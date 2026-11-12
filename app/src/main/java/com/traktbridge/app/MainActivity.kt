@@ -47,8 +47,31 @@ class MainActivity : ComponentActivity() {
         super.onActivityResult(requestCode,resultCode,data)
         if(requestCode==57 && resultCode==RESULT_OK) data?.data?.let { inspectVideo(it) }
         if(requestCode==58 && resultCode==RESULT_OK) data?.data?.let { inspectImport(it) }
+        if(resultCode==RESULT_OK && requestCode in 65..66) data?.data?.let { settingsTransfer(requestCode,it) }
         if(resultCode==RESULT_OK && requestCode in 63..64) data?.data?.let { encryptedTransfer(requestCode,it) }
         if(resultCode==RESULT_OK && requestCode in 60..62) data?.data?.let { historyTransfer(requestCode,it) }
+    }
+    private fun settingsTransfer(code:Int,uri:android.net.Uri) {
+        val field=EditText(this).apply { hint="Password (10+ characters)"; inputType=android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD }
+        android.app.AlertDialog.Builder(this).setTitle("Personal settings backup").setMessage("Includes default-profile collections, notes, favorites and selected display settings. Excludes tokens, tracking permissions, other profiles and learned mappings. Existing settings are not overwritten on import.").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Continue") { _,_->
+            val password=field.text.toString().toCharArray(); field.text.clear()
+            Thread {
+                try {
+                    if(code==65) {
+                        val data=EncryptedBackup.encrypt(PortableSettings.snapshot(applicationContext),password)
+                        contentResolver.openOutputStream(uri,"wt")?.use { it.write(data) } ?: error("Cannot write")
+                        runOnUiThread { if(!isDestroyed && !isFinishing) Toast.makeText(this,"Encrypted settings exported",Toast.LENGTH_LONG).show() }
+                    } else {
+                        val data=contentResolver.openInputStream(uri)?.use { input -> val out=java.io.ByteArrayOutputStream(); val buf=ByteArray(8192); while(true) { val n=input.read(buf); if(n<0) break; require(out.size()+n<=8_000_000); out.write(buf,0,n) }; out.toByteArray() } ?: error("Cannot read")
+                        val stores=PortableSettings.parse(EncryptedBackup.decrypt(data,password))
+                        runOnUiThread { if(!isDestroyed && !isFinishing) android.app.AlertDialog.Builder(this).setTitle("Merge personal settings?").setMessage("Existing entries remain unchanged. No account credentials or permissions are imported.").setNegativeButton("Cancel",null).setPositiveButton("Merge") { _,_->
+                            Thread { val result=runCatching { PortableSettings.merge(applicationContext,stores) }; runOnUiThread { if(!isDestroyed && !isFinishing) { Toast.makeText(this,result.fold({ it.toString()+" entries imported" },{ "Merge failed" }),Toast.LENGTH_LONG).show(); recreate() } } }.start()
+                        }.show() }
+                    }
+                } catch(_:Exception) { runOnUiThread { if(!isDestroyed && !isFinishing) Toast.makeText(this,"Settings transfer failed",Toast.LENGTH_LONG).show() } }
+                finally { password.fill('\u0000') }
+            }.start()
+        }.show()
     }
     private fun restoreDailyBackup() {
         if(!LocalBackupVault.exists(this)) { Toast.makeText(this,"No daily backup yet",Toast.LENGTH_LONG).show(); return }
@@ -356,6 +379,8 @@ class MainActivity : ComponentActivity() {
         root.addView(Switch(this).apply { text="Daily encrypted on-device history backup"; isChecked=prefs.getBoolean("daily_backup",false); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("daily_backup",checked).apply(); LocalBackupVault.schedule(this@MainActivity,checked) } })
         button("Restore daily device backup") { restoreDailyBackup() }
         button("Delete daily device backup") { LocalBackupVault.delete(this); Toast.makeText(this,"Device backup deleted",Toast.LENGTH_SHORT).show() }
+        button("Export personal settings (encrypted)") { startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/octet-stream").putExtra(Intent.EXTRA_TITLE,"traktbridge-settings.tbenc"),65) }
+        button("Import personal settings (encrypted)") { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*"),66) }
         button("Encrypted history backup") { startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/octet-stream").putExtra(Intent.EXTRA_TITLE,"traktbridge-history.tbenc"),63) }
         button("Restore encrypted backup") { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*"),64) }
         button("Back up viewing history (JSON)") { pickBackup(60) }
