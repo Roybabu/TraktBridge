@@ -289,6 +289,7 @@ class MainActivity : Activity() {
         fun button(s: String, action: () -> Unit) { root.addView(actionButton(s,action)) }
         label("SETTINGS • Account and tracking")
         button("Check for app updates") { checkUpdates() }
+        root.addView(Switch(this).apply { text="Hide catalogue spoilers"; isChecked=prefs.getBoolean("hide_spoilers",true); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("hide_spoilers",checked).apply() } })
         button("Appearance accent") { choose("Accent color",listOf("Violet","Blue","Green")) { prefs.edit().putString("accent",listOf("violet","blue","green")[it]).apply(); recreate() } }
         button("Personal collections") { collections() }
         button("Favorite titles") { favorites() }
@@ -593,7 +594,7 @@ class MainActivity : Activity() {
             for(e in rows) {
                 val card=panel(body)
                 val date=java.time.Instant.parse(e.airs).atZone(java.time.ZoneId.systemDefault()).format(java.time.format.DateTimeFormatter.ofPattern("EEE, dd MMM • HH:mm"))
-                card.addView(txt(date,14,violet,true)); card.addView(txt(e.show,18,ink,true)); card.addView(txt("S"+e.season+" E"+e.episode+" • "+e.title,14,muted))
+                card.addView(txt(date,14,violet,true)); card.addView(txt(e.show,18,ink,true)); card.addView(txt("S"+e.season+" E"+e.episode+if(prefs.getBoolean("hide_spoilers",true)) "" else " • "+e.title,14,muted))
             }
             android.app.AlertDialog.Builder(this).setTitle("Upcoming episodes").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
         }
@@ -677,7 +678,7 @@ class MainActivity : Activity() {
             body.addView(txt(d.title.ifBlank { label },24,ink,true))
             body.addView(txt(listOf(d.year.takeIf { it>0 }?.toString().orEmpty(),d.runtime.takeIf { it>0 }?.let { it.toString()+" min" }.orEmpty(),d.genres).filter { it.isNotBlank() }.joinToString(" • "),14,muted))
             if(d.rating>0) body.addView(txt("Trakt rating: "+String.format(java.util.Locale.US,"%.1f",d.rating)+"/10",16,violet))
-            body.addView(txt(d.overview.ifBlank { "No overview available" },16))
+            if(prefs.getBoolean("hide_spoilers",true)) body.addView(actionButton("Reveal synopsis") { android.app.AlertDialog.Builder(this).setTitle(d.title).setMessage(d.overview.ifBlank { "No overview available" }).setPositiveButton("Close",null).show() }) else body.addView(txt(d.overview.ifBlank { "No overview available" },16))
             if(d.released.isNotBlank()) body.addView(txt("Release: "+d.released,13,muted))
             body.addView(actionButton("Check title on Trakt (availability varies by region)") { openTraktWatchPage(type,id) })
             body.addView(actionButton("Watchlist / rating") { lookup("Checking account",{ done -> TraktLibrary.accountId(this,done) }) { account:String -> remoteActions(RemoteItem(type,id,d.title),account) } })
