@@ -136,11 +136,12 @@ class HistorySyncWorker(context: Context, params: WorkerParameters): Worker(cont
         DebugTrace.event("sync","worker started")
         WatchHistory(applicationContext).use { db ->
             var retry=false
-            for(r in db.syncQueue()) {
+            val queue=db.syncQueue()
+            for(r in queue) {
                 if(isStopped) return@synchronized Result.retry()
                 if(!HistorySync.process(applicationContext,db,r)) { retry=true; break }
             }
-            if(retry) Result.retry() else Result.success()
+            if(retry || queue.size>=100 && db.syncQueue(1).any { it.status=="queued" }) Result.retry() else Result.success()
         }
     }
 }
