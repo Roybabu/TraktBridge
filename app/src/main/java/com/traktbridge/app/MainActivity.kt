@@ -412,13 +412,15 @@ class MainActivity : Activity() {
         details.addView(txt(r.matchLabel.ifBlank { r.title.ifBlank { "Unidentified video" } },18,ink,true))
         details.addView(txt(g.platforms.joinToString(" • ") { appLabel(it) },13,muted))
         details.addView(txt(g.sessions.size.toString()+" viewing session(s) • "+java.text.DateFormat.getDateInstance().format(java.util.Date(g.latest.ended)),13,muted))
-        val completion=when { g.confirmed -> "Finished • synced to Trakt"; g.queued -> "Completion approved • sync pending"; g.active -> "Currently watching"; g.remainingMs==0L -> "End reached • confirm completion"; g.positionMs>=0 -> "In progress"; else -> "Completion unknown" }
+        val completion=when { g.confirmed -> "Finished • synced to Trakt"; g.queued -> "Completion approved • sync pending"; g.active -> "Currently watching"; g.nearEnd -> "Near end • confirm completion"; g.positionMs>=0 -> "In progress"; else -> "Completion unknown" }
         details.addView(txt(completion,14,if(g.confirmed) 0xff6ee7b7.toInt() else 0xfffbbf24.toInt(),true))
         details.addView(txt("Total sampled watch time: "+if(g.sampledMs>0) durationText(g.sampledMs) else "Unknown",13,muted))
         if(g.durationMs>0 && g.positionMs>=0) {
             details.addView(txt(durationText(g.positionMs)+" / "+durationText(g.durationMs)+" • "+durationText(g.remainingMs)+" left",13,ink))
+            details.addView(txt("Last observed position • "+when(g.positionSource) { "screen"->"visible player timer estimate"; "server"->"server reported"; "media"->"media session reported"; else->"source unverified" },12,muted))
             details.addView(ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal).apply { progress=(g.positionMs.toDouble()/g.durationMs*100).toInt().coerceIn(0,100); progressTintList=android.content.res.ColorStateList.valueOf(violet) })
         } else { if(g.catalogueRuntimeMs>0) details.addView(txt("Catalogue runtime: "+durationText(g.catalogueRuntimeMs),13,muted)); details.addView(txt("Remaining time unavailable • player position unknown",13,muted)) }
+        if(g.bufferingMs>0 || g.pausedMs>0 || g.seeks>0 || g.uncertainMs>0) details.addView(txt("Paused: "+durationText(g.pausedMs)+" • Buffering: "+durationText(g.bufferingMs)+" • Seeks: "+g.seeks+" • Uncertain: "+durationText(g.uncertainMs),12,muted))
         if(r.traktId<=0) details.addView(txt("Identify exact title to combine sessions.",12,muted))
         if(expanded || g.pending || g.queued) card.addView(actionButton(if(g.confirmed) "View sessions" else "Review / view sessions") { showSessions(g) })
         else card.addView(actionButton("View sessions") { showSessions(g) })
@@ -443,7 +445,8 @@ class MainActivity : Activity() {
         details.addView(txt(appLabel(r.source)+" • "+java.text.DateFormat.getDateInstance().format(java.util.Date(r.started)),13,muted))
         val status=when(r.status) { "synced"->"Synced to Trakt"; "active"->"Watching"; "pending"->"Needs review"; "reviewed"->"Ready to confirm"; else->r.status.replaceFirstChar { it.uppercase() } }
         details.addView(txt(status,13,if(r.status=="synced") 0xff6ee7b7.toInt() else 0xfffbbf24.toInt(),true))
-        details.addView(txt(if(r.id.startsWith("usage:")) "Watch time unknown" else (r.watched/1000).toString()+" sec sampled",13,muted))
+        details.addView(txt(if(r.watched<=0) "Watch time unknown" else durationText(r.watched)+" sampled",13,muted))
+        if(r.seeks>0 || r.bufferingMs>0 || r.pausedMs>0 || r.uncertainMs>0) details.addView(txt("Paused: "+durationText(r.pausedMs)+" • Buffering: "+durationText(r.bufferingMs)+" • Seeks: "+r.seeks+" (rewinds "+r.rewinds+") • Uncertain: "+durationText(r.uncertainMs),12,muted))
         if(r.duration>0 && r.position>=0) details.addView(ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal).apply { progress=(r.position.toDouble()/r.duration*100).toInt().coerceIn(0,100); progressTintList=android.content.res.ColorStateList.valueOf(violet) })
         if(!expanded) { card.addView(actionButton("View details") { android.app.AlertDialog.Builder(this).setTitle("Viewing details").setMessage(r.matchLabel.ifBlank { r.title.ifBlank { "Unidentified video" } }+"\n"+r.subtitle).setNegativeButton("Close",null).setPositiveButton("Open history") { _,_->showTab(1) }.show() }); return }
             if (r.traktId > 0) card.addView(TextView(this).apply { text = "Matched: " + r.matchLabel + " • Trakt ID " + r.traktId })

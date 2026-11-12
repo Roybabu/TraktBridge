@@ -63,3 +63,6 @@ Configure Plex, Jellyfin, Emby or Kodi using a trusted HTTPS server and explicit
 
 ## Intelligent recognition and learned matches (0.9.9)
 Fuse media-session, notification and accessibility title observations with heuristic evidence scores and conflict reporting. Rank Trakt search candidates by title, year, runtime and episode evidence. Confirmed matches teach provider-scoped exact title/episode and shared provider-ID mappings; optional automatic local reuse never approves a completed watch. Clear learned mappings independently of history. Scores are heuristic, not calibrated probabilities. No automatic network catalogue search.
+
+## Playback accuracy (0.10.0)
+Classify playing, paused, buffering, stopped and unknown observations. Exclude detected seeks, rewinds, stagnant media positions and sampling gaps from sampled viewing time; preserve last valid position with source. Enrich unidentified active sessions without splitting on missing labels, while distinct explicit episodes split. Display pause, buffering, uncertain intervals and seek counts. Near-end position is a suggestion, not completion approval. No ad identification or inference of exact remaining time from sampled watch time.

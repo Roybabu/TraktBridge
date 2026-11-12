@@ -62,7 +62,7 @@ object ServerParsing {
         val state=p.optString("state")
         if(state !in setOf("playing","paused","buffering")) return@mapNotNull null
         val duration=m.optLong("duration",0); val position=PlaybackPosition.sanitize(m.optLong("viewOffset",-1),duration)
-        WatchSample("server:plex:"+client+":"+id,"server.plex",title,detail,duration,position,state=="playing")
+        WatchSample("server:plex:"+client+":"+id,"server.plex",title,detail,duration,position,state=="playing",when(state) { "playing"->PlaybackPhase.PLAYING; "buffering"->PlaybackPhase.BUFFERING; else->PlaybackPhase.PAUSED },"server")
     }
     fun jellyfin(body:JSONArray,client:String,kind:String):List<WatchSample> = objects(body).mapNotNull { s ->
         if(s.optString("DeviceId")!=client) return@mapNotNull null
@@ -76,7 +76,7 @@ object ServerParsing {
         val detail=if(type=="Episode") "S"+m.optInt("ParentIndexNumber")+" E"+m.optInt("IndexNumber")+" • "+m.optString("Name") else ""
         val duration=m.optLong("RunTimeTicks",0)/10000
         val raw=p.optLong("PositionTicks",-1); val position=PlaybackPosition.sanitize(if(raw<0) -1 else raw/10000,duration)
-        WatchSample("server:"+kind+":"+client+":"+id,"server."+kind,title,detail,duration,position,!p.optBoolean("IsPaused",true))
+        WatchSample("server:"+kind+":"+client+":"+id,"server."+kind,title,detail,duration,position,!p.optBoolean("IsPaused",true),if(p.optBoolean("IsPaused",true)) PlaybackPhase.PAUSED else PlaybackPhase.PLAYING,"server")
     }
     private fun time(o:JSONObject?):Long {
         if(o==null) return -1
@@ -91,7 +91,7 @@ object ServerParsing {
         val id=m.optLong("id",-1); if(id<0) return null
         val detail=if(type=="episode") "S"+m.optInt("season")+" E"+m.optInt("episode")+" • "+m.optString("title") else ""
         val duration=time(properties.optJSONObject("totaltime")).coerceAtLeast(0)
-        return WatchSample("server:kodi:"+client+":"+type+":"+id,"server.kodi",title,detail,duration,PlaybackPosition.sanitize(time(properties.optJSONObject("time")),duration),properties.optInt("speed",0)>0)
+        return WatchSample("server:kodi:"+client+":"+type+":"+id,"server.kodi",title,detail,duration,PlaybackPosition.sanitize(time(properties.optJSONObject("time")),duration),properties.optInt("speed",0)>0,if(properties.optInt("speed",0)>0) PlaybackPhase.PLAYING else PlaybackPhase.PAUSED,"server",properties.optInt("speed",1).toFloat())
     }
 }
 object MediaServer {

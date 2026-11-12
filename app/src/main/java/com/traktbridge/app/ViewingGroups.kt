@@ -9,6 +9,11 @@ data class ViewingTitle(val key:String,val sessions:List<WatchRecord>) {
     val representative=sessions.filter { it.traktId>0 }.maxByOrNull { it.ended } ?: latest
     val platforms=sessions.map { it.source }.distinct()
     val sampledMs=sessions.sumOf { it.watched.coerceAtLeast(0) }
+    val pausedMs=sessions.sumOf { it.pausedMs }
+    val bufferingMs=sessions.sumOf { it.bufferingMs }
+    val uncertainMs=sessions.sumOf { it.uncertainMs }
+    val seeks=sessions.sumOf { it.seeks }
+    val rewinds=sessions.sumOf { it.rewinds }
     val confirmed=sessions.any { it.status=="synced" }
     val active=sessions.any { it.status=="active" }
     val queued=sessions.any { it.status in setOf("queued","uncertain","blocked") }
@@ -18,6 +23,8 @@ data class ViewingTitle(val key:String,val sessions:List<WatchRecord>) {
     val catalogueRuntimeMs=sessions.maxOf { it.catalogueRuntime }
     val durationMs=positionSession?.duration ?: catalogueRuntimeMs
     val positionMs=positionSession?.position?.coerceIn(0,durationMs) ?: -1L
+    val positionSource=positionSession?.positionSource ?: "unknown"
+    val nearEnd=PlaybackAccuracy.nearEnd(positionMs,durationMs)
     val remainingMs=if(durationMs>0 && positionMs>=0) (durationMs-positionMs).coerceAtLeast(0) else -1L
 }
 object ViewingGroups {

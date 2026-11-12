@@ -89,7 +89,14 @@ class PlaybackListener : NotificationListenerService() {
             val now=System.currentTimeMillis()
             val note=mediaTitles[c.packageName]?.takeIf { now-it.first in 0..120000 }?.second.orEmpty()
             val key=c.packageName+":"+c.sessionToken.hashCode()
-            val playing=p?.state==PlaybackState.STATE_PLAYING
+            val phase=when(p?.state) {
+                PlaybackState.STATE_PLAYING -> PlaybackPhase.PLAYING
+                PlaybackState.STATE_BUFFERING,PlaybackState.STATE_CONNECTING -> PlaybackPhase.BUFFERING
+                PlaybackState.STATE_PAUSED -> PlaybackPhase.PAUSED
+                PlaybackState.STATE_STOPPED,PlaybackState.STATE_NONE,PlaybackState.STATE_ERROR -> PlaybackPhase.STOPPED
+                else -> PlaybackPhase.UNKNOWN
+            }
+            val playing=phase==PlaybackPhase.PLAYING
             val hint=if(playing) TitleAccessibility.hint(this,c.packageName,now-120000,now) else null
             val prior=retained[key]
             val metaDetail=m?.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE).orEmpty()
@@ -109,7 +116,7 @@ class PlaybackListener : NotificationListenerService() {
             val duration=screen?.duration ?: mediaDuration
             val position=screen?.position ?: mediaPosition
             if(playing && p!=null && p.position>=0 && position<0) DebugTrace.event("progress","package="+c.packageName+" rejected position without valid runtime")
-            samples.add(WatchSample(key,c.packageName,title,subtitle,duration,position,playing))
+            samples.add(WatchSample(key,c.packageName,title,subtitle,duration,position,playing,phase,if(screen!=null) "screen" else if(mediaPosition>=0) "media" else "unknown",p?.playbackSpeed?.takeIf { it>0 } ?: 1f))
             rows.put(JSONObject().apply {
                 put("package", c.packageName)
                 put("title", title)
@@ -124,7 +131,11 @@ class PlaybackListener : NotificationListenerService() {
         val remote=serverSampler.samples(System.currentTimeMillis())
         // Avoid double-counting local player sessions when the explicitly selected server client is active.
         val remotePackages=remote.map { when(it.source) { "server.plex"->"com.plexapp.android"; "server.jellyfin"->"org.jellyfin.mobile"; "server.emby"->"com.mb.android"; "server.kodi"->"org.xbmc.kodi"; else->"" } }.toSet()
-        history.ingest(samples.filterNot { it.source in remotePackages }+remote, SystemClock.elapsedRealtime(), System.currentTimeMillis())
+        val local=samples.filterNot { it.source in remotePackages }.groupBy { it.source }.flatMap { (_,group) ->
+            val playingRows=group.filter { it.playing }
+            if(playingRows.size>1) listOf(playingRows.maxBy { (if(it.title.isNotBlank()) 4 else 0)+(if(it.position>=0) 2 else 0) }) else group
+        }
+        history.ingest(local+remote, SystemClock.elapsedRealtime(), System.currentTimeMillis())
         prefs.edit().putString("sessions", rows.toString()).putInt("session_count",sessions.size).apply {
             if(rows.length()>0) putString("last_nonempty_sessions",rows.toString())
         }.apply()

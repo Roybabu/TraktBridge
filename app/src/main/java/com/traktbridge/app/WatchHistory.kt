@@ -6,16 +6,16 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import java.util.UUID
 
-data class WatchSample(val key: String, val source: String, val title: String, val subtitle: String, val duration: Long, val position: Long, val playing: Boolean)
-data class WatchRecord(val id: String, val source: String, val title: String, val subtitle: String, val started: Long, val ended: Long, val watched: Long, val duration: Long, val position: Long, val status: String, val matchType: String = "", val traktId: Long = 0, val matchLabel: String = "", val showId: Long = 0, val season: Int = -1, val episode: Int = -1, val catalogueRuntime: Long = 0)
+data class WatchSample(val key: String, val source: String, val title: String, val subtitle: String, val duration: Long, val position: Long, val playing: Boolean, val phase: PlaybackPhase = if(playing) PlaybackPhase.PLAYING else PlaybackPhase.PAUSED, val positionSource:String = if(position>=0) "media" else "unknown", val speed:Float=1f)
+data class WatchRecord(val id: String, val source: String, val title: String, val subtitle: String, val started: Long, val ended: Long, val watched: Long, val duration: Long, val position: Long, val status: String, val matchType: String = "", val traktId: Long = 0, val matchLabel: String = "", val showId: Long = 0, val season: Int = -1, val episode: Int = -1, val catalogueRuntime: Long = 0, val pausedMs:Long=0, val bufferingMs:Long=0, val uncertainMs:Long=0, val seeks:Int=0, val rewinds:Int=0, val positionSource:String="unknown")
 
-class WatchHistory(context: Context): SQLiteOpenHelper(context.applicationContext, "watch_history.db", null, 6) {
+class WatchHistory(context: Context): SQLiteOpenHelper(context.applicationContext, "watch_history.db", null, 7) {
     companion object {
         private const val MAX_GAP = 12000L
         private const val MIN_WATCH = 15000L
         private const val PAUSE_TIMEOUT = 120000L
     }
-    private data class Active(val id: String, val sample: WatchSample, val lastTick: Long, val lastPlaying: Long, val watched: Long, val started: Long, val lastWall: Long)
+    private data class Active(val id: String, val sample: WatchSample, val lastTick: Long, val lastPlaying: Long, val watched: Long, val started: Long, val lastWall: Long, val paused:Long=0, val buffering:Long=0, val uncertain:Long=0, val seeks:Int=0, val rewinds:Int=0, val resumePosition:Long=-1, val resumeDuration:Long=0, val resumeSource:String="unknown")
     private val active = mutableMapOf<String, Active>()
     private fun createLearning(db:SQLiteDatabase) {
         db.execSQL("CREATE TABLE IF NOT EXISTS learned (key TEXT PRIMARY KEY, type TEXT NOT NULL, trakt_id INTEGER NOT NULL, label TEXT NOT NULL, show_id INTEGER NOT NULL, season INTEGER NOT NULL, episode INTEGER NOT NULL, runtime INTEGER NOT NULL, title TEXT NOT NULL, year INTEGER NOT NULL)")
@@ -23,7 +23,7 @@ class WatchHistory(context: Context): SQLiteOpenHelper(context.applicationContex
     }
     override fun onCreate(db: SQLiteDatabase) {
         createLearning(db)
-        db.execSQL("CREATE TABLE viewing (id TEXT PRIMARY KEY, source TEXT NOT NULL, title TEXT NOT NULL, subtitle TEXT NOT NULL, started INTEGER NOT NULL, ended INTEGER NOT NULL, watched INTEGER NOT NULL, duration INTEGER NOT NULL, position INTEGER NOT NULL, status TEXT NOT NULL, match_type TEXT NOT NULL DEFAULT '', trakt_id INTEGER NOT NULL DEFAULT 0, match_label TEXT NOT NULL DEFAULT '', show_id INTEGER NOT NULL DEFAULT 0, season INTEGER NOT NULL DEFAULT -1, episode INTEGER NOT NULL DEFAULT -1, notified INTEGER NOT NULL DEFAULT 0, sync_account TEXT NOT NULL DEFAULT '', sync_message TEXT NOT NULL DEFAULT '', catalogue_runtime INTEGER NOT NULL DEFAULT 0)")
+        db.execSQL("CREATE TABLE viewing (id TEXT PRIMARY KEY, source TEXT NOT NULL, title TEXT NOT NULL, subtitle TEXT NOT NULL, started INTEGER NOT NULL, ended INTEGER NOT NULL, watched INTEGER NOT NULL, duration INTEGER NOT NULL, position INTEGER NOT NULL, status TEXT NOT NULL, match_type TEXT NOT NULL DEFAULT '', trakt_id INTEGER NOT NULL DEFAULT 0, match_label TEXT NOT NULL DEFAULT '', show_id INTEGER NOT NULL DEFAULT 0, season INTEGER NOT NULL DEFAULT -1, episode INTEGER NOT NULL DEFAULT -1, notified INTEGER NOT NULL DEFAULT 0, sync_account TEXT NOT NULL DEFAULT '', sync_message TEXT NOT NULL DEFAULT '', catalogue_runtime INTEGER NOT NULL DEFAULT 0, paused_ms INTEGER NOT NULL DEFAULT 0, buffering_ms INTEGER NOT NULL DEFAULT 0, uncertain_ms INTEGER NOT NULL DEFAULT 0, seeks INTEGER NOT NULL DEFAULT 0, rewinds INTEGER NOT NULL DEFAULT 0, position_source TEXT NOT NULL DEFAULT 'unknown')")
         db.execSQL("CREATE INDEX viewing_status ON viewing(status, ended)")
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -40,6 +40,10 @@ class WatchHistory(context: Context): SQLiteOpenHelper(context.applicationContex
             db.execSQL("ALTER TABLE viewing ADD COLUMN sync_account TEXT NOT NULL DEFAULT ''")
             db.execSQL("ALTER TABLE viewing ADD COLUMN sync_message TEXT NOT NULL DEFAULT ''")
         }
+        if (oldVersion < 7) {
+            for(column in listOf("paused_ms","buffering_ms","uncertain_ms","seeks","rewinds")) db.execSQL("ALTER TABLE viewing ADD COLUMN "+column+" INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE viewing ADD COLUMN position_source TEXT NOT NULL DEFAULT 'unknown'")
+        }
         if (oldVersion < 6) createLearning(db)
         if (oldVersion < 5) db.execSQL("ALTER TABLE viewing ADD COLUMN catalogue_runtime INTEGER NOT NULL DEFAULT 0")
     }
@@ -47,9 +51,9 @@ class WatchHistory(context: Context): SQLiteOpenHelper(context.applicationContex
     private fun wasNotified(id: String): Boolean = readableDatabase.rawQuery("SELECT notified FROM viewing WHERE id=?",arrayOf(id)).use { !it.moveToFirst() || it.getInt(0) != 0 }
     fun markNotified(id: String) { writableDatabase.update("viewing",ContentValues().apply { put("notified",1) },"id=? AND status='pending'",arrayOf(id)) }
     fun record(id: String): WatchRecord? {
-        readableDatabase.rawQuery("SELECT id,source,title,subtitle,started,ended,watched,duration,position,status,match_type,trakt_id,match_label,show_id,season,episode,catalogue_runtime FROM viewing WHERE id=?",arrayOf(id)).use { c ->
+        readableDatabase.rawQuery("SELECT id,source,title,subtitle,started,ended,watched,duration,position,status,match_type,trakt_id,match_label,show_id,season,episode,catalogue_runtime,paused_ms,buffering_ms,uncertain_ms,seeks,rewinds,position_source FROM viewing WHERE id=?",arrayOf(id)).use { c ->
             if (!c.moveToFirst()) return null
-            return WatchRecord(c.getString(0),c.getString(1),c.getString(2),c.getString(3),c.getLong(4),c.getLong(5),c.getLong(6),c.getLong(7),c.getLong(8),c.getString(9),c.getString(10),c.getLong(11),c.getString(12),c.getLong(13),c.getInt(14),c.getInt(15),c.getLong(16))
+            return WatchRecord(c.getString(0),c.getString(1),c.getString(2),c.getString(3),c.getLong(4),c.getLong(5),c.getLong(6),c.getLong(7),c.getLong(8),c.getString(9),c.getString(10),c.getLong(11),c.getString(12),c.getLong(13),c.getInt(14),c.getInt(15),c.getLong(16),c.getLong(17),c.getLong(18),c.getLong(19),c.getInt(20),c.getInt(21),c.getString(22))
         }
     }
     @Synchronized fun recover() {
@@ -62,7 +66,8 @@ class WatchHistory(context: Context): SQLiteOpenHelper(context.applicationContex
         val v = ContentValues().apply {
             put("id", a.id); put("source", a.sample.source); put("title", a.sample.title); put("subtitle", a.sample.subtitle)
             put("started", a.started); put("ended", a.lastWall); put("watched", a.watched)
-            put("duration", a.sample.duration); put("position", a.sample.position); put("status", status)
+            put("duration", a.resumeDuration); put("position", a.resumePosition); put("status", status)
+            put("paused_ms",a.paused); put("buffering_ms",a.buffering); put("uncertain_ms",a.uncertain); put("seeks",a.seeks); put("rewinds",a.rewinds); put("position_source",a.resumeSource)
         }
         check(writableDatabase.insertWithOnConflict("viewing", null, v, SQLiteDatabase.CONFLICT_REPLACE) != -1L)
     }
@@ -77,23 +82,25 @@ class WatchHistory(context: Context): SQLiteOpenHelper(context.applicationContex
         for (key in active.keys.toList()) {
             val old = active[key] ?: continue
             val now = current[key]
-            if (now == null || now.title != old.sample.title || now.subtitle != old.sample.subtitle || elapsed - old.lastTick !in 0..MAX_GAP ||
+            if (now == null || !PlaybackAccuracy.compatibleIdentity(old.sample,now) || now.phase==PlaybackPhase.STOPPED || elapsed - old.lastTick !in 0..MAX_GAP ||
                 (!now.playing && elapsed - old.lastPlaying >= PAUSE_TIMEOUT)) finish(key)
         }
         for (s in current.values) {
             val old = active[s.key]
             if (old == null) {
                 if (!s.playing) continue
-                val a = Active(UUID.randomUUID().toString(), s, elapsed, elapsed, 0, wall, wall)
+                val valid=PlaybackPosition.valid(s.position,s.duration)
+                val a = Active(UUID.randomUUID().toString(), s, elapsed, elapsed, 0, wall, wall,resumePosition=if(valid) s.position else -1,resumeDuration=s.duration.coerceAtLeast(0),resumeSource=if(valid) s.positionSource else "unknown")
                 active[s.key] = a; save(a, "active")
             } else {
-                // Count real elapsed time only when both surrounding samples report PLAYING.
-                // Seeks and playback speed never inflate elapsed viewing time.
-                val delta = if (old.sample.playing && s.playing) (elapsed - old.lastTick).coerceIn(0, MAX_GAP) else 0
-                val merged = s.copy(duration = if (s.duration > 0) s.duration else old.sample.duration,
-                    position = if (s.position >= 0) s.position else old.sample.position)
+                val interval=PlaybackAccuracy.interval(old.sample,s,elapsed-old.lastTick)
+                val merged=PlaybackAccuracy.mergeIdentity(old.sample,s)
+                val valid=PlaybackPosition.valid(s.position,s.duration)
                 val a = old.copy(sample = merged, lastTick = elapsed, lastPlaying = if (s.playing) elapsed else old.lastPlaying,
-                    watched = old.watched + delta, lastWall = if (s.playing) wall else old.lastWall)
+                    watched = old.watched + interval.watched, lastWall = if (s.playing) wall else old.lastWall,
+                    paused=old.paused+interval.paused,buffering=old.buffering+interval.buffering,uncertain=old.uncertain+interval.uncertain,seeks=old.seeks+interval.seeks,rewinds=old.rewinds+interval.replay,
+                    resumePosition=if(valid) s.position else old.resumePosition,resumeDuration=if(valid) s.duration else old.resumeDuration.takeIf { it>0 } ?: s.duration.coerceAtLeast(0),resumeSource=if(valid) s.positionSource else old.resumeSource)
+                if(interval.seeks>0) DebugTrace.event("progress","seek detected rewind="+(interval.replay>0))
                 active[s.key] = a; save(a, "active")
             }
         }
@@ -101,8 +108,8 @@ class WatchHistory(context: Context): SQLiteOpenHelper(context.applicationContex
     @Synchronized fun finishAll() { for (key in active.keys.toList()) finish(key) }
     fun records(limit: Int = 100): List<WatchRecord> {
         val result = mutableListOf<WatchRecord>()
-        readableDatabase.rawQuery("SELECT id,source,title,subtitle,started,ended,watched,duration,position,status,match_type,trakt_id,match_label,show_id,season,episode,catalogue_runtime FROM viewing WHERE status IN ('pending','active','reviewed','queued','uncertain','blocked','synced') ORDER BY ended DESC"+(if(limit>0) " LIMIT "+limit else ""), null).use { c ->
-            while(c.moveToNext()) result.add(WatchRecord(c.getString(0),c.getString(1),c.getString(2),c.getString(3),c.getLong(4),c.getLong(5),c.getLong(6),c.getLong(7),c.getLong(8),c.getString(9),c.getString(10),c.getLong(11),c.getString(12),c.getLong(13),c.getInt(14),c.getInt(15),c.getLong(16)))
+        readableDatabase.rawQuery("SELECT id,source,title,subtitle,started,ended,watched,duration,position,status,match_type,trakt_id,match_label,show_id,season,episode,catalogue_runtime,paused_ms,buffering_ms,uncertain_ms,seeks,rewinds,position_source FROM viewing WHERE status IN ('pending','active','reviewed','queued','uncertain','blocked','synced') ORDER BY ended DESC"+(if(limit>0) " LIMIT "+limit else ""), null).use { c ->
+            while(c.moveToNext()) result.add(WatchRecord(c.getString(0),c.getString(1),c.getString(2),c.getString(3),c.getLong(4),c.getLong(5),c.getLong(6),c.getLong(7),c.getLong(8),c.getString(9),c.getString(10),c.getLong(11),c.getString(12),c.getLong(13),c.getInt(14),c.getInt(15),c.getLong(16),c.getLong(17),c.getLong(18),c.getLong(19),c.getInt(20),c.getInt(21),c.getString(22)))
         }
         return result
     }
