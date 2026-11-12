@@ -16,15 +16,36 @@ import javax.net.ssl.SSLServerSocket
 import javax.net.ssl.SSLSocket
 
 object RemotePlayback {
-    data class Entry(val device: DevicePairing.Peer,val rows: JSONArray,val received: Long)
+    data class Entry(val device: DevicePairing.Peer,val rows: JSONArray,val received: Long,val endpoint: InetSocketAddress)
     private val entries=ConcurrentHashMap<String,Entry>()
-    fun put(peer: DevicePairing.Peer,rows: JSONArray) { entries[peer.id]=Entry(peer,rows,SystemClock.elapsedRealtime()) }
+    fun put(peer: DevicePairing.Peer,rows: JSONArray,endpoint: InetSocketAddress) { entries[peer.id]=Entry(peer,rows,SystemClock.elapsedRealtime(),endpoint) }
     fun visible(context: Context): List<Entry> {
         if(!PlaybackSharing.enabled(context) || !PlaybackSharing.localWifi(context)) return emptyList()
         val ids=DevicePairing.peers(context).map { it.id }.toSet()
         val now=SystemClock.elapsedRealtime()
         entries.entries.removeIf { !PlaybackSharing.fresh(now-it.value.received) || it.key !in ids }
         return entries.values.sortedBy { it.device.label }
+    }
+    private val commands=ThreadPoolExecutor(1,1,0,TimeUnit.SECONDS,ArrayBlockingQueue(4))
+    fun control(context:Context,entry:Entry,session:String,action:String,done:(Boolean)->Unit) {
+        val app=context.applicationContext
+        val main=Handler(Looper.getMainLooper())
+        val job=Runnable {
+            val ok=runCatching {
+                require(visible(app).any { it.device.id==entry.device.id } && DeviceControl.valid(session))
+                val ssl=DeviceTls.context(app)
+                (ssl.socketFactory.createSocket() as SSLSocket).use { socket ->
+                    DeviceTls.configure(socket,false); socket.connect(entry.endpoint,2000)
+                    require(DeviceTls.authenticate(app,socket).id==entry.device.id)
+                    val current=PlaybackSharing.read(DataInputStream(socket.inputStream))
+                    require((0 until current.length()).any { i -> current.optJSONObject(i)?.let { it.optString("sessionId")==session && DeviceControl.permits(it.optInt("controlMask"),action) }==true })
+                    val output=DataOutputStream(socket.outputStream); output.writeByte(1); output.writeUTF(session); output.writeUTF(action); output.flush()
+                    DataInputStream(socket.inputStream).readBoolean()
+                }
+            }.getOrDefault(false)
+            main.post { done(ok) }
+        }
+        try { commands.execute(job) } catch(_:RejectedExecutionException) { main.post { done(false) } }
     }
     fun clear()=entries.clear()
 }
@@ -97,7 +118,7 @@ class LocalPlaybackSync(context: Context): java.io.Closeable {
                                 val peer=DeviceTls.authenticate(app,socket)
                                 if(allowed()) {
                                     val rows=PlaybackSharing.read(DataInputStream(socket.inputStream))
-                                    if(allowed() && DevicePairing.peers(app).any { it.id==peer.id }) RemotePlayback.put(peer,rows)
+                                    if(allowed() && DevicePairing.peers(app).any { it.id==peer.id }) RemotePlayback.put(peer,rows,target)
                                 }
                             }
                         }
@@ -120,7 +141,15 @@ class LocalPlaybackSync(context: Context): java.io.Closeable {
                             DeviceTls.configure(it,true)
                             val peer=DeviceTls.authenticate(app,it)
                             if(allowed() && DevicePairing.peers(app).any { p -> p.id==peer.id })
-                                PlaybackSharing.write(DataOutputStream(it.outputStream),PlaybackSharing.snapshot(app))
+                                {
+                                val output=DataOutputStream(it.outputStream)
+                                PlaybackSharing.write(output,PlaybackSharing.snapshot(app))
+                                val input=DataInputStream(it.inputStream)
+                                if(input.readUnsignedByte()==1) {
+                                    val session=input.readUTF(); val action=input.readUTF()
+                                    output.writeBoolean(DeviceControl.execute(app,peer.id,session,action)); output.flush()
+                                }
+                            }
                         }
                     }
                 } } catch(_:RejectedExecutionException) { runCatching { socket.close() } }

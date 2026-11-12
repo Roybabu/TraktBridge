@@ -43,9 +43,9 @@ class PlaybackListener : NotificationListenerService() {
             try { capture(); if(prefs.getBoolean("enabled",false) && prefs.getBoolean("learned_auto",false) && SystemClock.elapsedRealtime()-lastLearningCheck>=30000) { lastLearningCheck=SystemClock.elapsedRealtime(); val n=history.applyLearned(); if(n>0) DebugTrace.event("recognition","learned matches="+n) }; notifyPending(); notifyUsageFallback(); consecutiveFailures=0 } catch (e: Exception) { consecutiveFailures=(consecutiveFailures+1).coerceAtMost(3); DebugTrace.failure("poll",e); prefs.edit().putString("sample_error",e.javaClass.simpleName).apply(); runCatching { history.finishAll() } } finally { if(connected) handler.postDelayed(this, ResourcePolicy.pollDelay(prefs.getBoolean("enabled",false),prefs.getInt("tracked_session_count",0)>0,consecutiveFailures,getSystemService(android.os.PowerManager::class.java).isPowerSaveMode)) }
         }
     }
-    override fun onListenerConnected() { super.onListenerConnected(); connected=true; DebugTrace.event("listener","connected"); prefs.edit().putBoolean("listener_connected",true).apply(); handler.removeCallbacks(poll); handler.post(poll) }
-    override fun onListenerDisconnected() { connected=false; DebugTrace.event("listener","disconnected"); handler.removeCallbacks(poll); prefs.edit().putBoolean("listener_connected",false).apply(); runCatching { history.finishAll() }; retained.clear(); sessionIds.clear(); mediaTitles.clear(); super.onListenerDisconnected() }
-    override fun onDestroy() { connected=false; DebugTrace.event("listener","destroyed"); handler.removeCallbacks(poll); prefs.edit().putBoolean("listener_connected",false).apply(); runCatching { history.finishAll() }; runCatching { serverSampler.close() }; runCatching { history.close() }; super.onDestroy() }
+    override fun onListenerConnected() { super.onListenerConnected(); connected=true; DeviceControl.dispatch={ session,action -> runCatching { remoteCommand(session,action) }.getOrDefault(false) }; DebugTrace.event("listener","connected"); prefs.edit().putBoolean("listener_connected",true).apply(); handler.removeCallbacks(poll); handler.post(poll) }
+    override fun onListenerDisconnected() { connected=false; DeviceControl.dispatch=null; DebugTrace.event("listener","disconnected"); handler.removeCallbacks(poll); prefs.edit().putBoolean("listener_connected",false).apply(); runCatching { history.finishAll() }; retained.clear(); sessionIds.clear(); mediaTitles.clear(); super.onListenerDisconnected() }
+    override fun onDestroy() { connected=false; DeviceControl.dispatch=null; DebugTrace.event("listener","destroyed"); handler.removeCallbacks(poll); prefs.edit().putBoolean("listener_connected",false).apply(); runCatching { history.finishAll() }; runCatching { serverSampler.close() }; runCatching { history.close() }; super.onDestroy() }
     private fun notifyPending() {
         if (!getSharedPreferences("tracker",MODE_PRIVATE).getBoolean("enabled",false) || !ViewingNotifications.enabled(this)) return
         for (record in history.pendingNotifications().take(3)) {
@@ -71,6 +71,17 @@ class PlaybackListener : NotificationListenerService() {
                 if(record!=null && ViewingNotifications.post(this,record)) { history.markNotified(id); true } else false
             } else ViewingNotifications.postUsage(this,activity); DebugTrace.event("usage","fallback notification posted="+posted+" durationSec="+((activity.end-activity.start)/1000)); if(posted) prefs.edit().putLong(key,activity.end).apply()
         }
+    }
+    private fun remoteCommand(session:String,action:String):Boolean {
+        if(!connected || !DeviceControl.enabled(this)) return false
+        val allowed=prefs.getStringSet("allowed",emptySet()) ?: emptySet()
+        val controller=getSystemService(MediaSessionManager::class.java).getActiveSessions(ComponentName(this,PlaybackListener::class.java)).firstOrNull {
+            it.packageName in allowed && sessionIds[it.sessionToken]?.substringAfterLast(":")==session
+        } ?: return false
+        val state=controller.playbackState ?: return false
+        if(!DeviceControl.permits(DeviceControl.mask(state.actions),action)) return false
+        if(action=="play") controller.transportControls.play() else controller.transportControls.pause()
+        return true
     }
     private fun capture() {
         val tick=SystemClock.elapsedRealtime()
@@ -136,6 +147,8 @@ class PlaybackListener : NotificationListenerService() {
             rows.put(JSONObject().apply {
                 put("package", c.packageName)
                 put("sessionLabel","Session "+key.substringAfterLast(":").take(8))
+                put("sessionId",key.substringAfterLast(":"))
+                put("controlMask",if(DeviceControl.enabled(this@PlaybackListener)) DeviceControl.mask(p?.actions ?: 0L) else 0)
                 put("title", title)
                 put("displayTitle", m?.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE) ?: "")
                 put("subtitle", subtitle)

@@ -33,7 +33,9 @@ object PlaybackSharing {
             val position=row.optLong("positionMs",-1).takeIf { it in 0..duration && duration>0 } ?: -1
             out.put(JSONObject().put("title",title).put("subtitle",row.optString("subtitle").take(200))
                 .put("package",row.optString("package").take(150)).put("state",state)
-                .put("durationMs",duration).put("positionMs",position))
+                .put("durationMs",duration).put("positionMs",position)
+                .put("sessionId",row.optString("sessionId").takeIf { DeviceControl.valid(it) }.orEmpty())
+                .put("controlMask",row.optInt("controlMask").coerceIn(0,3)))
         }
         return out
     }

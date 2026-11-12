@@ -463,6 +463,12 @@ class MainActivity : ComponentActivity() {
         fun label(s: String) { root.addView(txt(s,15,muted)) }
         fun button(s: String, action: () -> Unit) { root.addView(actionButton(s,action)) }
         label("SETTINGS • Account and tracking")
+        button("Allow remote playback controls") {
+            val enabled=prefs.getBoolean("device_controls",false)
+            android.app.AlertDialog.Builder(this).setTitle(if(enabled) "Disable remote controls?" else "Allow paired devices to control playback?")
+                .setMessage("Paired devices may play or pause supported selected media sessions. Controls require a separate opt-in and can be disabled at any time.")
+                .setNegativeButton("Cancel",null).setPositiveButton(if(enabled) "Disable" else "Enable") { _,_-> prefs.edit().putBoolean("device_controls",!enabled).apply() }.show()
+        }
         button("Cross-device playback sharing") {
             val enabled=prefs.getBoolean("device_sharing",false)
             android.app.AlertDialog.Builder(this).setTitle(if(enabled) "Stop device sharing?" else "Enable device sharing?")
@@ -1451,9 +1457,25 @@ class MainActivity : ComponentActivity() {
             android.app.AlertDialog.Builder(this).setTitle("Viewing journal").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
         }
     }
+    private fun remotePlaybackControls() {
+        val choices=RemotePlayback.visible(this).flatMap { entry ->
+            (0 until entry.rows.length()).mapNotNull { i -> entry.rows.optJSONObject(i)?.takeIf { it.optInt("controlMask")>0 && DeviceControl.valid(it.optString("sessionId")) }?.let { entry to it } }
+        }
+        if(choices.isEmpty()) { Toast.makeText(this,"No controllable remote playback",Toast.LENGTH_LONG).show(); return }
+        choose("Remote playback",choices.map { it.first.device.label+" • "+it.second.optString("title") }) { index ->
+            val (entry,row)=choices[index]
+            val actions=listOf("play","pause").filter { DeviceControl.permits(row.optInt("controlMask"),it) }
+            choose("Remote action",actions) { selected ->
+                RemotePlayback.control(this,entry,row.optString("sessionId"),actions[selected]) { ok ->
+                    if(!isDestroyed && !isFinishing) Toast.makeText(this,if(ok) "Command sent to player" else "Command unavailable or rejected",Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
     private fun nowPlaying() {
         val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(12),dp(16),dp(12)) }
         val status=txt("",16,ink,true); body.addView(status)
+        body.addView(actionButton("Remote playback controls") { remotePlaybackControls() })
         val content=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }; body.addView(content)
         val dialog=android.app.AlertDialog.Builder(this).setTitle("Now Playing • All devices").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).create()
         val handler=android.os.Handler(android.os.Looper.getMainLooper())
