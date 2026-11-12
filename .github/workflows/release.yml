@@ -1,0 +1,87 @@
+name: Signed Android release
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: signed-release
+  cancel-in-progress: false
+jobs:
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check tag and version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^VERSION_NAME=//p' version.properties)
+          code=$(sed -n 's/^VERSION_CODE=//p' version.properties)
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$code" =~ ^[1-9][0-9]*$ ]]
+          test "$GITHUB_REF_NAME" = "v$version"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install required Android SDK packages
+        run: |
+          set -euo pipefail
+          export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          sdkmanager=$(find "$ANDROID_HOME/cmdline-tools" -type f -path '*/bin/sdkmanager' | sort -V | tail -1)
+          test -x "$sdkmanager"
+          "$sdkmanager" --sdk_root="$ANDROID_HOME" --version
+          "$sdkmanager" --sdk_root="$ANDROID_HOME" "platforms;android-35" "build-tools;35.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - run: gradle --no-daemon :app:testDebugUnitTest :app:lintDebug
+      - name: Assemble signed APK
+        env:
+          KEYSTORE_BASE64: ${{ secrets.TRAKT_KEYSTORE_BASE64 }}
+          TRAKT_STORE_PASSWORD: ${{ secrets.TRAKT_STORE_PASSWORD }}
+          TRAKT_KEY_ALIAS: ${{ secrets.TRAKT_KEY_ALIAS }}
+          TRAKT_KEY_PASSWORD: ${{ secrets.TRAKT_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in KEYSTORE_BASE64 TRAKT_STORE_PASSWORD TRAKT_KEY_ALIAS TRAKT_KEY_PASSWORD; do
+            if [[ -z "${!name}" ]]; then echo "::error::Missing signing secret: $name"; exit 1; fi
+          done
+          umask 077
+          export TRAKT_KEYSTORE_PATH="$RUNNER_TEMP/traktbridge-release.jks"
+          trap 'rm -f "$TRAKT_KEYSTORE_PATH"' EXIT
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$TRAKT_KEYSTORE_PATH"
+          gradle --no-daemon :app:assembleRelease
+      - name: Verify APK certificate and prepare release
+        env:
+          EXPECTED_SHA256: ${{ vars.TRAKT_SIGNING_SHA256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$EXPECTED_SHA256" || { echo "::error::Set TRAKT_SIGNING_SHA256 repository variable"; exit 1; }
+          apk=app/build/outputs/apk/release/app-release.apk
+          report=$("$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$apk")
+          printf '%s\n' "$report"
+          actual=$(printf '%s\n' "$report" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | tr -d ':' | tr '[:upper:]' '[:lower:]')
+          expected=$(printf '%s' "$EXPECTED_SHA256" | tr -d ':[:space:]' | tr '[:upper:]' '[:lower:]')
+          test "$actual" = "$expected" || { echo "::error::Signing certificate mismatch"; exit 1; }
+          mkdir -p dist
+          cp "$apk" "dist/TraktBridge-$VERSION.apk"
+          (cd dist && sha256sum "TraktBridge-$VERSION.apk" > SHA256SUMS.txt)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TraktBridge-signed
+          path: dist/
+      - name: Publish versioned release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --title "TraktBridge $VERSION" --generate-notes

@@ -1,0 +1,16 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
+<uses-permission android:name="android.permission.INTERNET"/>
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
+<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+<!-- Usage access is explicitly granted by the user in Android Settings, not a runtime permission. -->
+<uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions"/>
+<queries><intent><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent></queries>
+<application android:label="TraktBridge" android:theme="@style/TraktBridgeTheme" android:allowBackup="false">
+<activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter><intent-filter><action android:name="android.intent.action.VIEW"/><category android:name="android.intent.category.DEFAULT"/><category android:name="android.intent.category.BROWSABLE"/><data android:scheme="traktbridge" android:host="callback"/></intent-filter></activity>
+<service android:name=".PlaybackListener" android:label="TraktBridge playback detection" android:exported="true" android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"><intent-filter><action android:name="android.service.notification.NotificationListenerService"/></intent-filter></service>
+<service android:name=".TrackingService" android:exported="false" android:foregroundServiceType="specialUse"><property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="User-started continuous local playback activity tracking"/></service>
+<service android:name=".TitleAccessibility" android:label="TraktBridge title suggestions" android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE" android:exported="true"><intent-filter><action android:name="android.accessibilityservice.AccessibilityService"/></intent-filter><meta-data android:name="android.accessibilityservice" android:resource="@xml/title_accessibility"/></service>
+<activity android:name=".DebugActivity" android:exported="false"/>
+<receiver android:name=".ReviewReceiver" android:exported="false"/>
+</application></manifest>
