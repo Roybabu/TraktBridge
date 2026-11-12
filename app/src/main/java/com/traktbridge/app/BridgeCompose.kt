@@ -18,6 +18,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.text.font.FontWeight
 
 @Composable
@@ -30,7 +33,12 @@ fun BridgeTheme(accent:Int,content:@Composable ()->Unit) {
         mode=="amoled" -> darkColorScheme(primary=Color(accent),onPrimary=Color(0xff171022),background=Color.Black,surface=Color(0xff101010),onSurface=Color(0xfff1f0f6))
         else -> darkColorScheme(primary=Color(accent),onPrimary=Color(0xff171022),background=Color(0xff0d0f16),surface=Color(0xff1b1e2a),onSurface=Color(0xfff1f0f6))
     }
-    MaterialTheme(colorScheme=if(prefs.getBoolean("high_contrast",false)) scheme.copy(onSurface=Color.White,onSurfaceVariant=Color.White) else scheme,content=content)
+    val density=LocalDensity.current
+    val tv=context.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_TYPE_MASK == android.content.res.Configuration.UI_MODE_TYPE_TELEVISION
+    val scale=UiAccessibility.readingScale(prefs.getInt("reading_size",0),tv)
+    CompositionLocalProvider(LocalDensity provides Density(density.density,density.fontScale*scale)) {
+        MaterialTheme(colorScheme=if(prefs.getBoolean("high_contrast",false)) scheme.copy(onSurface=Color.White,onSurfaceVariant=Color.White) else scheme,content=content)
+    }
 }
 
 @Composable
@@ -159,7 +167,9 @@ fun BridgeEmptyState(accent:Int,title:String,detail:String,actionLabel:String,on
     BridgeTheme(accent) {
         var entered by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
         androidx.compose.runtime.LaunchedEffect(Unit) { entered=true }
-        val opacity by animateFloatAsState(if(entered) 1f else 0.55f,animationSpec=tween(180),label="empty-state")
+        val context=LocalContext.current
+        val reduce=context.getSharedPreferences("tracker",0).getBoolean("reduce_motion",false)
+        val opacity by animateFloatAsState(if(entered || reduce) 1f else 0.55f,animationSpec=tween(if(reduce) 0 else 180),label="empty-state")
         Card(Modifier.fillMaxWidth().padding(vertical=6.dp).alpha(opacity)) {
             Column(Modifier.padding(20.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
                 Text(title,style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.SemiBold)

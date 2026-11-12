@@ -453,7 +453,7 @@ class MainActivity : ComponentActivity() {
         else { workspace.addView(frame,LinearLayout.LayoutParams(-1,0,1f)); workspace.addView(nav,LinearLayout.LayoutParams(-1,-2)) }
         val navLabels=listOf(getString(R.string.nav_home),getString(R.string.nav_library),getString(R.string.nav_review),getString(R.string.nav_activity),getString(R.string.nav_settings))
         if(tvMode) {
-            navLabels.forEachIndexed { i,name -> nav.addView(TextView(this).apply { text=name; textSize=if(tvMode) 18f else 15f; gravity=android.view.Gravity.CENTER; minHeight=dp(64); id=android.view.View.generateViewId(); isFocusable=true; setOnFocusChangeListener { view,focused -> view.alpha=if(focused) 1f else 0.82f; if(tvMode) view.scaleX=if(focused) 1.05f else 1f; if(tvMode) view.scaleY=if(focused) 1.05f else 1f }; setOnClickListener { showTab(i) } },if(wide) LinearLayout.LayoutParams(-1,dp(68)).apply { bottomMargin=dp(6) } else LinearLayout.LayoutParams(0,-2,1f)) }
+            navLabels.forEachIndexed { i,name -> nav.addView(TextView(this).apply { text=name; textSize=if(tvMode) 18f else 15f; gravity=android.view.Gravity.CENTER; minHeight=dp(64); id=android.view.View.generateViewId(); isFocusable=true; setOnFocusChangeListener { view,focused -> view.alpha=if(focused) 1f else 0.82f; if(tvMode) view.scaleX=if(focused && !prefs.getBoolean("reduce_motion",false)) 1.05f else 1f; if(tvMode) view.scaleY=if(focused) 1.05f else 1f }; setOnClickListener { showTab(i) } },if(wide) LinearLayout.LayoutParams(-1,dp(68)).apply { bottomMargin=dp(6) } else LinearLayout.LayoutParams(0,-2,1f)) }
         } else {
             composeNav=ComposeView(this).apply {
                 setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
@@ -524,6 +524,7 @@ class MainActivity : ComponentActivity() {
         button("Beta feedback and diagnostics") { betaFeedback() }
         root.addView(Switch(this).apply { text="Hide catalogue spoilers"; isChecked=prefs.getBoolean("hide_spoilers",true); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("hide_spoilers",checked).apply() } })
         root.addView(Switch(this).apply { text="High contrast text"; isChecked=prefs.getBoolean("high_contrast",false); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("high_contrast",checked).apply(); recreate() } })
+        root.addView(Switch(this).apply { text="Reduce interface motion"; isChecked=prefs.getBoolean("reduce_motion",false); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("reduce_motion",checked).apply(); recreate() } })
         button("Text size") { choose("Reading size",listOf("System default","Large","Extra large")) { prefs.edit().putInt("reading_size",it).apply(); recreate() } }
         button("Monthly viewing goal and dashboard") { configureGoal() }
         button("Customize dashboard and widget") { customizeDashboard() }
@@ -937,10 +938,10 @@ class MainActivity : ComponentActivity() {
     private fun dp(n:Int)= (n*resources.displayMetrics.density+0.5f).toInt()
     private fun rounded(color:Int,radius:Int=16)=android.graphics.drawable.GradientDrawable().apply { setColor(color); cornerRadius=dp(radius).toFloat() }
     private fun txt(value:String,size:Int=15,color:Int=ink,bold:Boolean=false)=TextView(this).apply {
-        text=value; textSize=size.toFloat()*when(prefs.getInt("reading_size",0)) { 1->1.15f; 2->1.3f; else->1f }; setTextColor(color); if(bold) setTypeface(null,android.graphics.Typeface.BOLD)
+        text=value; textSize=size.toFloat()*UiAccessibility.readingScale(prefs.getInt("reading_size",0),tvMode); setTextColor(color); if(bold) setTypeface(null,android.graphics.Typeface.BOLD)
     }
     private fun actionButton(label:String,action:()->Unit)=Button(this).apply {
-        text=label; contentDescription=label; isAllCaps=false; isFocusable=true; if(tvMode) { minWidth=dp(120); setOnFocusChangeListener { view,focused -> view.alpha=if(focused) 1f else 0.85f; view.scaleX=if(focused) 1.03f else 1f; view.scaleY=if(focused) 1.03f else 1f } }; setTextColor(ink); textSize=14f*when(prefs.getInt("reading_size",0)) { 1->1.15f; 2->1.3f; else->1f }; background=if(tvMode) TvFocus.background(this@MainActivity,0xff302a48.toInt(),violet) else rounded(0xff302a48.toInt(),12); minHeight=dp(layoutMode.touch)
+        text=label; contentDescription=label; isAllCaps=false; isFocusable=true; if(tvMode) { minWidth=dp(120); setOnFocusChangeListener { view,focused -> view.alpha=if(focused) 1f else 0.85f; view.scaleX=if(focused && !prefs.getBoolean("reduce_motion",false)) 1.03f else 1f; view.scaleY=if(focused && !prefs.getBoolean("reduce_motion",false)) 1.03f else 1f } }; setTextColor(ink); textSize=14f*UiAccessibility.readingScale(prefs.getInt("reading_size",0),tvMode); background=if(tvMode) TvFocus.background(this@MainActivity,0xff302a48.toInt(),violet) else rounded(0xff302a48.toInt(),12); minHeight=dp(layoutMode.touch)
         layoutParams=LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(6) }; setOnClickListener { action() }
     }
     private fun panel(parent:LinearLayout):LinearLayout=LinearLayout(this).apply {
