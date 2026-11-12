@@ -90,12 +90,18 @@ object TraktCatalogue {
             if(key<=0 || title.isBlank()) null else CatalogueItem(type,key,title,o.optInt("year"),runtimeMinutes=o.optInt("runtime"))
         }.distinctBy { it.type+":"+it.id }
     }
-    fun related(type:String,id:Long,done:(Result<List<CatalogueItem>>)->Unit)=request(done) {
+    private fun relatedItems(type:String,id:Long):List<CatalogueItem> {
         require(type in setOf("movie","show") && id>0)
-        objects(get("/"+RemoteRules.plural(type)+"/"+id+"/related?limit=30&extended=full")).mapNotNull { o ->
+        return objects(get("/"+RemoteRules.plural(type)+"/"+id+"/related?limit=30&extended=full")).mapNotNull { o ->
             val key=id(o); val title=o.optString("title")
             if(key<=0 || title.isBlank()) null else CatalogueItem(type,key,title,o.optInt("year"),runtimeMinutes=o.optInt("runtime"))
         }.distinctBy { it.id }
+    }
+    fun related(type:String,id:Long,done:(Result<List<CatalogueItem>>)->Unit)=request(done) { relatedItems(type,id) }
+    fun personalized(seeds:List<RecommendationSeed>,done:(Result<List<RelatedBatch>>)->Unit)=request(done) {
+        val batches=seeds.take(5).mapNotNull { seed -> try { RelatedBatch(seed,relatedItems(seed.type,seed.id)) } catch(e:Exception) { DebugTrace.failure("recommendation",e); null } }
+        check(batches.isNotEmpty()) { "Recommendations unavailable. Try again later." }
+        batches
     }
     fun discover(type:String,mode:String,done:(Result<List<CatalogueItem>>)->Unit)=request(done) {
         require(type in setOf("movie","show") && mode in setOf("trending","popular"))

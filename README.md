@@ -104,3 +104,6 @@ Not implemented: licensed streaming availability, exact provider deep links, aut
 
 ## v0.82.0 development scope
 Unified local library search groups Trakt movies and TV series with separately identified AniList local anime progress and unidentified sessions. IDs are never equated across catalogues. Browse results are capped at 200 per category. SQLite corruption handling fails closed rather than invoking default destructive deletion. Backup generation and merge require integrity checks; a failed database is preserved for manual recovery. Automatic reconstruction of a corrupt database, live device recovery and signed release validation remain outstanding.
+
+## v0.83.0 development scope
+Personalized recommendations combine up to five confirmed-history seeds using measured viewing time and recency, merge related catalogue results, exclude previously watched and hidden titles, and display recommendation reasons. Explicit consent precedes sending title IDs; feedback stays local. Partial network results remain usable and catalogue UI exceptions are handled. This is heuristic ranking, not a trained ML model. Live API and device validation remain pending.

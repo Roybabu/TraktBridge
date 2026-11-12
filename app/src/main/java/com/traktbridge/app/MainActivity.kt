@@ -1181,16 +1181,33 @@ class MainActivity : ComponentActivity() {
         }.show()
     }
     private fun recommendFromHistory() {
-        val rows=history.records(0).filter { it.status=="synced" && it.traktId>0 && (it.matchType=="movie" || (it.matchType=="episode" && it.showId>0)) }.groupBy { if(it.matchType=="episode") "show:"+it.showId else "movie:"+it.traktId }.values.sortedWith(compareByDescending<List<WatchRecord>> { it.sumOf { r -> r.watched.coerceAtLeast(0) } }.thenByDescending { it.maxOf { r -> r.ended } }).map { it.maxBy { r -> r.ended } }.take(30)
-        choose("Find similar content",rows.map { it.matchLabel }) { i ->
-            val r=rows[i]; val type=if(r.matchType=="episode") "show" else "movie"; val id=if(type=="show") r.showId else r.traktId
-            val watched=rows.map { if(type=="show" && it.matchType=="episode") it.showId else if(type=="movie" && it.matchType=="movie") it.traktId else -1L }.toSet()
-            lookup("Finding related titles",{ done -> TraktCatalogue.related(type,id,done) }) { items:List<CatalogueItem> ->
-                val all=history.records(0).filter { it.status=="synced" }.map { if(type=="show" && it.matchType=="episode") it.showId else if(type=="movie" && it.matchType=="movie") it.traktId else -1L }.toSet()
-                val fresh=items.filterNot { it.id in all || it.id in watched || it.id==id }
-                choose("Because you watched "+r.matchLabel,fresh.map { it.label() }) { j -> titleDetails(type,fresh[j].id,fresh[j].title) }
-            }
+        val records=history.records(0)
+        val seeds=RecommendationEngine.seeds(records,System.currentTimeMillis())
+        if(seeds.isEmpty()) {
+            android.app.AlertDialog.Builder(this).setTitle("Recommendations").setMessage("Confirm some viewing history first, or browse trending titles.").setNegativeButton("Close",null).setPositiveButton("Discover") { _,_->discover() }.show()
+            return
         }
+        val hiddenStore=personalStore("recommendation_hidden")
+        android.app.AlertDialog.Builder(this).setTitle("Personalized recommendations").setMessage("Trakt receives up to five catalogue title IDs to find related content. Viewing times and local feedback stay on this device.").setNegativeButton("Cancel",null).setNeutralButton("Reset hidden titles") { _,_->hiddenStore.edit().clear().apply(); recommendFromHistory() }.setPositiveButton("Find titles") { _,_->
+            lookup("Finding personal recommendations",{ done -> TraktCatalogue.personalized(seeds,done) }) { batches:List<RelatedBatch> ->
+                val rows=RecommendationEngine.rank(batches,RecommendationEngine.seen(records),hiddenStore.all.keys)
+                val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
+                if(batches.size<seeds.size) body.addView(txt("Some recommendation sources were unavailable.",14,muted))
+                if(rows.isEmpty()) body.addView(txt("No new recommendations. Try Discover or reset hidden titles.",15,muted))
+                cards(body,rows) { parent,row ->
+                    val item=row.item
+                    val card=panel(parent)
+                    card.addView(txt(item.label(),17,ink,true))
+                    card.addView(txt("Because you watched "+row.reasons.take(3).joinToString(", "),14,muted))
+                    card.addView(actionButton("Details") { titleDetails(item.type,item.id,item.title) })
+                    card.addView(actionButton("Not interested") {
+                        if(hiddenStore.all.size>=500) { Toast.makeText(this,"Hidden list full. Reset it to add more.",Toast.LENGTH_LONG).show() }
+                        else { hiddenStore.edit().putBoolean(item.type+":"+item.id,true).apply(); card.visibility=android.view.View.GONE }
+                    })
+                }
+                android.app.AlertDialog.Builder(this).setTitle("For you").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
+            }
+        }.show()
     }
     private fun discover() {
         choose("Discover",listOf("Trending movies","Trending shows","Popular movies","Popular shows")) { index ->
@@ -1628,12 +1645,12 @@ class MainActivity : ComponentActivity() {
     private fun <T> lookup(label: String, request: ((Result<T>) -> Unit) -> Unit, success: (T) -> Unit) {
         val progress = android.app.AlertDialog.Builder(this).setMessage(label + "…").setNegativeButton("Cancel",null).create()
         progress.show()
-        request { result ->
+        try { request { result ->
             if (!isFinishing && !isDestroyed && progress.isShowing) {
                 progress.dismiss()
-                result.fold(success, { android.app.AlertDialog.Builder(this).setTitle("Catalogue unavailable").setMessage(it.message?.take(200) ?: "Try again later.").setPositiveButton("OK",null).show() })
+                try { result.getOrThrow().let(success) } catch(e:Exception) { DebugTrace.failure("catalogue-ui",e); android.app.AlertDialog.Builder(this).setTitle("Catalogue unavailable").setMessage("Unable to complete this request. Try again later.").setPositiveButton("OK",null).show() }
             }
-        }
+        } } catch(e:Exception) { progress.dismiss(); DebugTrace.failure("catalogue-request",e); if(!isFinishing && !isDestroyed) Toast.makeText(this,"Unable to start request. Try again.",Toast.LENGTH_LONG).show() }
     }
     private fun choose(title: String, labels: List<String>, selected: (Int) -> Unit) {
         if (labels.isEmpty()) { android.app.AlertDialog.Builder(this).setTitle(title).setMessage("No results. Try another title or spelling.").setPositiveButton("OK",null).show(); return }
