@@ -7,6 +7,7 @@ object PlaybackAccuracy {
     // Do not extrapolate across missing observations or state transitions.
     fun interval(old:WatchSample,next:WatchSample,elapsed:Long):PlaybackInterval {
         if(elapsed !in 1..MAX_GAP) return PlaybackInterval()
+        if(SegmentDetection.excluded(old.segment) || SegmentDetection.excluded(next.segment)) return PlaybackInterval(uncertain=elapsed)
         if(old.phase==PlaybackPhase.BUFFERING || next.phase==PlaybackPhase.BUFFERING) return PlaybackInterval(buffering=elapsed)
         if(old.phase==PlaybackPhase.PAUSED && next.phase==PlaybackPhase.PAUSED) return PlaybackInterval(paused=elapsed)
         if(old.phase!=PlaybackPhase.PLAYING || next.phase!=PlaybackPhase.PLAYING) return PlaybackInterval(uncertain=elapsed)

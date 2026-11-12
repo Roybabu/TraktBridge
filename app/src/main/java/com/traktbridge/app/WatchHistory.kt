@@ -6,7 +6,7 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import java.util.UUID
 
-data class WatchSample(val key: String, val source: String, val title: String, val subtitle: String, val duration: Long, val position: Long, val playing: Boolean, val phase: PlaybackPhase = if(playing) PlaybackPhase.PLAYING else PlaybackPhase.PAUSED, val positionSource:String = if(position>=0) "media" else "unknown", val speed:Float=1f)
+data class WatchSample(val key: String, val source: String, val title: String, val subtitle: String, val duration: Long, val position: Long, val playing: Boolean, val phase: PlaybackPhase = if(playing) PlaybackPhase.PLAYING else PlaybackPhase.PAUSED, val positionSource:String = if(position>=0) "media" else "unknown", val speed:Float=1f,val segment:PlaybackSegment=PlaybackSegment.UNKNOWN)
 data class WatchRecord(val id: String, val source: String, val title: String, val subtitle: String, val started: Long, val ended: Long, val watched: Long, val duration: Long, val position: Long, val status: String, val matchType: String = "", val traktId: Long = 0, val matchLabel: String = "", val showId: Long = 0, val season: Int = -1, val episode: Int = -1, val catalogueRuntime: Long = 0, val pausedMs:Long=0, val bufferingMs:Long=0, val uncertainMs:Long=0, val seeks:Int=0, val rewinds:Int=0, val positionSource:String="unknown")
 
 class WatchHistory(context: Context): SQLiteOpenHelper(context.applicationContext, "watch_history.db", null, 8, android.database.DatabaseErrorHandler { throw android.database.sqlite.SQLiteDatabaseCorruptException("Viewing database integrity failure; original database preserved") }) {

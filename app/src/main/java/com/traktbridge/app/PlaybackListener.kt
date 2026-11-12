@@ -96,6 +96,8 @@ class PlaybackListener : NotificationListenerService() {
             DebugTrace.event("media","selected package="+c.packageName+" metadata="+(m!=null)+" titlePresent="+(!m?.getString(MediaMetadata.METADATA_KEY_TITLE).isNullOrBlank() || !m?.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE).isNullOrBlank())+" state="+(p?.state ?: -1)+" positionMs="+(p?.position ?: -1)+" durationMs="+(m?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0))
             val direct=m?.getString(MediaMetadata.METADATA_KEY_TITLE)?.takeIf { DetectionProfiles.validMetadata(it) } ?: m?.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE)?.takeIf { DetectionProfiles.validMetadata(it) }.orEmpty()
             val now=System.currentTimeMillis()
+            val explicitSegment=SegmentDetection.metadata(m?.getString(MediaMetadata.METADATA_KEY_TITLE).orEmpty())
+            val segment=if(explicitSegment!=PlaybackSegment.UNKNOWN) explicitSegment else if(selected.count { it.packageName==c.packageName }==1) TitleAccessibility.segment(this,c.packageName,now) else PlaybackSegment.UNKNOWN
             val note=mediaTitles[c.packageName]?.takeIf { now-it.first in 0..120000 }?.second.orEmpty()
             val key=c.packageName+":"+c.sessionToken.hashCode()
             val phase=when(p?.state) {
@@ -115,11 +117,11 @@ class PlaybackListener : NotificationListenerService() {
                 hint?.takeIf { selected.count { other -> other.packageName==c.packageName }==1 }?.let { Evidence(it.first,it.second,"accessibility",profile.screenWeight) }
             ))
             val safeRecognition=recognition?.takeIf { !it.conflict && it.score>=65 }
-            if(recognition?.conflict==true) retained.remove(key)
+            if(recognition?.conflict==true || segment==PlaybackSegment.ADVERTISEMENT) retained.remove(key)
             val title=if(recognition?.conflict==true) "" else safeRecognition?.title ?: prior?.title.orEmpty()
             val subtitle=if(recognition?.conflict==true) "" else safeRecognition?.detail?.takeIf { it.isNotBlank() } ?: prior?.takeIf { it.title==title }?.detail.orEmpty()
             if(playing && recognition!=null) DebugTrace.event("recognition","package="+c.packageName+" score="+recognition.score+" sources="+recognition.sources.joinToString(",")+" conflict="+recognition.conflict)
-            if(playing && safeRecognition!=null) retained[key]=RetainedTitle(title,subtitle,tick)
+            if(playing && safeRecognition!=null && segment!=PlaybackSegment.ADVERTISEMENT) retained[key]=RetainedTitle(title,subtitle,tick)
             if(p?.state in setOf(PlaybackState.STATE_STOPPED,PlaybackState.STATE_NONE,PlaybackState.STATE_ERROR)) retained.remove(key)
             val mediaDuration=m?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L
             val mediaPosition=PlaybackPosition.sanitize(p?.position ?: -1L,mediaDuration)
@@ -127,7 +129,7 @@ class PlaybackListener : NotificationListenerService() {
             val duration=screen?.duration ?: mediaDuration
             val position=screen?.position ?: mediaPosition
             if(playing && p!=null && p.position>=0 && position<0) DebugTrace.event("progress","package="+c.packageName+" rejected position without valid runtime")
-            if(recognition?.conflict!=true) samples.add(WatchSample(key,c.packageName,title,subtitle,duration,position,playing,phase,if(screen!=null) "screen" else if(mediaPosition>=0) "media" else "unknown",p?.playbackSpeed?.takeIf { it>0 } ?: 1f))
+            if(recognition?.conflict!=true && segment!=PlaybackSegment.ADVERTISEMENT) samples.add(WatchSample(key,c.packageName,title,subtitle,duration,position,playing,phase,if(screen!=null) "screen" else if(mediaPosition>=0) "media" else "unknown",p?.playbackSpeed?.takeIf { it>0 } ?: 1f,segment))
             rows.put(JSONObject().apply {
                 put("package", c.packageName)
                 put("title", title)
@@ -137,6 +139,7 @@ class PlaybackListener : NotificationListenerService() {
                 put("positionMs", position)
                 put("state", p?.state ?: 0)
                 put("output",when(c.playbackInfo?.playbackType) { android.media.session.MediaController.PlaybackInfo.PLAYBACK_TYPE_REMOTE -> "remote"; android.media.session.MediaController.PlaybackInfo.PLAYBACK_TYPE_LOCAL -> "local"; else -> "unknown" })
+                put("segment",segment.name)
                 put("recognitionScore",recognition?.score ?: 0)
                 put("recognitionConflict",recognition?.conflict ?: false)
                 put("positionSource",if(screen!=null) "screen" else if(mediaPosition>=0) "media" else "unknown")

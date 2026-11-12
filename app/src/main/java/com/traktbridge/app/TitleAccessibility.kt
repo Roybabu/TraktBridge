@@ -91,6 +91,8 @@ class TitleAccessibility: AccessibilityService() {
         }
         walk(root,0)
         player=ContentRecognition.playerContext(labels,player)
+        val segment=SegmentDetection.screen(labels,player)
+        prefs.edit().putString("segment:"+pkg,segment.name).putLong("segment_time:"+pkg,now).apply()
         val hint=ContentRecognition.detect(pkg,labels,player)
         val timing=ContentRecognition.timing(labels,player)
         if(timing!=null && hint!=null && hint.kind!="details") prefs.edit().putLong("screen_position:"+pkg,timing.position).putLong("screen_duration:"+pkg,timing.duration).putLong("screen_time:"+pkg,now).putString("screen_title:"+pkg,hint.title).apply()
@@ -106,6 +108,11 @@ class TitleAccessibility: AccessibilityService() {
     override fun onInterrupt() { DebugTrace.event("title","interrupted") }
     override fun onDestroy() { prefs.edit().putBoolean("title_connected",false).apply(); super.onDestroy() }
     companion object {
+        fun segment(context:Context,pkg:String,now:Long):PlaybackSegment {
+            val p=context.getSharedPreferences("tracker",Context.MODE_PRIVATE)
+            if(!p.getBoolean("enabled",false) || !p.getBoolean("title_optin",false) || pkg !in (p.getStringSet("allowed",emptySet()) ?: emptySet()) || now-p.getLong("segment_time:"+pkg,0) !in 0..6000) return PlaybackSegment.UNKNOWN
+            return runCatching { PlaybackSegment.valueOf(p.getString("segment:"+pkg,"UNKNOWN").orEmpty()) }.getOrDefault(PlaybackSegment.UNKNOWN)
+        }
         fun timing(context:Context,pkg:String,title:String,now:Long):ContentRecognition.PlayerTime? {
             val p=context.getSharedPreferences("tracker",Context.MODE_PRIVATE)
             if(!p.getBoolean("title_optin",false) || title.isBlank() || p.getString("screen_title:"+pkg,"")!=title || now-p.getLong("screen_time:"+pkg,0) !in 0..8000) return null

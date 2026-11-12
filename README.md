@@ -158,3 +158,6 @@ Release candidate security guard validates version metadata, exported components
 
 ## v0.100.0
 Provider-specific metadata weights, retention windows and screen timing policies are applied to selected playback sessions. Unknown providers use conservative fallback; generic player and advertisement labels are rejected. Profiles are heuristic and require physical-device verification; no unsupported player capability is guaranteed.
+
+## v0.101.0
+Explicit ad metadata and fresh, opt-in accessibility player controls identify possible intro, recap, credits and advertisement segments. Flagged intervals are excluded from sampled watch time; ads are not ingested. No automatic skipping or inference of unseen segment boundaries. Provider cue availability and real-device accuracy remain unverified.
