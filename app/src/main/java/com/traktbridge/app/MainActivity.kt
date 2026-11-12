@@ -117,6 +117,45 @@ class MainActivity : Activity() {
             }.show()
         }
     }
+    private fun serverSettings() {
+        val kinds=listOf("plex","jellyfin","emby","kodi")
+        val names=listOf("Plex","Jellyfin","Emby","Kodi")
+        choose("Media server integrations",kinds.mapIndexed { i,k -> names[i]+if(ServerStore.load(this,k)!=null) " • connected" else " • not configured" }) { index ->
+            val kind=kinds[index]
+            val old=ServerStore.load(this,kind)
+            val url=EditText(this).apply { hint="HTTPS server base URL"; setSingleLine(true); setText(old?.url.orEmpty()) }
+            val token=EditText(this).apply { hint=if(kind=="kodi") "Username:password (if required)" else "Server API token"; inputType=android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD; setText(old?.token.orEmpty()) }
+            val client=EditText(this).apply { hint="Playback client / device ID"; setSingleLine(true); setText(old?.client.orEmpty()) }
+            val box=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(24,12,24,12); addView(url); addView(token); addView(client); addView(txt("Use a trusted HTTPS server. Discover clients while the intended device is connected. Only the selected client is tracked. Credentials stay encrypted on this device. Server playback may occur on another device.",14,muted)) }
+            val d=android.app.AlertDialog.Builder(this).setTitle(names[index]+" connection").setView(box).setNegativeButton("Cancel",null).setNeutralButton(if(old!=null) "Disconnect" else "Discover clients",null).setPositiveButton("Discover and save",null).create()
+            d.setOnShowListener {
+                fun discover() {
+                    val c=ServerConfig(kind,url.text.toString().trim(),token.text.toString(),client.text.toString().trim().ifBlank { "discover" })
+                    val valid=runCatching { ServerStore.validate(c) }
+                    if(valid.isFailure) { url.error=valid.exceptionOrNull()?.message ?: "Invalid configuration"; return }
+                    d.dismiss()
+                    val progress=android.app.ProgressDialog.show(this,"Connecting", "Discovering playback clients…",true,false)
+                    Thread {
+                        val result=runCatching { MediaServer.discover(c) }
+                        runOnUiThread {
+                            if(isFinishing || isDestroyed) return@runOnUiThread
+                            progress.dismiss()
+                            result.fold({ clients ->
+                                if(clients.isEmpty()) { Toast.makeText(this,"No clients found. Start playback on the intended device and retry.",Toast.LENGTH_LONG).show(); return@fold }
+                                choose("Select playback client",clients.map { it.second+" • "+it.first }) { j ->
+                                    val saved=runCatching { ServerStore.save(this,c.copy(client=clients[j].first)) }
+                                    Toast.makeText(this,if(saved.isSuccess) "Media server saved" else "Unable to save connection",Toast.LENGTH_LONG).show()
+                                }
+                            },{ Toast.makeText(this,"Connection failed. Check HTTPS URL, certificate and credentials.",Toast.LENGTH_LONG).show() })
+                        }
+                    }.start()
+                }
+                d.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener { discover() }
+                d.getButton(android.app.AlertDialog.BUTTON_NEUTRAL).setOnClickListener { if(old!=null) { ServerStore.remove(this,kind); d.dismiss() } else discover() }
+            }
+            d.show()
+        }
+    }
     private fun handleShared(i:Intent) {
         if(i.action!=Intent.ACTION_SEND) return
         val type=i.type.orEmpty()
@@ -202,6 +241,7 @@ class MainActivity : Activity() {
         button("Scan player title (one-shot OCR)") { armOcr() }
         button("Review OCR result") { reviewOcr() }
         button("Clear OCR result") { prefs.edit().remove("ocr_target").remove("ocr_after").remove("ocr_until").remove("ocr_choices").remove("ocr_source").remove("ocr_captured").remove("ocr_status").apply() }
+        button("Connect media servers") { serverSettings() }
         button("Open diagnostic recorder") { startActivity(Intent(this,DebugActivity::class.java)) }
         auth = TraktAuth(applicationContext)
         account = TextView(this).apply { textSize = 16f }
@@ -422,7 +462,7 @@ class MainActivity : Activity() {
             if (r.status in setOf("pending","reviewed")) card.addView(Button(this).apply { text = "Delete viewing record"; setOnClickListener { android.app.AlertDialog.Builder(this@MainActivity).setTitle("Delete this local record?").setNegativeButton("Cancel",null).setPositiveButton("Delete") { _,_ -> history.discard(r.id); ViewingNotifications.cancel(this@MainActivity,r.id); refreshHistory() }.show() } })
 
     }
-    private fun appLabel(pkg: String): String = apps.entries.firstOrNull { it.value == pkg }?.key ?: runCatching {
+    private fun appLabel(pkg: String): String = mapOf("server.plex" to "Plex server","server.jellyfin" to "Jellyfin server","server.emby" to "Emby server","server.kodi" to "Kodi server")[pkg] ?: apps.entries.firstOrNull { it.value == pkg }?.key ?: runCatching {
         packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg,0)).toString()
     }.getOrDefault(pkg)
     private fun chooseInstalledApps() {

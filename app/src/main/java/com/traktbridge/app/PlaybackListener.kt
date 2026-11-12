@@ -16,6 +16,7 @@ class PlaybackListener : NotificationListenerService() {
     private val prefs by lazy { getSharedPreferences("tracker", MODE_PRIVATE) }
     private var lastUsageCheck=0L
     private var lastTick=0L
+    private val serverSampler by lazy { ServerSampler(applicationContext) }
     private val retained=mutableMapOf<String,Pair<String,String>>()
     private val mediaTitles=mutableMapOf<String,Pair<Long,String>>()
     override fun onNotificationPosted(sbn: android.service.notification.StatusBarNotification?) {
@@ -37,7 +38,7 @@ class PlaybackListener : NotificationListenerService() {
     }
     override fun onListenerConnected() { super.onListenerConnected(); DebugTrace.event("listener","connected"); prefs.edit().putBoolean("listener_connected",true).apply(); handler.removeCallbacks(poll); handler.post(poll) }
     override fun onListenerDisconnected() { DebugTrace.event("listener","disconnected"); handler.removeCallbacks(poll); prefs.edit().putBoolean("listener_connected",false).apply(); history.finishAll(); super.onListenerDisconnected() }
-    override fun onDestroy() { DebugTrace.event("listener","destroyed"); handler.removeCallbacks(poll); prefs.edit().putBoolean("listener_connected",false).apply(); history.finishAll(); history.close(); super.onDestroy() }
+    override fun onDestroy() { DebugTrace.event("listener","destroyed"); handler.removeCallbacks(poll); prefs.edit().putBoolean("listener_connected",false).apply(); history.finishAll(); serverSampler.close(); history.close(); super.onDestroy() }
     private fun notifyPending() {
         if (!getSharedPreferences("tracker",MODE_PRIVATE).getBoolean("enabled",false) || !ViewingNotifications.enabled(this)) return
         for (record in history.pendingNotifications().take(3)) {
@@ -69,7 +70,7 @@ class PlaybackListener : NotificationListenerService() {
         if(lastTick>0 && tick-lastTick>12000) DebugTrace.event("sampling","gapMs="+(tick-lastTick))
         lastTick=tick
         prefs.edit().putLong("last_sample",System.currentTimeMillis()).remove("sample_error").apply()
-        if (!prefs.getBoolean("enabled", false)) { DebugTrace.event("sampling","disabled"); history.finishAll(); retained.clear(); prefs.edit().remove("sessions").apply(); return }
+        if (!prefs.getBoolean("enabled", false)) { DebugTrace.event("sampling","disabled"); history.finishAll(); serverSampler.clear(); retained.clear(); prefs.edit().remove("sessions").apply(); return }
         val allowed = prefs.getStringSet("allowed", emptySet()) ?: emptySet()
         val sessions = try {
             getSystemService(MediaSessionManager::class.java).getActiveSessions(ComponentName(this, PlaybackListener::class.java))
@@ -114,7 +115,10 @@ class PlaybackListener : NotificationListenerService() {
                 put("sampledAt", System.currentTimeMillis())
             })
         }
-        history.ingest(samples, SystemClock.elapsedRealtime(), System.currentTimeMillis())
+        val remote=serverSampler.samples(System.currentTimeMillis())
+        // Avoid double-counting local player sessions when the explicitly selected server client is active.
+        val remotePackages=remote.map { when(it.source) { "server.plex"->"com.plexapp.android"; "server.jellyfin"->"org.jellyfin.mobile"; "server.emby"->"com.mb.android"; "server.kodi"->"org.xbmc.kodi"; else->"" } }.toSet()
+        history.ingest(samples.filterNot { it.source in remotePackages }+remote, SystemClock.elapsedRealtime(), System.currentTimeMillis())
         prefs.edit().putString("sessions", rows.toString()).putInt("session_count",sessions.size).apply {
             if(rows.length()>0) putString("last_nonempty_sessions",rows.toString())
         }.apply()

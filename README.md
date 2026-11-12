@@ -57,3 +57,6 @@ Import Netflix viewing activity or generic CSV with Title,Date (ISO or US date) 
 
 ## One-shot player OCR (0.9.7)
 On Android 14+, explicitly arm one scan for a selected app. After an 8-second delay, a qualifying accessibility event within 45 seconds requests a window screenshot. Protected windows are rejected by Android. Bundled on-device Latin OCR processes edge regions in memory, then releases images. Review title candidates and optional timer estimates manually; no automatic history changes or upload. Clear results in settings. No continuous capture or DRM bypass.
+
+## Direct media server integration (0.9.8)
+Configure Plex, Jellyfin, Emby or Kodi using a trusted HTTPS server and explicit playback client selection. Poll session metadata using provider APIs; credentials are encrypted with Android Keystore, redirects are disabled, and server responses are bounded. Server sessions contribute title, episode, position, duration and sampled playback to existing local review. No automatic Trakt upload. Kodi requires HTTPS access to JSON-RPC, typically through a configured reverse proxy. Server playback may be remote; select only a client you own/use.
