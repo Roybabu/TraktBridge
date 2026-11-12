@@ -151,6 +151,22 @@ class WatchHistory(context: Context): SQLiteOpenHelper(context.applicationContex
         }, "id=? AND status IN ('pending','reviewed')", arrayOf(id))
         if(changed==1 && learn) remember(before,item)
     }
+    fun linkDuplicateTitle(targetId:String,recordId:String):Boolean {
+        val db=writableDatabase
+        db.beginTransaction()
+        try {
+            val target=record(targetId) ?: return false
+            val row=record(recordId) ?: return false
+            if(LibraryDuplicates.candidates(listOf(row),target).isEmpty()) return false
+            val changed=db.update("viewing",ContentValues().apply {
+                put("match_type",target.matchType); put("trakt_id",target.traktId); put("match_label",target.matchLabel)
+                put("show_id",target.showId); put("season",target.season); put("episode",target.episode)
+                put("catalogue_runtime",target.catalogueRuntime); put("status","reviewed")
+            },"id=? AND trakt_id=0 AND status IN ('pending','reviewed')",arrayOf(recordId))==1
+            db.setTransactionSuccessful()
+            return changed
+        } finally { db.endTransaction() }
+    }
     fun clearMatch(id: String) {
         record(id)?.let { r -> forget(r) }
         writableDatabase.update("viewing", ContentValues().apply {

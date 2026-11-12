@@ -170,3 +170,6 @@ Distinct concurrent local sessions can be sampled when each has a distinct recog
 
 ## v0.104.0
 Configurable 75–100% completion review threshold combines valid player position, sampled playback, exact identity, session status and catalogue runtime consistency. Suggestions never authorize uploads; existing explicit approval and account verification are unchanged. Physical-device calibration remains pending.
+
+## v0.105.0
+Possible duplicate titles are suggested conservatively from exact normalized titles, provider, episode and compatible runtime. Explicit linking copies a verified catalogue identity into an unapproved record, consolidating the library read model without deleting sessions, adding watch time or approving uploads. It does not merge distinct physical events or rewrite synced records.

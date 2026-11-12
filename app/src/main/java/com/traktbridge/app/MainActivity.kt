@@ -1652,6 +1652,7 @@ class MainActivity : ComponentActivity() {
         if(r.traktId<=0) details.addView(txt("Identify exact title to combine sessions.",12,muted))
         if(r.traktId>0) card.addView(actionButton("Title details") { titleDetails(if(r.matchType=="episode") "show" else "movie",if(r.matchType=="episode") r.showId else r.traktId,r.matchLabel) })
         if(!g.confirmed) card.addView(actionButton("Open playback app") { openPlaybackApp(g.platforms) })
+        if(r.traktId>0) card.addView(actionButton("Review possible duplicate titles") { duplicateTitles(r) })
         if(r.traktId>0) card.addView(actionButton("More title actions") {
             choose("Manage title",listOf("Personal status: "+libraryStatus(r.matchType,r.traktId).ifBlank { "Not set" },if(isFavorite(r.matchType,r.traktId)) "Remove favorite" else "Add favorite","Notes and tags","Add to collection")) { action ->
                 when(action) { 0->setLibraryStatus(r.matchType,r.traktId,r.matchLabel); 1->{ toggleFavorite(r.matchType,r.traktId,r.matchLabel); refreshHistory() }; 2->editTitleNotes(r.matchType,r.traktId,r.matchLabel); 3->addCollection(r.matchType,r.traktId,r.matchLabel) }
@@ -1659,6 +1660,14 @@ class MainActivity : ComponentActivity() {
         })
         if(expanded || g.pending || g.queued) card.addView(actionButton(if(g.confirmed) "View sessions" else "Review / view sessions") { showSessions(g) })
         else card.addView(actionButton("View sessions") { showSessions(g) })
+    }
+    private fun duplicateTitles(target:WatchRecord) {
+        val rows=LibraryDuplicates.candidates(history.records(0),target)
+        choose("Possible duplicate titles",rows.map { it.title+" • "+appLabel(it.source)+" • "+java.text.DateFormat.getDateTimeInstance().format(java.util.Date(it.started)) }) { i ->
+            android.app.AlertDialog.Builder(this).setTitle("Link to same catalogue title?").setMessage(rows[i].title+" → "+target.matchLabel+"\nVerify the exact title and episode. Original sessions and sampled time remain unchanged. Nothing is approved or uploaded.").setNegativeButton("Cancel",null).setPositiveButton("Link title") { _,_->
+                if(history.linkDuplicateTitle(target.id,rows[i].id)) { ViewingNotifications.cancel(this,rows[i].id); refreshHistory() } else Toast.makeText(this,"Record changed; review again",Toast.LENGTH_LONG).show()
+            }.show()
+        }
     }
     private fun showSessions(g:ViewingTitle) {
         val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
