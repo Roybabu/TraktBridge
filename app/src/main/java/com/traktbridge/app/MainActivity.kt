@@ -44,7 +44,39 @@ class MainActivity : Activity() {
         super.onActivityResult(requestCode,resultCode,data)
         if(requestCode==57 && resultCode==RESULT_OK) data?.data?.let { inspectVideo(it) }
         if(requestCode==58 && resultCode==RESULT_OK) data?.data?.let { inspectImport(it) }
+        if(resultCode==RESULT_OK && requestCode in 63..64) data?.data?.let { encryptedTransfer(requestCode,it) }
         if(resultCode==RESULT_OK && requestCode in 60..62) data?.data?.let { historyTransfer(requestCode,it) }
+    }
+    private fun encryptedTransfer(code:Int,uri:android.net.Uri) {
+        val field=EditText(this).apply { hint="Backup password (10+ characters)"; inputType=android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD }
+        android.app.AlertDialog.Builder(this).setTitle(if(code==63) "Encrypt history backup" else "Unlock history backup").setMessage("Keep the password safely. Lost passwords cannot be recovered. This backup contains viewing history only.").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Continue") { _,_->
+            val password=field.text.toString().toCharArray(); field.text.clear()
+            Thread {
+                try {
+                    if(code==63) {
+                        val data=WatchHistory(applicationContext).use { EncryptedBackup.encrypt(HistoryBackup.snapshot(it).toString(),password) }
+                        contentResolver.openOutputStream(uri,"wt")?.use { it.write(data) } ?: error("Cannot write backup")
+                        runOnUiThread { if(!isDestroyed && !isFinishing) Toast.makeText(this,"Encrypted backup saved",Toast.LENGTH_LONG).show() }
+                    } else {
+                        val data=contentResolver.openInputStream(uri)?.use { input ->
+                            val out=java.io.ByteArrayOutputStream(); val buf=ByteArray(8192)
+                            while(true) { val n=input.read(buf); if(n<0) break; require(out.size()+n<=EncryptedBackup.MAX_BYTES); out.write(buf,0,n) }; out.toByteArray()
+                        } ?: error("Cannot open backup")
+                        val rows=HistoryBackup.parse(EncryptedBackup.decrypt(data,password))
+                        runOnUiThread {
+                            if(isDestroyed || isFinishing) return@runOnUiThread
+                            android.app.AlertDialog.Builder(this).setTitle("Merge decrypted history?").setMessage(rows.size.toString()+" records; existing IDs skipped. No upload approval is restored.").setNegativeButton("Cancel",null).setPositiveButton("Merge") { _,_->
+                                Thread {
+                                    val result=runCatching { WatchHistory(applicationContext).use { HistoryBackup.merge(it,rows) } }
+                                    runOnUiThread { if(!isDestroyed && !isFinishing) { Toast.makeText(this,result.fold({ it.first.toString()+" restored • "+it.second+" skipped" },{ "Restore failed" }),Toast.LENGTH_LONG).show(); refreshHistory() } }
+                                }.start()
+                            }.show()
+                        }
+                    }
+                } catch(_:Exception) { runOnUiThread { if(!isDestroyed && !isFinishing) Toast.makeText(this,"Backup failed. Check password and file.",Toast.LENGTH_LONG).show() } }
+                finally { password.fill('\u0000') }
+            }.start()
+        }.show()
     }
     private fun pickBackup(code:Int) {
         val intent=if(code==62) Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*") else Intent(Intent.ACTION_CREATE_DOCUMENT).setType(if(code==60) "application/json" else "text/csv").putExtra(Intent.EXTRA_TITLE,if(code==60) "traktbridge-history.json" else "traktbridge-history.csv")
@@ -288,12 +320,15 @@ class MainActivity : Activity() {
         fun label(s: String) { root.addView(txt(s,15,muted)) }
         fun button(s: String, action: () -> Unit) { root.addView(actionButton(s,action)) }
         label("SETTINGS • Account and tracking")
+        button("Clear offline catalogue") { getSharedPreferences("offline_catalogue",MODE_PRIVATE).edit().clear().apply() }
         button("Check for app updates") { checkUpdates() }
         root.addView(Switch(this).apply { text="Hide catalogue spoilers"; isChecked=prefs.getBoolean("hide_spoilers",true); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("hide_spoilers",checked).apply() } })
         button("Appearance accent") { choose("Accent color",listOf("Violet","Blue","Green")) { prefs.edit().putString("accent",listOf("violet","blue","green")[it]).apply(); recreate() } }
         button("Personal collections") { collections() }
         button("Favorite titles") { favorites() }
         button("Guided tracking setup") { setupGuide() }
+        button("Encrypted history backup") { startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/octet-stream").putExtra(Intent.EXTRA_TITLE,"traktbridge-history.tbenc"),63) }
+        button("Restore encrypted backup") { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*"),64) }
         button("Back up viewing history (JSON)") { pickBackup(60) }
         button("Export viewing history (CSV)") { pickBackup(61) }
         button("Restore viewing history (JSON)") { pickBackup(62) }
@@ -691,7 +726,14 @@ class MainActivity : Activity() {
         }
     }
     private fun titleDetails(type:String,id:Long,label:String) {
-        lookup("Loading title details",{ done -> TraktCatalogue.details(type,id,done) }) { d:TitleDetails ->
+        val cache=getSharedPreferences("offline_catalogue",MODE_PRIVATE)
+        val key=type+":"+id
+        lookup("Loading title details",{ done -> TraktCatalogue.details(type,id) { result ->
+            val cached=runCatching { org.json.JSONObject(cache.getString(key,"")) }.getOrNull()
+            if(result.isSuccess) {
+                val d=result.getOrThrow(); cache.edit().putString(key,org.json.JSONObject().put("title",d.title).put("overview",d.overview).put("year",d.year).put("runtime",d.runtime).put("rating",d.rating).put("genres",d.genres).put("trailer",d.trailer).put("released",d.released).toString()).apply(); done(result)
+            } else if(cached!=null) done(Result.success(TitleDetails(cached.optString("title"),cached.optString("overview"),cached.optInt("year"),cached.optInt("runtime"),cached.optDouble("rating",0.0),cached.optString("genres"),cached.optString("trailer"),cached.optString("released")))) else done(result)
+        } }) { d:TitleDetails ->
             val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(12),dp(16),dp(12)) }
             val image=ImageView(this).apply { scaleType=ImageView.ScaleType.FIT_CENTER; contentDescription="Poster" }
             body.addView(image,LinearLayout.LayoutParams(-1,dp(240))); Artwork.load(this,type,id,image)
