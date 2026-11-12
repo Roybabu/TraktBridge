@@ -414,6 +414,17 @@ class MainActivity : ComponentActivity() {
         fun label(s: String) { root.addView(txt(s,15,muted)) }
         fun button(s: String, action: () -> Unit) { root.addView(actionButton(s,action)) }
         label("SETTINGS • Account and tracking")
+        button("Device identity") {
+            runCatching { DeviceIdentity.register(this) }.fold({ device ->
+                val field=EditText(this).apply { setText(device.label); filters=arrayOf(android.text.InputFilter.LengthFilter(80)) }
+                android.app.AlertDialog.Builder(this).setTitle("This device")
+                    .setMessage("Device fingerprint: "+device.id+"\nLocal registration only. No playback is shared yet.")
+                    .setView(field).setNegativeButton("Close",null).setPositiveButton("Rename") { _,_->
+                        runCatching { DeviceIdentity.rename(this,field.text.toString()) }.onFailure { Toast.makeText(this,"Invalid device name",Toast.LENGTH_SHORT).show() }
+                    }.show()
+            }, { Toast.makeText(this,"Device registration unavailable",Toast.LENGTH_LONG).show() })
+        }
+
         root.addView(Switch(this).apply { text="Download artwork only on unmetered networks"; isChecked=prefs.getBoolean("artwork_unmetered",false); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("artwork_unmetered",checked).apply() } })
         button("Clear offline catalogue") { getSharedPreferences("offline_catalogue",MODE_PRIVATE).edit().clear().apply() }
         button("Clear cached artwork") { Artwork.clear(this); Toast.makeText(this,"Artwork cache cleanup requested",Toast.LENGTH_SHORT).show() }

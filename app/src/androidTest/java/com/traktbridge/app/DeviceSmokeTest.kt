@@ -18,7 +18,8 @@ class DeviceSmokeTest {
     }
     @Test fun databaseIntegrityAndRecoveryRoundTrip() {
         val context=InstrumentationRegistry.getInstrumentation().targetContext
-        WatchHistory(context).use { db ->
+        val db=WatchHistory(context)
+        try {
             assertTrue(HistoryBackup.integrity(db))
             val id=db.addManualLog("instrumentation","Device smoke test",System.currentTimeMillis()-1000)
             try {
@@ -29,6 +30,14 @@ class DeviceSmokeTest {
             } finally {
                 db.writableDatabase.delete("viewing","id=?",arrayOf(id))
             }
-        }
+        } finally { db.close() }
+    }
+    @Test fun deviceIdentityPersists() {
+        val context=InstrumentationRegistry.getInstrumentation().targetContext
+        val first=DeviceIdentity.register(context)
+        val second=DeviceIdentity.register(context)
+        assertEquals(first.id,second.id)
+        assertArrayEquals(first.publicKey,second.publicKey)
+        assertEquals(64,first.id.length)
     }
 }
