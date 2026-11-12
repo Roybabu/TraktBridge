@@ -26,6 +26,10 @@ class MainActivity : ComponentActivity() {
     private var historyFilter=HistoryFilter()
     private var historyLimit=100
     private var analyticsPeriod=30
+    private var analyticsSource=""
+    private var historyRequest=0L
+    private val historyExecutor=java.util.concurrent.Executors.newSingleThreadExecutor()
+    private var historyTask:java.util.concurrent.Future<*>?=null
     private var calendarMonth=java.time.YearMonth.now()
     private val tvMode:Boolean get()=(getSystemService(android.app.UiModeManager::class.java).currentModeType==android.content.res.Configuration.UI_MODE_TYPE_TELEVISION)
     private val wide:Boolean get()=tvMode || resources.configuration.screenWidthDp>=720
@@ -340,6 +344,7 @@ class MainActivity : ComponentActivity() {
         importSource=savedInstanceState?.getString("import_source") ?: "com.netflix.mediaclient"
         historyFilter=HistoryFilter(savedInstanceState?.getString("filter_q").orEmpty(),savedInstanceState?.getString("filter_source").orEmpty(),savedInstanceState?.getInt("filter_period") ?: 0,savedInstanceState?.getString("filter_type").orEmpty(),savedInstanceState?.getString("filter_status").orEmpty(),savedInstanceState?.getString("filter_sort") ?: "recent")
         analyticsPeriod=savedInstanceState?.getInt("analytics_period") ?: 30
+        analyticsSource=savedInstanceState?.getString("analytics_source").orEmpty()
         calendarMonth=runCatching { java.time.YearMonth.parse(savedInstanceState?.getString("calendar_month").orEmpty()) }.getOrDefault(java.time.YearMonth.now())
         shell=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(bg) }
         shell.setOnApplyWindowInsetsListener { v,insets -> v.setPadding(insets.systemWindowInsetLeft,insets.systemWindowInsetTop,insets.systemWindowInsetRight,insets.systemWindowInsetBottom); insets }
@@ -665,8 +670,8 @@ class MainActivity : ComponentActivity() {
         }.onFailure { DebugTrace.failure("foreground",it); Toast.makeText(this,"Unable to start tracking",Toast.LENGTH_LONG).show() }
     }
     override fun onResume() { super.onResume(); if (::output.isInitialized) refresh(); if (::historyList.isInitialized) refreshHistory() }
-    override fun onDestroy() { if (::history.isInitialized) history.close(); super.onDestroy() }
-    override fun onSaveInstanceState(outState: Bundle) { outState.putInt("tab",tab); outState.putString("import_source",importSource); outState.putString("filter_q",historyFilter.query); outState.putString("filter_source",historyFilter.source); outState.putInt("filter_period",historyFilter.period); outState.putString("filter_type",historyFilter.type); outState.putString("filter_status",historyFilter.status); outState.putString("filter_sort",historyFilter.sort); outState.putInt("analytics_period",analyticsPeriod); outState.putString("calendar_month",calendarMonth.toString()); super.onSaveInstanceState(outState) }
+    override fun onDestroy() { historyRequest++; historyTask?.cancel(true); historyExecutor.shutdownNow(); if (::history.isInitialized) history.close(); super.onDestroy() }
+    override fun onSaveInstanceState(outState: Bundle) { outState.putInt("tab",tab); outState.putString("import_source",importSource); outState.putString("filter_q",historyFilter.query); outState.putString("filter_source",historyFilter.source); outState.putInt("filter_period",historyFilter.period); outState.putString("filter_type",historyFilter.type); outState.putString("filter_status",historyFilter.status); outState.putString("filter_sort",historyFilter.sort); outState.putInt("analytics_period",analyticsPeriod); outState.putString("analytics_source",analyticsSource); outState.putString("calendar_month",calendarMonth.toString()); super.onSaveInstanceState(outState) }
     private fun dp(n:Int)= (n*resources.displayMetrics.density+0.5f).toInt()
     private fun rounded(color:Int,radius:Int=16)=android.graphics.drawable.GradientDrawable().apply { setColor(color); cornerRadius=dp(radius).toFloat() }
     private fun txt(value:String,size:Int=15,color:Int=ink,bold:Boolean=false)=TextView(this).apply {
@@ -689,9 +694,27 @@ class MainActivity : ComponentActivity() {
     }
     private fun refreshHistory() {
         if(!::dashboard.isInitialized || tab==4 || isFinishing || isDestroyed) return
+        val request=++historyRequest
+        val selectedTab=tab
+        historyTask?.cancel(true)
         dashboard.removeAllViews()
-        val records=history.records(0)
-        val groups=ViewingGroups.build(records)
+        dashboard.addView(txt("Loading viewing history…",15,muted))
+        val app=applicationContext
+        historyTask=historyExecutor.submit {
+            val result=runCatching { WatchHistory(app).use { db -> val rows=db.records(0); rows to ViewingGroups.build(rows) } }
+            if(!Thread.currentThread().isInterrupted) runOnUiThread {
+                if(isDestroyed || isFinishing || request!=historyRequest || tab!=selectedTab) return@runOnUiThread
+                result.fold({ (records,groups) -> renderHistory(records,groups) }, {
+                    dashboard.removeAllViews()
+                    dashboard.addView(txt("Viewing history unavailable. Existing data has not been cleared.",15,muted))
+                    dashboard.addView(actionButton("Retry") { refreshHistory() })
+                    dashboard.addView(actionButton("Check database integrity") { checkHistoryIntegrity() })
+                })
+            }
+        }
+    }
+    private fun renderHistory(records:List<WatchRecord>,groups:List<ViewingTitle>) {
+        dashboard.removeAllViews()
         val pending=groups.count { it.queued || it.pending }
         when(tab) {
             0 -> {
@@ -748,24 +771,28 @@ class MainActivity : ComponentActivity() {
                 dashboard.addView(actionButton(if(analyticsPeriod==0) "Period: All time" else "Period: Last "+analyticsPeriod+" days") {
                     val periods=listOf(7,30,90,0); choose("Analytics period",listOf("Last 7 days","Last 30 days","Last 90 days","All time")) { analyticsPeriod=periods[it]; refreshHistory() }
                 })
-                val scoped=ViewingAnalytics.filter(records,HistoryFilter(period=analyticsPeriod))
+                val sources=records.map { it.source }.distinct().sortedBy { appLabel(it) }
+                dashboard.addView(actionButton("Platform: "+analyticsSource.takeIf { it.isNotBlank() }?.let { appLabel(it) }.orEmpty().ifBlank { "All" }) {
+                    choose("Filter viewing activity",listOf("All platforms")+sources.map { appLabel(it) }) { i -> analyticsSource=if(i==0) "" else sources[i-1]; refreshHistory() }
+                })
+                val scoped=ViewingAnalytics.filter(records,HistoryFilter(period=analyticsPeriod,source=analyticsSource))
                 val scopedGroups=ViewingGroups.build(scoped)
                 metricGrid(dashboard,listOf("Sampled watch time" to durationText(scoped.sumOf { it.watched }),"Movies synced" to scopedGroups.count { it.confirmed && it.representative.matchType=="movie" }.toString(),"Episodes synced" to scopedGroups.count { it.confirmed && it.representative.matchType=="episode" }.toString(),"Platforms" to scoped.filter { it.watched>0 }.map { it.source }.distinct().size.toString(),"Paused" to durationText(scoped.sumOf { it.pausedMs }),"Buffering" to durationText(scoped.sumOf { it.bufferingMs }),"Seeks" to scoped.sumOf { it.seeks }.toString(),"Uncertain" to durationText(scoped.sumOf { it.uncertainMs })))
                 dashboard.addView(actionButton("Subscription costs") { subscriptions() })
                 dashboard.addView(actionButton("Streaming service dashboard") { serviceDashboard() })
                 section(dashboard,"Watch time by platform")
-                val totals=scoped.groupBy { it.source }.mapValues { it.value.sumOf { r -> r.watched } }.toList().sortedByDescending { it.second }
+                val totals=ViewingAnalytics.platforms(scoped).map { it.source to it.sampledMs }
                 val max=totals.maxOfOrNull { it.second }?.coerceAtLeast(1) ?: 1
                 val chart=panel(dashboard)
                 if(totals.isEmpty()) chart.addView(txt("No sampled activity yet.",15,muted))
                 totals.forEach { (pkg,time) ->
-                    chart.addView(txt(appLabel(pkg)+" • "+durationText(time),14))
+                    chart.addView(actionButton(appLabel(pkg)+" • "+durationText(time)) { analyticsSource=pkg; refreshHistory() })
                     chart.addView(ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal).apply { progress=(time.toDouble()/max*100).toInt(); progressTintList=android.content.res.ColorStateList.valueOf(violet) },LinearLayout.LayoutParams(-1,dp(12)).apply { bottomMargin=dp(14) })
                 }
                 chart.addView(txt("App-activity and remote history are excluded from sampled time. Date filters use session end date.",13,muted))
                 dashboard.addView(actionButton("Viewing journal and yearly recap") { viewingJournal() })
                 section(dashboard,"Viewing calendar")
-                calendarView(dashboard,records)
+                calendarView(dashboard,if(analyticsSource.isBlank()) records else records.filter { it.source==analyticsSource })
 
             }
         }
@@ -1061,9 +1088,20 @@ class MainActivity : ComponentActivity() {
             val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
             body.addView(txt(report,18,ink,true))
             body.addView(actionButton("Share recap") { startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT,report),"Share viewing recap")) })
-            records.groupBy { ViewingAnalytics.day(it.ended) }.toSortedMap(reverseOrder()).entries.take(60).forEach { (day,items) ->
+            section(body,"Monthly viewing time")
+            val months=ViewingAnalytics.monthly(records,year)
+            val peak=months.maxOf { it.sampledMs }.coerceAtLeast(1)
+            months.forEach { month ->
+                body.addView(actionButton(java.time.Month.of(month.month).name+" • "+durationText(month.sampledMs)+" • "+month.sessions+" sessions") {
+                    calendarMonth=java.time.YearMonth.of(year,month.month); showTab(3)
+                })
+                body.addView(ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal).apply { progress=(month.sampledMs.toDouble()/peak*100).toInt() },LinearLayout.LayoutParams(-1,dp(10)))
+            }
+            section(body,"Recent journal entries")
+            records.groupBy { ViewingAnalytics.day(it.ended) }.toSortedMap(reverseOrder()).entries.take(30).forEach { (day,items) ->
                 section(body,day.toString())
-                items.forEach { r -> body.addView(txt(r.matchLabel.ifBlank { r.title.ifBlank { "Unidentified video" } }+" • "+appLabel(r.source)+" • "+durationText(r.watched),14,muted)) }
+                items.take(20).forEach { r -> body.addView(txt(r.matchLabel.ifBlank { r.title.ifBlank { "Unidentified video" } }+" • "+appLabel(r.source)+" • "+durationText(r.watched),14,muted)) }
+                if(items.size>20) body.addView(txt("More entries in the viewing calendar.",13,muted))
             }
             android.app.AlertDialog.Builder(this).setTitle("Viewing journal").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
         }

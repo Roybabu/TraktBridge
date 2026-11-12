@@ -110,3 +110,6 @@ Personalized recommendations combine up to five confirmed-history seeds using me
 
 ## v0.84.0 development scope
 Mood discovery offers six mood presets, movie/show selection, runtime and rating constraints, and excludes known watched or hidden titles. Genre associations are heuristic; runtime for TV is per episode when provided. Poster decoding validates dimensions and downsamples cached and downloaded images; background artwork work retains application context rather than activity context and skips detached targets. Physical-device memory profiling and live catalogue validation remain outstanding.
+
+## v0.85.0 development scope
+Interactive platform filters, monthly annual recap bars and calendar drill-downs are available. History dashboard queries and grouping run off the UI thread with cancellation and stale-result checks; database failures show a retry and integrity action. Annual totals exclude active sessions and duplicate IDs. Journal rendering is bounded; original history is unchanged. Physical-device startup benchmarks and end-to-end recovery testing remain outstanding. Version 0.85.0 is a release candidate subject to CI and device validation.

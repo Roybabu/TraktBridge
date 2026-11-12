@@ -9,9 +9,18 @@ import java.util.Locale
 data class HistoryFilter(val query:String="",val source:String="",val period:Int=0,val type:String="",val status:String="",val sort:String="recent")
 data class ActivityDay(val date:LocalDate,val sampledMs:Long,val sessions:Int)
 data class AnnualRecap(val sampledMs:Long,val activeDays:Int,val longestStreak:Int,val busiestMonth:Int?,val topSource:String?,val confirmedMovies:Int,val confirmedEpisodes:Int)
+data class MonthlyActivity(val month:Int,val sampledMs:Long,val sessions:Int)
+data class PlatformActivity(val source:String,val sampledMs:Long,val sessions:Int)
 object ViewingAnalytics {
+    fun monthly(records:List<WatchRecord>,year:Int,zone:ZoneId=ZoneId.systemDefault()):List<MonthlyActivity> {
+        val totals=records.distinctBy { it.id }.filter { it.status!="active" && day(it.ended,zone).year==year }.groupBy { day(it.ended,zone).monthValue }
+        return (1..12).map { month -> val rows=totals[month].orEmpty(); MonthlyActivity(month,rows.sumOf { it.watched.coerceAtLeast(0) },rows.size) }
+    }
+    fun platforms(records:List<WatchRecord>):List<PlatformActivity> =
+        records.distinctBy { it.id }.groupBy { it.source }.map { (source,rows) -> PlatformActivity(source,rows.sumOf { it.watched.coerceAtLeast(0) },rows.size) }.sortedWith(compareByDescending<PlatformActivity> { it.sampledMs }.thenBy { it.source })
+
     fun recap(records:List<WatchRecord>,year:Int,zone:ZoneId=ZoneId.systemDefault()):AnnualRecap {
-        val rows=records.filter { it.status!="active" && day(it.ended,zone).year==year }
+        val rows=records.distinctBy { it.id }.filter { it.status!="active" && day(it.ended,zone).year==year }
         val sampled=rows.filter { it.watched>0 }
         val days=sampled.map { day(it.ended,zone) }.distinct().sorted()
         var streak=0; var longest=0; var previous:LocalDate?=null
@@ -41,7 +50,7 @@ object ViewingAnalytics {
     // Existing rows store aggregate sampled duration, not timestamped intervals.
     // Attribute the aggregate to the session end date; never fabricate per-day splits.
     fun calendar(records:List<WatchRecord>,month:YearMonth,zone:ZoneId=ZoneId.systemDefault()):List<ActivityDay> {
-        val byDay=records.groupBy { day(it.ended,zone) }
+        val byDay=records.distinctBy { it.id }.filter { YearMonth.from(day(it.ended,zone))==month }.groupBy { day(it.ended,zone) }
         return (1..month.lengthOfMonth()).map { n ->
             val d=month.atDay(n); val rows=byDay[d].orEmpty()
             ActivityDay(d,rows.sumOf { it.watched.coerceAtLeast(0) },rows.size)
