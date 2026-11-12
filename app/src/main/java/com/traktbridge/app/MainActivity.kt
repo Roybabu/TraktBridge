@@ -567,6 +567,7 @@ class MainActivity : Activity() {
                     chart.addView(ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal).apply { progress=(time.toDouble()/max*100).toInt(); progressTintList=android.content.res.ColorStateList.valueOf(violet) },LinearLayout.LayoutParams(-1,dp(12)).apply { bottomMargin=dp(14) })
                 }
                 chart.addView(txt("App-activity and remote history are excluded from sampled time. Date filters use session end date.",13,muted))
+                dashboard.addView(actionButton("Viewing journal and yearly recap") { viewingJournal() })
                 section(dashboard,"Viewing calendar")
                 calendarView(dashboard,records)
 
@@ -614,6 +615,25 @@ class MainActivity : Activity() {
                 },now.hour,now.minute,true).show()
             },now.year,now.monthValue-1,now.dayOfMonth).show()
         }.show()
+    }
+    private fun viewingJournal() {
+        val rows=history.records(0).filter { it.status!="active" }
+        val years=rows.map { ViewingAnalytics.day(it.ended).year }.distinct().sortedDescending()
+        choose("Viewing year",years.map { it.toString() }) { index ->
+            val year=years[index]
+            val records=rows.filter { ViewingAnalytics.day(it.ended).year==year }
+            val groups=ViewingGroups.build(records)
+            val total=records.sumOf { it.watched }
+            val report="TraktBridge • "+year+" viewing recap\nSampled time: "+durationText(total)+"\nMovies synced: "+groups.count { it.confirmed && it.representative.matchType=="movie" }+"\nEpisodes synced: "+groups.count { it.confirmed && it.representative.matchType=="episode" }+"\nSessions: "+records.size
+            val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
+            body.addView(txt(report,18,ink,true))
+            body.addView(actionButton("Share recap") { startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT,report),"Share viewing recap")) })
+            records.groupBy { ViewingAnalytics.day(it.ended) }.toSortedMap(reverseOrder()).entries.take(60).forEach { (day,items) ->
+                section(body,day.toString())
+                items.forEach { r -> body.addView(txt(r.matchLabel.ifBlank { r.title.ifBlank { "Unidentified video" } }+" • "+appLabel(r.source)+" • "+durationText(r.watched),14,muted)) }
+            }
+            android.app.AlertDialog.Builder(this).setTitle("Viewing journal").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
+        }
     }
     private fun liveInspector() {
         val body=TextView(this).apply { setPadding(dp(16),dp(12),dp(16),dp(12)); setTextIsSelectable(true) }
