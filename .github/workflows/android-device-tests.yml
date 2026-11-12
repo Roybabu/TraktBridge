@@ -20,7 +20,7 @@ jobs:
             profile: phone
           - api: 35
             profile: tablet
-          - api: 34
+          - api: 31
             profile: tv
     steps:
       - uses: actions/checkout@v4
@@ -39,7 +39,7 @@ jobs:
       - uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: ${{ matrix.api }}
-          arch: x86_64
+          arch: ${{ matrix.profile == 'tv' && 'x86' || 'x86_64' }}
           target: ${{ matrix.profile == 'tv' && 'android-tv' || 'google_apis' }}
           disable-animations: true
           script: |

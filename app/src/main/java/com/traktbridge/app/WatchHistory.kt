@@ -63,7 +63,7 @@ class WatchHistory(context: Context): SQLiteOpenHelper(context.applicationContex
     }
     override fun onConfigure(db:SQLiteDatabase) {
         super.onConfigure(db)
-        db.execSQL("PRAGMA secure_delete=ON")
+        db.rawQuery("PRAGMA secure_delete=ON",null).use { cursor -> check(cursor.moveToFirst() && cursor.getInt(0)==1) { "Unable to enable secure deletion" } }
     }
     fun pendingNotifications(): List<WatchRecord> {
         val ids=mutableListOf<String>()
