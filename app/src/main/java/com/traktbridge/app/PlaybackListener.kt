@@ -92,21 +92,24 @@ class PlaybackListener : NotificationListenerService() {
             val hint=if(playing) TitleAccessibility.hint(this,c.packageName,now-120000,now) else null
             val prior=retained[key]
             val real=direct.takeIf { PlayerRules.validTitle(it) } ?: note.takeIf { PlayerRules.validTitle(it) }
-            val title=real ?: prior?.first ?: hint?.first.orEmpty()
-            val subtitle=m?.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE)?.takeIf { it.isNotBlank() } ?: prior?.second ?: hint?.second.orEmpty()
+            val title=real ?: hint?.first ?: prior?.first.orEmpty()
+            val subtitle=m?.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE)?.takeIf { it.isNotBlank() } ?: hint?.takeIf { it.first==title }?.second ?: prior?.takeIf { it.first==title }?.second.orEmpty()
             if(playing && title.isNotBlank()) retained[key]=title to subtitle
             if(p?.state in setOf(PlaybackState.STATE_STOPPED,PlaybackState.STATE_NONE,PlaybackState.STATE_ERROR)) retained.remove(key)
-            val duration=m?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L
-            val position=PlaybackPosition.sanitize(p?.position ?: -1L,duration)
+            val mediaDuration=m?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L
+            val mediaPosition=PlaybackPosition.sanitize(p?.position ?: -1L,mediaDuration)
+            val screen=if(playing && mediaPosition<0) TitleAccessibility.timing(this,c.packageName,title,now) else null
+            val duration=screen?.duration ?: mediaDuration
+            val position=screen?.position ?: mediaPosition
             if(playing && p!=null && p.position>=0 && position<0) DebugTrace.event("progress","package="+c.packageName+" rejected position without valid runtime")
             samples.add(WatchSample(key,c.packageName,title,subtitle,duration,position,playing))
             rows.put(JSONObject().apply {
                 put("package", c.packageName)
-                put("title", m?.getString(MediaMetadata.METADATA_KEY_TITLE) ?: "")
+                put("title", title)
                 put("displayTitle", m?.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE) ?: "")
-                put("subtitle", m?.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE) ?: "")
-                put("durationMs", m?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L)
-                put("positionMs", p?.position ?: -1L)
+                put("subtitle", subtitle)
+                put("durationMs", duration)
+                put("positionMs", position)
                 put("state", p?.state ?: 0)
                 put("sampledAt", System.currentTimeMillis())
             })

@@ -45,3 +45,6 @@ Shared player-control rules and app catalog cover major streaming and local play
 
 ## Pre-playback identification (0.9.3)
 Optional accessibility title suggestions recognize a unique video detail heading near a play action and retain a candidate within an active media session. Inspector reports structural resource IDs, node classes and counts without screen text. Invalid positions without credible runtime are excluded. Confirmed Trakt matches store catalogue runtime separately from player progress; remaining time stays unknown when position is unavailable. All suggestions require review.
+
+## Full-player layout recognition (0.9.4)
+Accessibility labels use normalized window coordinates across portrait and landscape top, bottom and side regions. Playback controls and seek bars establish player context, ambiguous titles are rejected, and explicit elapsed/negative remaining timer pairs can supply progress when media metadata lacks it. Timer observations expire and are tied to the candidate title. No screen capture or raw text logging.

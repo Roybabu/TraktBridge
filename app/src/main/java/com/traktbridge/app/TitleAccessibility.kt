@@ -5,6 +5,7 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.content.Context
 import android.os.Build
+import android.graphics.Rect
 
 class TitleAccessibility: AccessibilityService() {
     private val prefs by lazy { getSharedPreferences("tracker",MODE_PRIVATE) }
@@ -23,6 +24,8 @@ class TitleAccessibility: AccessibilityService() {
         lastScan=now
         val root=rootInActiveWindow ?: return
         if(root.packageName?.toString()!=pkg) return
+        val window=Rect().also { root.getBoundsInScreen(it) }
+        if(window.width()<=0 || window.height()<=0) return
         val labels=mutableListOf<ScreenLabel>()
         val ids=linkedSetOf<String>()
         val classes=linkedSetOf<String>()
@@ -38,22 +41,29 @@ class TitleAccessibility: AccessibilityService() {
             if(PlayerRules.isPlayer(id)) player=true
             if(node.isVisibleToUser) {
                 val value=(node.text ?: node.contentDescription)?.toString()?.trim().orEmpty()
-                if(value.isNotBlank()) {
-                    textNodes++
+                val seek=cls=="SeekBar" || id.contains("seekbar") || id.contains("seek_bar") || id=="exo_progress"
+                if(value.isNotBlank() || seek) {
+                    if(value.isNotBlank()) textNodes++
                     val heading=Build.VERSION.SDK_INT>=28 && node.isHeading
                     val button=cls=="Button" || node.isClickable
-                    if(value.length<=160 && (heading || button || id.isNotBlank() || PlayerRules.titleId(pkg,id,player))) labels.add(ScreenLabel(id,value,heading,button))
+                    val rect=Rect().also { node.getBoundsInScreen(it) }
+                    if(value.length<=160 && rect.width()>0 && rect.height()>0) labels.add(ScreenLabel(id,value,heading,button,
+                        (rect.exactCenterX()-window.left)/window.width().toDouble(),(rect.exactCenterY()-window.top)/window.height().toDouble(),
+                        rect.width()/window.width().toDouble(),rect.height()/window.height().toDouble(),seek))
                 }
             }
             for(i in 0 until node.childCount) node.getChild(i)?.let { walk(it,depth+1) }
         }
         walk(root,0)
+        player=ContentRecognition.playerContext(labels,player)
         val hint=ContentRecognition.detect(pkg,labels,player)
+        val timing=ContentRecognition.timing(labels,player)
+        if(timing!=null && hint!=null && hint.kind!="details") prefs.edit().putLong("screen_position:"+pkg,timing.position).putLong("screen_duration:"+pkg,timing.duration).putLong("screen_time:"+pkg,now).putString("screen_title:"+pkg,hint.title).apply()
         DebugTrace.event("title","package="+pkg+" player="+player+" textNodes="+textNodes+" candidate="+(hint?.kind ?: "none"))
         if(prefs.getBoolean("player_inspector",false)) {
             // Structural metadata only: no text, content descriptions, credentials or URLs in reports.
             DebugTrace.event("inspector","package="+pkg+" nodes="+count+" textNodes="+textNodes+" ids="+ids.take(60).joinToString(","))
-            DebugTrace.event("inspector","package="+pkg+" classes="+classes.take(25).joinToString(",")+" headings="+labels.count { it.heading }+" buttons="+labels.count { it.button })
+            DebugTrace.event("inspector","package="+pkg+" classes="+classes.take(25).joinToString(",")+" headings="+labels.count { it.heading }+" buttons="+labels.count { it.button }+" top="+labels.count { it.y in 0.0..0.30 }+" bottom="+labels.count { it.y in 0.70..1.0 }+" seek="+labels.count { it.seek }+" timerPair="+(timing!=null))
         }
         if(hint==null) return
         prefs.edit().putString("title_hint:"+pkg,hint.title).putString("title_detail:"+pkg,hint.detail).putLong("title_time:"+pkg,now).apply()
@@ -61,6 +71,12 @@ class TitleAccessibility: AccessibilityService() {
     override fun onInterrupt() { DebugTrace.event("title","interrupted") }
     override fun onDestroy() { prefs.edit().putBoolean("title_connected",false).apply(); super.onDestroy() }
     companion object {
+        fun timing(context:Context,pkg:String,title:String,now:Long):ContentRecognition.PlayerTime? {
+            val p=context.getSharedPreferences("tracker",Context.MODE_PRIVATE)
+            if(!p.getBoolean("title_optin",false) || title.isBlank() || p.getString("screen_title:"+pkg,"")!=title || now-p.getLong("screen_time:"+pkg,0) !in 0..8000) return null
+            val pos=p.getLong("screen_position:"+pkg,-1); val dur=p.getLong("screen_duration:"+pkg,0)
+            return if(PlaybackPosition.valid(pos,dur)) ContentRecognition.PlayerTime(pos,dur) else null
+        }
         fun hint(context:Context,pkg:String,start:Long,end:Long):Pair<String,String>? {
             val p=context.getSharedPreferences("tracker",Context.MODE_PRIVATE)
             if(!p.getBoolean("title_optin",false) || pkg !in (p.getStringSet("allowed",emptySet()) ?: emptySet())) return null
