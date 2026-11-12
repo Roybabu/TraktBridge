@@ -536,6 +536,12 @@ class MainActivity : Activity() {
             }
         }
     }
+    private fun openTraktWatchPage(type:String,id:Long) {
+        if(type !in setOf("movie","show") || id<=0) return
+        // Resolve only through the official Trakt ID redirect; availability is not asserted.
+        val url="https://trakt.tv/"+RemoteRules.plural(type)+"/"+id
+        runCatching { startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse(url))) }.onFailure { Toast.makeText(this,"No browser available",Toast.LENGTH_LONG).show() }
+    }
     private fun openPlaybackApp(sources:List<String>) {
         val installed=sources.distinct().mapNotNull { pkg -> packageManager.getLaunchIntentForPackage(pkg)?.let { pkg to it } }
         if(installed.isEmpty()) { Toast.makeText(this,"No recorded playback app is installed or launchable",Toast.LENGTH_LONG).show(); return }
@@ -592,6 +598,7 @@ class MainActivity : Activity() {
             if(d.rating>0) body.addView(txt("Trakt rating: "+String.format(java.util.Locale.US,"%.1f",d.rating)+"/10",16,violet))
             body.addView(txt(d.overview.ifBlank { "No overview available" },16))
             if(d.released.isNotBlank()) body.addView(txt("Release: "+d.released,13,muted))
+            body.addView(actionButton("Check title on Trakt (availability varies by region)") { openTraktWatchPage(type,id) })
             body.addView(actionButton("Watchlist / rating") { lookup("Checking account",{ done -> TraktLibrary.accountId(this,done) }) { account:String -> remoteActions(RemoteItem(type,id,d.title),account) } })
             if(d.trailer.startsWith("https://")) body.addView(actionButton("Open trailer") { runCatching { startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse(d.trailer))) } })
             android.app.AlertDialog.Builder(this).setTitle("Title details").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
