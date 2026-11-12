@@ -1,0 +1,5 @@
+# Live database protection and migration gate (0.164.0)
+
+The live SQLite database is not encrypted. Android application sandbox and device file encryption are not equivalent to application-level database encryption. This release enables SQLite secure_delete for subsequently deleted rows, retains existing indexes, and fixes API 26 database helper closing in backup and sync workers.
+
+A future live encryption migration must use a supported SQLCipher or equivalent dependency, preserve every table including approval/account state, learned mappings, provider refs, and device history, and verify integrity, counts, keys, and rollback before switching the live database. Never restore upload approvals through a normal user backup. The existing AES-GCM local backup protects a recovery subset; it is not a full lossless database migration image. Do not delete the original database or migrate while tracking or pending/uncertain/blocked uploads exist. Test process death, insufficient space, key invalidation, API 26 and TV architectures, and permanent signed upgrades. No automatic migration is enabled.
