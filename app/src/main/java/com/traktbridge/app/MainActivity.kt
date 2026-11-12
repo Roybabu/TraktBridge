@@ -372,6 +372,7 @@ class MainActivity : ComponentActivity() {
         root.addView(Switch(this).apply { text="Download artwork only on unmetered networks"; isChecked=prefs.getBoolean("artwork_unmetered",false); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("artwork_unmetered",checked).apply() } })
         button("Clear offline catalogue") { getSharedPreferences("offline_catalogue",MODE_PRIVATE).edit().clear().apply() }
         button("Check for app updates") { checkUpdates() }
+        button("Beta feedback and diagnostics") { betaFeedback() }
         root.addView(Switch(this).apply { text="Hide catalogue spoilers"; isChecked=prefs.getBoolean("hide_spoilers",true); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("hide_spoilers",checked).apply() } })
         root.addView(Switch(this).apply { text="High contrast text"; isChecked=prefs.getBoolean("high_contrast",false); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("high_contrast",checked).apply(); recreate() } })
         button("Text size") { choose("Reading size",listOf("System default","Large","Extra large")) { prefs.edit().putInt("reading_size",it).apply(); recreate() } }
@@ -495,6 +496,14 @@ class MainActivity : ComponentActivity() {
         handleTrackingShortcut(intent)
         handleAutomation(intent)
         if(!prefs.getBoolean("setup_seen",false)) { prefs.edit().putBoolean("setup_seen",true).apply(); setupGuide() }
+    }
+    private fun betaFeedback() {
+        val field=EditText(this).apply { hint="Describe the issue and steps to reproduce"; minLines=4; maxLines=8 }
+        val info=packageManager.getPackageInfo(packageName,0).versionName.orEmpty()
+        android.app.AlertDialog.Builder(this).setTitle("Beta feedback").setMessage("Review your text before sharing. No viewing history, account credentials or diagnostic logs are attached automatically.").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Share") { _,_->
+            val report="TraktBridge "+info+"\nAndroid "+android.os.Build.VERSION.SDK_INT+"\n"+field.text.toString().trim().take(4000)
+            runCatching { startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT,report),"Share beta feedback")) }.onFailure { Toast.makeText(this,"No sharing app available",Toast.LENGTH_LONG).show() }
+        }.show()
     }
     private fun checkUpdates() {
         lookup("Checking GitHub",{ done -> UpdateCheck.check(done) }) { latest:String ->

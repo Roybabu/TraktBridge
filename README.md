@@ -149,3 +149,6 @@ Privacy dashboard exposes tracking, screen protection, credential lock, backup a
 
 ## v0.97.0
 Automated deterministic playback soak simulation covers 24 hours of five-second samples, repeated gaps, pauses and navigation/identity integration. This is a JVM simulation, not a physical-device endurance test or Android UI instrumentation suite; those remain outstanding.
+
+## v0.98.0
+User-initiated beta feedback sharing includes app version and Android API level only by default, plus user-entered text. A physical-device acceptance checklist is provided. No beta testing has been certified.
