@@ -29,3 +29,37 @@ fun BridgeHeader(accent:Int,onSearch:()->Unit) {
         }
     }
 }
+
+@Composable
+fun BridgeHomeSummary(accent:Int,live:Boolean,pending:Int,weekly:String,onTracking:()->Unit,onReview:()->Unit,onDiscover:()->Unit,onPlanner:()->Unit) {
+    BridgeTheme(accent) {
+        Card(Modifier.fillMaxWidth().padding(vertical=6.dp),colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surface)) {
+            Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+                Text(if(live) "Tracking active" else "Tracking inactive",color=if(live) Color(0xff6ee7b7) else Color(0xfffbbf24),fontWeight=FontWeight.SemiBold)
+                Text(weekly+" sampled this week",style=MaterialTheme.typography.headlineSmall)
+                Text(pending.toString()+" titles awaiting review or sync",style=MaterialTheme.typography.bodyMedium)
+                Button(onClick=onTracking,modifier=Modifier.fillMaxWidth()) { Text("Tracking settings") }
+                Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick=onReview,modifier=Modifier.weight(1f)) { Text("Review") }
+                    OutlinedButton(onClick=onDiscover,modifier=Modifier.weight(1f)) { Text("Discover") }
+                }
+                TextButton(onClick=onPlanner) { Text("Plan a watch") }
+            }
+        }
+    }
+}
+
+@Composable
+fun BridgeLibraryToolbar(accent:Int,summary:String,onSearch:()->Unit,onFilter:()->Unit,onManual:()->Unit) {
+    BridgeTheme(accent) {
+        Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background),verticalArrangement=Arrangement.spacedBy(4.dp)) {
+            Text("Your library",style=MaterialTheme.typography.headlineSmall,color=MaterialTheme.colorScheme.onSurface)
+            Text(summary,color=MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.bodySmall)
+            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+                Button(onClick=onSearch,modifier=Modifier.weight(1f)) { Text("Search") }
+                OutlinedButton(onClick=onFilter,modifier=Modifier.weight(1f)) { Text("Filters") }
+            }
+            TextButton(onClick=onManual) { Text("Log a watch") }
+        }
+    }
+}

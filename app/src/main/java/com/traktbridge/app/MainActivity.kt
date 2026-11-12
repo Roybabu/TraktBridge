@@ -588,14 +588,10 @@ class MainActivity : ComponentActivity() {
         val pending=groups.count { it.queued || (it.pending && !it.confirmed) }
         when(tab) {
             0 -> {
-                val status=panel(dashboard)
                 val age=System.currentTimeMillis()-prefs.getLong("last_sample",0)
-                val live=prefs.getBoolean("enabled",false) && age in 0..20000
-                status.addView(txt(if(live) "●  TRACKING ACTIVE" else "○  TRACKING NOT ACTIVE",12,if(live) 0xff6ee7b7.toInt() else 0xfffbbf24.toInt(),true))
-                status.addView(txt(if(live) "Ready to track selected apps" else "Start playback tracking",22,ink,true))
-                status.addView(txt("Only confirmed completed watches sync to Trakt.",14,muted))
-                status.addView(actionButton(if(live) "Tracking settings" else "Start tracking") { if(live) showTab(4) else { prefs.edit().putBoolean("enabled",true).apply(); startTracking(); showTab(4) } })
+                val live=prefs.getBoolean("enabled",false) && prefs.getBoolean("listener_connected",false) && age in 0..20000
                 val weekly=ViewingAnalytics.filter(records,HistoryFilter(period=7))
+                dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeHomeSummary(violet,live,pending,durationText(weekly.sumOf { it.watched }),{ showTab(4) },{ showTab(2) },{ discover() },{ viewingPlanner() }) } })
                 metricGrid(dashboard,listOf("This week" to durationText(weekly.sumOf { it.watched }),"Movies synced" to groups.count { it.confirmed && it.representative.matchType=="movie" }.toString(),"Episodes synced" to groups.count { it.confirmed && it.representative.matchType=="episode" }.toString(),"Needs review" to pending.toString()))
                 section(dashboard,"Now watching")
                 val active=groups.filter { it.active }
@@ -606,11 +602,9 @@ class MainActivity : ComponentActivity() {
                 if(continuing.isEmpty()) panel(dashboard).addView(txt("No unfinished sampled viewing yet.",15,muted)) else cards(dashboard,continuing.drop(1).take(6)) { parent,g -> titleCard(parent,g,false) }
                 section(dashboard,"Review queue")
                 val q=panel(dashboard); q.addView(txt("$pending awaiting action",22,ink,true)); q.addView(actionButton("Open review queue") { showTab(2) }); q.addView(actionButton("Review app activity") { reviewUsage() })
-                dashboard.addView(actionButton("Plan your next watch") { viewingPlanner() })
                 dashboard.addView(actionButton("Upcoming episodes") { upcomingEpisodes() })
                 dashboard.addView(actionButton("Recommendations from your history") { recommendFromHistory() })
                 dashboard.addView(actionButton("Anime catalogue (AniList)") { animeSearch() })
-                dashboard.addView(actionButton("Discover movies and shows") { discover() })
                 dashboard.addView(actionButton("Open Trakt account library") { openTraktLibrary() })
                 section(dashboard,"Recently watched")
                 val recent=groups.filter { !it.active }.take(5)
