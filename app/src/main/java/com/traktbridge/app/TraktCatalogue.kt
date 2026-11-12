@@ -9,7 +9,7 @@ import java.net.URLEncoder
 import java.util.concurrent.Executors
 import javax.net.ssl.HttpsURLConnection
 
-data class CatalogueItem(val type: String, val id: Long, val title: String, val year: Int = 0, val showId: Long = 0, val season: Int = -1, val episode: Int = -1) {
+data class CatalogueItem(val type: String, val id: Long, val title: String, val year: Int = 0, val showId: Long = 0, val season: Int = -1, val episode: Int = -1, val runtimeMinutes: Int = 0) {
     fun label(): String = if (type == "episode") title + " • S" + season + " E" + episode else title + (if (year > 0) " (" + year + ")" else "") + " • " + type
 }
 data class CatalogueSeason(val number: Int, val title: String)
@@ -39,10 +39,10 @@ object TraktCatalogue {
         require(type == "movie" || type == "show")
         require(query.isNotBlank())
         val q = URLEncoder.encode(query.trim(), "UTF-8")
-        objects(get("/search/" + type + "?query=" + q + "&limit=30")).mapNotNull { row ->
+        objects(get("/search/" + type + "?query=" + q + "&limit=30&extended=full")).mapNotNull { row ->
             val o = row.optJSONObject(type) ?: return@mapNotNull null
             val id = id(o); val title = o.optString("title")
-            if (id <= 0 || title.isBlank()) null else CatalogueItem(type,id,title,o.optInt("year"))
+            if (id <= 0 || title.isBlank()) null else CatalogueItem(type,id,title,o.optInt("year"),runtimeMinutes=o.optInt("runtime"))
         }.distinctBy { it.id }
     }
     fun seasons(show: CatalogueItem, done: (Result<List<CatalogueSeason>>) -> Unit) = request(done) {
@@ -54,9 +54,9 @@ object TraktCatalogue {
     }
     fun episodes(show: CatalogueItem, season: Int, done: (Result<List<CatalogueItem>>) -> Unit) = request(done) {
         require(show.type == "show" && show.id > 0 && season >= 0)
-        objects(get("/shows/" + show.id + "/seasons/" + season)).mapNotNull { o ->
+        objects(get("/shows/" + show.id + "/seasons/" + season + "?extended=full")).mapNotNull { o ->
             val n = o.optInt("number",-1); val eid = id(o)
-            if (n <= 0 || eid <= 0) null else CatalogueItem("episode",eid,show.title + " — " + o.optString("title","Episode " + n),show.year,show.id,season,n)
+            if (n <= 0 || eid <= 0) null else CatalogueItem("episode",eid,show.title + " — " + o.optString("title","Episode " + n),show.year,show.id,season,n,o.optInt("runtime"))
         }.distinctBy { it.id }.sortedBy { it.episode }
     }
     fun suggestedQuery(title: String): String = TitleNormalizer.suggestedQuery(title)

@@ -16,6 +16,7 @@ class PlaybackListener : NotificationListenerService() {
     private val prefs by lazy { getSharedPreferences("tracker", MODE_PRIVATE) }
     private var lastUsageCheck=0L
     private var lastTick=0L
+    private val retained=mutableMapOf<String,Pair<String,String>>()
     private val mediaTitles=mutableMapOf<String,Pair<Long,String>>()
     override fun onNotificationPosted(sbn: android.service.notification.StatusBarNotification?) {
         val n=sbn ?: return
@@ -68,7 +69,7 @@ class PlaybackListener : NotificationListenerService() {
         if(lastTick>0 && tick-lastTick>12000) DebugTrace.event("sampling","gapMs="+(tick-lastTick))
         lastTick=tick
         prefs.edit().putLong("last_sample",System.currentTimeMillis()).remove("sample_error").apply()
-        if (!prefs.getBoolean("enabled", false)) { DebugTrace.event("sampling","disabled"); history.finishAll(); prefs.edit().remove("sessions").apply(); return }
+        if (!prefs.getBoolean("enabled", false)) { DebugTrace.event("sampling","disabled"); history.finishAll(); retained.clear(); prefs.edit().remove("sessions").apply(); return }
         val allowed = prefs.getStringSet("allowed", emptySet()) ?: emptySet()
         val sessions = try {
             getSystemService(MediaSessionManager::class.java).getActiveSessions(ComponentName(this, PlaybackListener::class.java))
@@ -76,16 +77,29 @@ class PlaybackListener : NotificationListenerService() {
         DebugTrace.event("sampling","all="+sessions.size+" selected="+sessions.count { it.packageName in allowed }+" allowed="+allowed.size)
         val rows = JSONArray()
         val samples = mutableListOf<WatchSample>()
-        sessions.filter { it.packageName in allowed }.forEach { c ->
+        val selected=sessions.filter { it.packageName in allowed }
+        val keys=selected.map { it.packageName+":"+it.sessionToken.hashCode() }.toSet()
+        retained.keys.retainAll(keys)
+        selected.forEach { c ->
             val m = c.metadata
             val p = c.playbackState
             DebugTrace.event("media","selected package="+c.packageName+" metadata="+(m!=null)+" titlePresent="+(!m?.getString(MediaMetadata.METADATA_KEY_TITLE).isNullOrBlank() || !m?.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE).isNullOrBlank())+" state="+(p?.state ?: -1)+" positionMs="+(p?.position ?: -1)+" durationMs="+(m?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0))
             val direct=m?.getString(MediaMetadata.METADATA_KEY_TITLE)?.takeIf { PlayerRules.validTitle(it) } ?: m?.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE).orEmpty()
             val now=System.currentTimeMillis()
             val note=mediaTitles[c.packageName]?.takeIf { now-it.first in 0..120000 }?.second.orEmpty()
-            val title=direct.takeIf { PlayerRules.validTitle(it) } ?: note.takeIf { PlayerRules.validTitle(it) } ?: TitleAccessibility.hint(this,c.packageName,now-120000,now)?.first.orEmpty()
-            val subtitle = m?.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE).orEmpty()
-            samples.add(WatchSample(c.packageName + ":" + c.sessionToken.hashCode(), c.packageName, title, subtitle, m?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L, p?.position ?: -1L, p?.state == PlaybackState.STATE_PLAYING))
+            val key=c.packageName+":"+c.sessionToken.hashCode()
+            val playing=p?.state==PlaybackState.STATE_PLAYING
+            val hint=if(playing) TitleAccessibility.hint(this,c.packageName,now-120000,now) else null
+            val prior=retained[key]
+            val real=direct.takeIf { PlayerRules.validTitle(it) } ?: note.takeIf { PlayerRules.validTitle(it) }
+            val title=real ?: prior?.first ?: hint?.first.orEmpty()
+            val subtitle=m?.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE)?.takeIf { it.isNotBlank() } ?: prior?.second ?: hint?.second.orEmpty()
+            if(playing && title.isNotBlank()) retained[key]=title to subtitle
+            if(p?.state in setOf(PlaybackState.STATE_STOPPED,PlaybackState.STATE_NONE,PlaybackState.STATE_ERROR)) retained.remove(key)
+            val duration=m?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L
+            val position=PlaybackPosition.sanitize(p?.position ?: -1L,duration)
+            if(playing && p!=null && p.position>=0 && position<0) DebugTrace.event("progress","package="+c.packageName+" rejected position without valid runtime")
+            samples.add(WatchSample(key,c.packageName,title,subtitle,duration,position,playing))
             rows.put(JSONObject().apply {
                 put("package", c.packageName)
                 put("title", m?.getString(MediaMetadata.METADATA_KEY_TITLE) ?: "")

@@ -42,3 +42,6 @@ History, dashboard and statistics group all stored sessions by confirmed movie o
 
 ## Expanded player detection (0.9.2)
 Shared player-control rules and app catalog cover major streaming and local players; any installed video app can be selected, including regional variants. Candidate IDs are heuristics, not verified adapters for every app version. MediaStyle notifications supplement missing MediaSession titles. Optional Player Inspector logs recognized resource IDs and counts only, not screen text or credentials. Protected or inaccessible titles remain unidentified; no screenshots or DRM bypass. Enable title detection and inspector explicitly, show playback controls during testing, and export diagnostics.
+
+## Pre-playback identification (0.9.3)
+Optional accessibility title suggestions recognize a unique video detail heading near a play action and retain a candidate within an active media session. Inspector reports structural resource IDs, node classes and counts without screen text. Invalid positions without credible runtime are excluded. Confirmed Trakt matches store catalogue runtime separately from player progress; remaining time stays unknown when position is unavailable. All suggestions require review.

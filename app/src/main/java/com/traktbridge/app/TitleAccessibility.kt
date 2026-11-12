@@ -4,9 +4,8 @@ import android.accessibilityservice.AccessibilityService
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.content.Context
+import android.os.Build
 
-// Only inspect selected video packages, and only explicit player-title identifiers.
-// Do not collect arbitrary screen text, credentials, screenshots or input events.
 class TitleAccessibility: AccessibilityService() {
     private val prefs by lazy { getSharedPreferences("tracker",MODE_PRIVATE) }
     private var lastScan=0L
@@ -24,36 +23,47 @@ class TitleAccessibility: AccessibilityService() {
         lastScan=now
         val root=rootInActiveWindow ?: return
         if(root.packageName?.toString()!=pkg) return
-        val candidates=mutableListOf<Pair<String,String>>()
-        val inspected=linkedSetOf<String>()
+        val labels=mutableListOf<ScreenLabel>()
+        val ids=linkedSetOf<String>()
+        val classes=linkedSetOf<String>()
         var player=false
         var count=0
-        fun walk(node: AccessibilityNodeInfo,depth: Int,inPlayer:Boolean=false) {
-            if(depth>20 || ++count>350 || node.packageName?.toString()!=pkg || node.isPassword) return
+        var textNodes=0
+        fun walk(node: AccessibilityNodeInfo,depth:Int) {
+            if(depth>20 || ++count>350 || node.packageName?.toString()!=pkg || node.isPassword || node.isEditable) return
             val id=PlayerRules.id(node.viewIdResourceName.orEmpty())
-            val within=inPlayer || PlayerRules.isPlayer(id)
+            val cls=node.className?.toString()?.substringAfterLast('.').orEmpty()
+            if(id.matches(Regex("[a-z0-9_]{1,80}"))) ids.add(id)
+            if(cls.matches(Regex("[A-Za-z0-9_]{1,80}"))) classes.add(cls)
             if(PlayerRules.isPlayer(id)) player=true
-            if(PlayerRules.inspectId(id) && id.matches(Regex("[a-z0-9_]{1,80}"))) inspected.add(id)
-            if(PlayerRules.titleId(pkg,id,within)) {
+            if(node.isVisibleToUser) {
                 val value=(node.text ?: node.contentDescription)?.toString()?.trim().orEmpty()
-                if(PlayerRules.validTitle(value) && node.isVisibleToUser) candidates.add(id to value)
+                if(value.isNotBlank()) {
+                    textNodes++
+                    val heading=Build.VERSION.SDK_INT>=28 && node.isHeading
+                    val button=cls=="Button" || node.isClickable
+                    if(value.length<=160 && (heading || button || id.isNotBlank() || PlayerRules.titleId(pkg,id,player))) labels.add(ScreenLabel(id,value,heading,button))
+                }
             }
-            for(i in 0 until node.childCount) node.getChild(i)?.let { walk(it,depth+1,within) }
+            for(i in 0 until node.childCount) node.getChild(i)?.let { walk(it,depth+1) }
         }
         walk(root,0)
-        DebugTrace.event("title","selected package="+pkg+" playerHint="+player+" candidateCount="+candidates.size)
-        if(prefs.getBoolean("player_inspector",false)) DebugTrace.event("inspector","package="+pkg+" nodes="+count+" player="+player+" ids="+inspected.take(40).joinToString(","))
-        if(!player || candidates.isEmpty()) return
-        val title=candidates.firstOrNull { it.first.contains("show_title") }?.second ?: candidates.firstOrNull { !PlayerRules.detailId(it.first) }?.second ?: candidates.firstOrNull { it.first=="episode_title" || it.first=="player_episode_title" }?.second ?: return
-        val detail=candidates.firstOrNull { it.second!=title && PlayerRules.detailId(it.first) }?.second.orEmpty()
-        prefs.edit().putString("title_hint:"+pkg,title).putString("title_detail:"+pkg,detail).putLong("title_time:"+pkg,now).apply()
+        val hint=ContentRecognition.detect(pkg,labels,player)
+        DebugTrace.event("title","package="+pkg+" player="+player+" textNodes="+textNodes+" candidate="+(hint?.kind ?: "none"))
+        if(prefs.getBoolean("player_inspector",false)) {
+            // Structural metadata only: no text, content descriptions, credentials or URLs in reports.
+            DebugTrace.event("inspector","package="+pkg+" nodes="+count+" textNodes="+textNodes+" ids="+ids.take(60).joinToString(","))
+            DebugTrace.event("inspector","package="+pkg+" classes="+classes.take(25).joinToString(",")+" headings="+labels.count { it.heading }+" buttons="+labels.count { it.button })
+        }
+        if(hint==null) return
+        prefs.edit().putString("title_hint:"+pkg,hint.title).putString("title_detail:"+pkg,hint.detail).putLong("title_time:"+pkg,now).apply()
     }
     override fun onInterrupt() { DebugTrace.event("title","interrupted") }
     override fun onDestroy() { prefs.edit().putBoolean("title_connected",false).apply(); super.onDestroy() }
     companion object {
-        fun hint(context: Context,pkg: String,start: Long,end: Long): Pair<String,String>? {
+        fun hint(context:Context,pkg:String,start:Long,end:Long):Pair<String,String>? {
             val p=context.getSharedPreferences("tracker",Context.MODE_PRIVATE)
-            if(!p.getBoolean("title_optin",false)) return null
+            if(!p.getBoolean("title_optin",false) || pkg !in (p.getStringSet("allowed",emptySet()) ?: emptySet())) return null
             val t=p.getLong("title_time:"+pkg,0)
             if(t !in start..end) return null
             val title=p.getString("title_hint:"+pkg,"").orEmpty()

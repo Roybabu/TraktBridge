@@ -14,8 +14,9 @@ data class ViewingTitle(val key:String,val sessions:List<WatchRecord>) {
     val queued=sessions.any { it.status in setOf("queued","uncertain","blocked") }
     val pending=sessions.any { it.status in setOf("pending","reviewed") }
     // Do not add playback positions together: resuming/rewinding/replaying is not progress.
-    val positionSession=sessions.filter { it.position>=0 && it.duration>0 }.maxByOrNull { it.ended }
-    val durationMs=positionSession?.duration ?: 0L
+    val positionSession=sessions.filter { PlaybackPosition.valid(it.position,it.duration) }.maxByOrNull { it.ended }
+    val catalogueRuntimeMs=sessions.maxOf { it.catalogueRuntime }
+    val durationMs=positionSession?.duration ?: catalogueRuntimeMs
     val positionMs=positionSession?.position?.coerceIn(0,durationMs) ?: -1L
     val remainingMs=if(durationMs>0 && positionMs>=0) (durationMs-positionMs).coerceAtLeast(0) else -1L
 }

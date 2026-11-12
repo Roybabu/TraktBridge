@@ -7,9 +7,9 @@ import android.database.sqlite.SQLiteOpenHelper
 import java.util.UUID
 
 data class WatchSample(val key: String, val source: String, val title: String, val subtitle: String, val duration: Long, val position: Long, val playing: Boolean)
-data class WatchRecord(val id: String, val source: String, val title: String, val subtitle: String, val started: Long, val ended: Long, val watched: Long, val duration: Long, val position: Long, val status: String, val matchType: String = "", val traktId: Long = 0, val matchLabel: String = "", val showId: Long = 0, val season: Int = -1, val episode: Int = -1)
+data class WatchRecord(val id: String, val source: String, val title: String, val subtitle: String, val started: Long, val ended: Long, val watched: Long, val duration: Long, val position: Long, val status: String, val matchType: String = "", val traktId: Long = 0, val matchLabel: String = "", val showId: Long = 0, val season: Int = -1, val episode: Int = -1, val catalogueRuntime: Long = 0)
 
-class WatchHistory(context: Context): SQLiteOpenHelper(context.applicationContext, "watch_history.db", null, 4) {
+class WatchHistory(context: Context): SQLiteOpenHelper(context.applicationContext, "watch_history.db", null, 5) {
     companion object {
         private const val MAX_GAP = 12000L
         private const val MIN_WATCH = 15000L
@@ -18,7 +18,7 @@ class WatchHistory(context: Context): SQLiteOpenHelper(context.applicationContex
     private data class Active(val id: String, val sample: WatchSample, val lastTick: Long, val lastPlaying: Long, val watched: Long, val started: Long, val lastWall: Long)
     private val active = mutableMapOf<String, Active>()
     override fun onCreate(db: SQLiteDatabase) {
-        db.execSQL("CREATE TABLE viewing (id TEXT PRIMARY KEY, source TEXT NOT NULL, title TEXT NOT NULL, subtitle TEXT NOT NULL, started INTEGER NOT NULL, ended INTEGER NOT NULL, watched INTEGER NOT NULL, duration INTEGER NOT NULL, position INTEGER NOT NULL, status TEXT NOT NULL, match_type TEXT NOT NULL DEFAULT '', trakt_id INTEGER NOT NULL DEFAULT 0, match_label TEXT NOT NULL DEFAULT '', show_id INTEGER NOT NULL DEFAULT 0, season INTEGER NOT NULL DEFAULT -1, episode INTEGER NOT NULL DEFAULT -1, notified INTEGER NOT NULL DEFAULT 0, sync_account TEXT NOT NULL DEFAULT '', sync_message TEXT NOT NULL DEFAULT '')")
+        db.execSQL("CREATE TABLE viewing (id TEXT PRIMARY KEY, source TEXT NOT NULL, title TEXT NOT NULL, subtitle TEXT NOT NULL, started INTEGER NOT NULL, ended INTEGER NOT NULL, watched INTEGER NOT NULL, duration INTEGER NOT NULL, position INTEGER NOT NULL, status TEXT NOT NULL, match_type TEXT NOT NULL DEFAULT '', trakt_id INTEGER NOT NULL DEFAULT 0, match_label TEXT NOT NULL DEFAULT '', show_id INTEGER NOT NULL DEFAULT 0, season INTEGER NOT NULL DEFAULT -1, episode INTEGER NOT NULL DEFAULT -1, notified INTEGER NOT NULL DEFAULT 0, sync_account TEXT NOT NULL DEFAULT '', sync_message TEXT NOT NULL DEFAULT '', catalogue_runtime INTEGER NOT NULL DEFAULT 0)")
         db.execSQL("CREATE INDEX viewing_status ON viewing(status, ended)")
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -35,14 +35,15 @@ class WatchHistory(context: Context): SQLiteOpenHelper(context.applicationContex
             db.execSQL("ALTER TABLE viewing ADD COLUMN sync_account TEXT NOT NULL DEFAULT ''")
             db.execSQL("ALTER TABLE viewing ADD COLUMN sync_message TEXT NOT NULL DEFAULT ''")
         }
+        if (oldVersion < 5) db.execSQL("ALTER TABLE viewing ADD COLUMN catalogue_runtime INTEGER NOT NULL DEFAULT 0")
     }
     fun pendingNotifications(): List<WatchRecord> = records().filter { it.status == "pending" && !wasNotified(it.id) }
     private fun wasNotified(id: String): Boolean = readableDatabase.rawQuery("SELECT notified FROM viewing WHERE id=?",arrayOf(id)).use { !it.moveToFirst() || it.getInt(0) != 0 }
     fun markNotified(id: String) { writableDatabase.update("viewing",ContentValues().apply { put("notified",1) },"id=? AND status='pending'",arrayOf(id)) }
     fun record(id: String): WatchRecord? {
-        readableDatabase.rawQuery("SELECT id,source,title,subtitle,started,ended,watched,duration,position,status,match_type,trakt_id,match_label,show_id,season,episode FROM viewing WHERE id=?",arrayOf(id)).use { c ->
+        readableDatabase.rawQuery("SELECT id,source,title,subtitle,started,ended,watched,duration,position,status,match_type,trakt_id,match_label,show_id,season,episode,catalogue_runtime FROM viewing WHERE id=?",arrayOf(id)).use { c ->
             if (!c.moveToFirst()) return null
-            return WatchRecord(c.getString(0),c.getString(1),c.getString(2),c.getString(3),c.getLong(4),c.getLong(5),c.getLong(6),c.getLong(7),c.getLong(8),c.getString(9),c.getString(10),c.getLong(11),c.getString(12),c.getLong(13),c.getInt(14),c.getInt(15))
+            return WatchRecord(c.getString(0),c.getString(1),c.getString(2),c.getString(3),c.getLong(4),c.getLong(5),c.getLong(6),c.getLong(7),c.getLong(8),c.getString(9),c.getString(10),c.getLong(11),c.getString(12),c.getLong(13),c.getInt(14),c.getInt(15),c.getLong(16))
         }
     }
     @Synchronized fun recover() {
@@ -94,8 +95,8 @@ class WatchHistory(context: Context): SQLiteOpenHelper(context.applicationContex
     @Synchronized fun finishAll() { for (key in active.keys.toList()) finish(key) }
     fun records(limit: Int = 100): List<WatchRecord> {
         val result = mutableListOf<WatchRecord>()
-        readableDatabase.rawQuery("SELECT id,source,title,subtitle,started,ended,watched,duration,position,status,match_type,trakt_id,match_label,show_id,season,episode FROM viewing WHERE status IN ('pending','active','reviewed','queued','uncertain','blocked','synced') ORDER BY ended DESC"+(if(limit>0) " LIMIT "+limit else ""), null).use { c ->
-            while(c.moveToNext()) result.add(WatchRecord(c.getString(0),c.getString(1),c.getString(2),c.getString(3),c.getLong(4),c.getLong(5),c.getLong(6),c.getLong(7),c.getLong(8),c.getString(9),c.getString(10),c.getLong(11),c.getString(12),c.getLong(13),c.getInt(14),c.getInt(15)))
+        readableDatabase.rawQuery("SELECT id,source,title,subtitle,started,ended,watched,duration,position,status,match_type,trakt_id,match_label,show_id,season,episode,catalogue_runtime FROM viewing WHERE status IN ('pending','active','reviewed','queued','uncertain','blocked','synced') ORDER BY ended DESC"+(if(limit>0) " LIMIT "+limit else ""), null).use { c ->
+            while(c.moveToNext()) result.add(WatchRecord(c.getString(0),c.getString(1),c.getString(2),c.getString(3),c.getLong(4),c.getLong(5),c.getLong(6),c.getLong(7),c.getLong(8),c.getString(9),c.getString(10),c.getLong(11),c.getString(12),c.getLong(13),c.getInt(14),c.getInt(15),c.getLong(16)))
         }
         return result
     }
@@ -108,12 +109,12 @@ class WatchHistory(context: Context): SQLiteOpenHelper(context.applicationContex
         require(item.type != "episode" || (item.showId > 0 && item.season >= 0 && item.episode > 0))
         writableDatabase.update("viewing", ContentValues().apply {
             put("match_type",item.type); put("trakt_id",item.id); put("match_label",item.label())
-            put("show_id",item.showId); put("season",item.season); put("episode",item.episode); put("status","reviewed")
+            put("show_id",item.showId); put("season",item.season); put("episode",item.episode); put("catalogue_runtime",item.runtimeMinutes.coerceAtLeast(0)*60000L); put("status","reviewed")
         }, "id=? AND status IN ('pending','reviewed')", arrayOf(id))
     }
     fun clearMatch(id: String) {
         writableDatabase.update("viewing", ContentValues().apply {
-            put("match_type",""); put("trakt_id",0); put("match_label",""); put("show_id",0); put("season",-1); put("episode",-1)
+            put("match_type",""); put("trakt_id",0); put("match_label",""); put("show_id",0); put("season",-1); put("episode",-1); put("catalogue_runtime",0L)
         }, "id=? AND status IN ('pending','reviewed')", arrayOf(id))
     }
     fun enqueue(id: String, account: String): Boolean {
