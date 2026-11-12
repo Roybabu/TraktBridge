@@ -176,3 +176,6 @@ Possible duplicate titles are suggested conservatively from exact normalized tit
 
 ## v0.106.0
 Profile-scoped custom smart watchlists automatically recalculate from local history using six rules, optional content type and provider filters. Lists remain local, bounded to 50, and can be deleted without changing history or Trakt watchlists.
+
+## v0.107.0
+Advanced local library search combines normalized multi-token titles, personal tags, flat collection folders and five sorting options. Existing profile-specific collections act as folders; nested folder hierarchies are not introduced. Tags are normalized and bounded.

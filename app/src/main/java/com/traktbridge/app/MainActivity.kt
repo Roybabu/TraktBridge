@@ -386,6 +386,7 @@ class MainActivity : ComponentActivity() {
         button("Custom smart watchlists") { smartWatchlists() }
         button("Personal collection profiles") { collectionProfiles() }
         button("Personal collections") { collections() }
+        button("Organize library • tags and folders") { organizedLibrary() }
         button("Favorite titles") { favorites() }
         button("Automation shortcuts") { automationShortcuts() }
         button("Universal playback shortcuts") { playbackShortcut() }
@@ -668,6 +669,31 @@ class MainActivity : ComponentActivity() {
         val suffix=if(profile.isBlank()) "" else ":"+java.security.MessageDigest.getInstance("SHA-256").digest(profile.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
         return getSharedPreferences(name+suffix,MODE_PRIVATE)
     }
+    private fun organizedLibrary() {
+        val tagsByKey=personalStore("title_notes").all.mapValues { (_,v) -> runCatching { LibraryOrganization.tags(org.json.JSONObject(v as String).optString("tags")) }.getOrDefault(emptyList()) }
+        val store=personalStore("collections")
+        val names=listOf("")+store.all.keys.sorted()
+        val tags=listOf("")+tagsByKey.values.flatten().distinct().sorted()
+        val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(8),dp(16),dp(8)) }
+        val q=EditText(this).apply { hint="Search titles, episode names and tags"; setSingleLine(true) }; body.addView(q)
+        fun pick(label:String,values:List<String>):Spinner {
+            body.addView(txt(label,14,muted))
+            return Spinner(this).apply { adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,values); body.addView(this) }
+        }
+        val tag=pick("Tag",tags.map { it.ifBlank { "All tags" } })
+        val folder=pick("Collection folder",names.map { it.ifBlank { "All folders" } })
+        val sorts=listOf("recent","title","watchtime","remaining","oldest")
+        val sort=pick("Sort",listOf("Recent","Title A–Z","Most watched","Remaining time","Oldest first"))
+        android.app.AlertDialog.Builder(this).setTitle("Organize library").setView(ScrollView(this).apply { addView(body) }).setNegativeButton("Cancel",null).setNeutralButton("Manage folders") { _,_->collections() }.setPositiveButton("Search") { _,_->
+            val name=names[folder.selectedItemPosition]
+            val keys=if(name.isBlank()) null else runCatching { val a=JSONArray(store.getString(name,"[]")); (0 until a.length()).mapNotNull { a.optJSONObject(it)?.optString("key") }.toSet() }.getOrDefault(emptySet())
+            val rows=LibraryOrganization.search(ViewingGroups.build(history.records(0)),q.text.toString(),tags[tag.selectedItemPosition],keys,tagsByKey,sorts[sort.selectedItemPosition])
+            val results=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
+            results.addView(txt(rows.size.toString()+" titles • first 100 shown",14,muted))
+            rows.take(100).forEach { titleCard(results,it,false) }
+            android.app.AlertDialog.Builder(this).setTitle("Library search results").setView(ScrollView(this).apply { addView(results) }).setPositiveButton("Close",null).show()
+        }.show()
+    }
     private fun collections() {
         val store=personalStore("collections")
         val names=store.all.keys.sorted()
@@ -675,8 +701,8 @@ class MainActivity : ComponentActivity() {
             if(i==names.size) {
                 val field=EditText(this).apply { hint="Collection name" }
                 android.app.AlertDialog.Builder(this).setTitle("New collection").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Create") { _,_->
-                    val name=field.text.toString().trim().take(80)
-                    if(name.isNotBlank() && !store.contains(name)) store.edit().putString(name,"[]").apply()
+                    val name=LibraryOrganization.folder(field.text.toString())
+                    if(name!=null && !store.contains(name) && store.all.size<200) store.edit().putString(name,"[]").apply()
                 }.show()
             } else {
                 val name=names[i]; val a=JSONArray(store.getString(name,"[]"))
@@ -837,7 +863,7 @@ class MainActivity : ComponentActivity() {
             1,2 -> {
                 if(tab==1) dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeLibraryToolbar(violet,groups.size.toString()+" identified titles and provisional groups",{ universalSearch() },{ editHistoryFilter(records) },{ manualLog() }) } })
                 else { section(dashboard,"Needs your review"); dashboard.addView(actionButton("Log a watch manually") { manualLog() }) }
-                if(tab==1) dashboard.addView(actionButton("Unified movie, TV and anime library") { unifiedLibrary() })
+                if(tab==1) { dashboard.addView(actionButton("Unified movie, TV and anime library") { unifiedLibrary() }); dashboard.addView(actionButton("Advanced search • tags and folders") { organizedLibrary() }) }
                 dashboard.addView(actionButton("Refresh") { refreshHistory() })
                 if(tab==2) { dashboard.addView(actionButton("Review recent app activity") { reviewUsage() }); dashboard.addView(actionButton("Retry approved sync queue") { HistorySync.schedule(this); refreshHistory() }) }
                 if(tab==1) {
@@ -971,7 +997,7 @@ class MainActivity : ComponentActivity() {
         val tags=EditText(this).apply { hint="Tags separated by commas"; setText(current.optString("tags")) }
         body.addView(notes); body.addView(tags)
         android.app.AlertDialog.Builder(this).setTitle(label).setView(body).setNegativeButton("Cancel",null).setPositiveButton("Save privately") { _,_->
-            store.edit().putString(key,org.json.JSONObject().put("label",label).put("notes",notes.text.toString().take(10000)).put("tags",tags.text.toString().take(1000)).toString()).apply()
+            store.edit().putString(key,org.json.JSONObject().put("label",label).put("notes",notes.text.toString().take(10000)).put("tags",LibraryOrganization.tags(tags.text.toString()).joinToString(",")).toString()).apply()
         }.show()
     }
     private fun franchises() {
