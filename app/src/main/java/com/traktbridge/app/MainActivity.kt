@@ -251,7 +251,9 @@ class MainActivity : Activity() {
         showAuth()
         button("Connect Trakt") { try { startActivity(Intent(Intent.ACTION_VIEW, auth.begin())); showAuth("Complete sign-in in your browser") } catch (_: Exception) { showAuth("Unable to open sign-in") } }
         button("Check Trakt connection") { showAuth("Checking…"); auth.check { showAuth(it) } }
-        button("Disconnect Trakt locally") { auth.disconnect { showAuth(it) } }
+        button("Trakt account library") { openTraktLibrary() }
+        button("Clear downloaded Trakt history") { android.app.AlertDialog.Builder(this).setTitle("Clear remote history cache?").setMessage("Local viewing records and Trakt account history are unchanged.").setNegativeButton("Cancel",null).setPositiveButton("Clear") { _,_->TraktLibrary.clearCache(this) }.show() }
+        button("Disconnect Trakt locally") { auth.disconnect { TraktLibrary.clearCache(this); showAuth(it) } }
         label("Uses Trakt but is not endorsed or certified by Trakt.")
         label("Only selected apps are tracked locally. Catalogue search sends only the search text you choose to Trakt. Only explicitly approved completed watches are uploaded.")
         history = WatchHistory(this)
@@ -364,6 +366,7 @@ class MainActivity : Activity() {
                 if(continuing.isEmpty()) panel(dashboard).addView(txt("No unfinished sampled viewing yet.",15,muted)) else continuing.take(5).forEach { titleCard(dashboard,it,false) }
                 section(dashboard,"Review queue")
                 val q=panel(dashboard); q.addView(txt("$pending awaiting action",22,ink,true)); q.addView(actionButton("Open review queue") { showTab(2) }); q.addView(actionButton("Review app activity") { reviewUsage() })
+                dashboard.addView(actionButton("Open Trakt account library") { openTraktLibrary() })
                 section(dashboard,"Recently watched")
                 val recent=groups.filter { !it.active }.take(5)
                 if(recent.isEmpty()) panel(dashboard).addView(txt("Your viewing history will appear here.",15,muted)) else recent.forEach { titleCard(dashboard,it,false) }
@@ -424,6 +427,7 @@ class MainActivity : Activity() {
         body.addView(txt(series.completed.toString()+" episodes synced to Trakt. Local counts include only identified episodes, not the full catalogue.",14,muted))
         var dialog:android.app.AlertDialog?=null
         val show=CatalogueItem("show",series.id,series.title)
+        body.addView(actionButton("Check account series progress") { dialog?.dismiss(); remoteSeriesProgress(series.id,series.title) })
         body.addView(actionButton("Load all catalogue seasons") {
             dialog?.dismiss()
             lookup("Loading catalogue seasons",{ done -> TraktCatalogue.seasons(show,done) }) { seasons:List<CatalogueSeason> ->
@@ -459,6 +463,68 @@ class MainActivity : Activity() {
                 }
             }
             android.app.AlertDialog.Builder(this).setTitle(series.title+" • "+if(season==0) "Specials" else "Season "+season).setView(ScrollView(this).apply { addView(body) }).setNegativeButton("Back") { _,_->showSeries(id) }.setPositiveButton("Close") { _,_->refreshHistory() }.show()
+        }
+    }
+    private fun openTraktLibrary() {
+        val labels=listOf("Account watch history","Watchlist","Ratings","Saved playback progress","Downloaded history (local cache)")
+        choose("Trakt account library",labels) { index ->
+            if(index==4) lookup("Checking account",{ done -> TraktLibrary.accountId(this,done) }) { account:String ->
+                val rows=TraktLibrary.cachedHistory(this,account)
+                if(rows.isEmpty()) Toast.makeText(this,"No history downloaded for this account",Toast.LENGTH_LONG).show()
+                else showRemotePage("cached",RemotePage(rows.take(100),1,1,account))
+            } else loadRemotePage(listOf("history","watchlist","ratings","playback")[index],1)
+        }
+    }
+    private fun loadRemotePage(kind:String,page:Int) {
+        lookup("Loading Trakt "+kind,{ done -> TraktLibrary.page(this,kind,page,done) }) { result:RemotePage -> showRemotePage(kind,result) }
+    }
+    private fun showRemotePage(kind:String,page:RemotePage) {
+        val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
+        body.addView(txt("Trakt "+kind+" • Page "+page.page+(page.pages?.let { " of "+it } ?: ""),16,ink,true))
+        body.addView(txt("Account history is separate from measured local playback.",13,muted))
+        var dialog:android.app.AlertDialog?=null
+        if(kind=="history") body.addView(actionButton("Download this page for local viewing") {
+            val n=runCatching { TraktLibrary.cacheHistory(this,page) }.getOrDefault(-1)
+            Toast.makeText(this,if(n>=0) "Saved "+n+" history entries (duplicates replaced)" else "Download failed",Toast.LENGTH_LONG).show()
+        })
+        if(page.items.isEmpty()) body.addView(txt("No entries on this page.",15,muted))
+        val local=ViewingGroups.build(history.records(0)).associateBy { it.key }
+        for(item in page.items) {
+            val card=panel(body)
+            card.addView(txt(item.title,17,ink,true))
+            if(item.watchedAt.isNotBlank()) card.addView(txt("Watched on Trakt: "+item.watchedAt,12,muted))
+            if(item.rating>0) card.addView(txt("Your rating: "+item.rating+"/10",13,violet))
+            if(item.progress in 0.0..100.0) card.addView(txt("Trakt saved progress: "+item.progress.toInt()+"%",13,violet))
+            local[item.type+":"+item.id]?.let { g -> card.addView(actionButton("View matching local sessions") { showSessions(g) }) }
+            card.addView(actionButton("Watchlist / rating actions") { remoteActions(item,page.account) })
+            val showId=if(item.type=="show") item.id else item.showId
+            if(showId>0) card.addView(actionButton("Series progress") { remoteSeriesProgress(showId,item.title.substringBefore(" — ")) })
+        }
+        if(kind!="cached") {
+            if(page.page>1) body.addView(actionButton("Previous page") { dialog?.dismiss(); loadRemotePage(kind,page.page-1) })
+            if(page.items.isNotEmpty() && (page.pages==null || page.page<page.pages)) body.addView(actionButton("Next page") { dialog?.dismiss(); loadRemotePage(kind,page.page+1) })
+        } else body.addView(txt("Showing the latest 100 cached entries.",12,muted))
+        dialog=android.app.AlertDialog.Builder(this).setTitle("Trakt account library").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).create()
+        dialog.show()
+    }
+    private fun remoteSeriesProgress(showId:Long,title:String) {
+        lookup("Loading account progress",{ done -> TraktLibrary.progress(this,showId,done) }) { result:RemoteProgress ->
+            android.app.AlertDialog.Builder(this).setTitle(title).setMessage(result.completed.toString()+" of "+result.aired+" aired episodes completed on Trakt"+if(result.next.isBlank()) "" else "\nNext episode: "+result.next).setPositiveButton("OK",null).show()
+        }
+    }
+    private fun remoteActions(item:RemoteItem,account:String) {
+        choose(item.title,listOf("Add to Trakt watchlist","Remove from Trakt watchlist","Rate on Trakt","Remove Trakt rating")) { index ->
+            fun confirm(action:String,rating:Int=0) {
+                android.app.AlertDialog.Builder(this).setTitle("Confirm Trakt account change").setMessage(item.title+"\n"+action+if(rating>0) " "+rating+"/10" else "").setNegativeButton("Cancel",null).setPositiveButton("Confirm") { _,_->
+                    lookup("Updating Trakt",{ done -> TraktLibrary.mutate(this,account,item,action,rating,done) }) { message:String -> Toast.makeText(this,message,Toast.LENGTH_LONG).show() }
+                }.show()
+            }
+            when(index) {
+                0->confirm("watchlist-add")
+                1->confirm("watchlist-remove")
+                2->choose("Choose rating",(1..10).map { it.toString()+"/10" }) { confirm("rate",it+1) }
+                3->confirm("unrate")
+            }
         }
     }
     private fun durationText(ms:Long):String {
@@ -517,6 +583,7 @@ class MainActivity : Activity() {
         if(r.duration>0 && r.position>=0) details.addView(ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal).apply { progress=(r.position.toDouble()/r.duration*100).toInt().coerceIn(0,100); progressTintList=android.content.res.ColorStateList.valueOf(violet) })
         if(!expanded) { card.addView(actionButton("View details") { android.app.AlertDialog.Builder(this).setTitle("Viewing details").setMessage(r.matchLabel.ifBlank { r.title.ifBlank { "Unidentified video" } }+"\n"+r.subtitle).setNegativeButton("Close",null).setPositiveButton("Open history") { _,_->showTab(1) }.show() }); return }
             if (r.traktId > 0) card.addView(TextView(this).apply { text = "Matched: " + r.matchLabel + " • Trakt ID " + r.traktId })
+            if(r.traktId>0) card.addView(actionButton("Trakt watchlist / rating") { lookup("Checking account",{ done -> TraktLibrary.accountId(this,done) }) { account:String -> remoteActions(RemoteItem(r.matchType,r.traktId,r.matchLabel,r.showId,r.season,r.episode),account) } })
             if(r.id.startsWith("import:") && r.status=="pending") card.addView(actionButton("Reconcile with local history") { reconcileImported(r) })
             if (r.status in setOf("pending","reviewed")) card.addView(Button(this).apply { text = if (r.traktId > 0) "Change Trakt match" else "Identify on Trakt"; setOnClickListener { identify(r) } })
             if (r.traktId > 0 && r.status in setOf("pending","reviewed")) card.addView(Button(this).apply { text = "Remove Trakt match"; setOnClickListener { history.clearMatch(r.id); refreshHistory() } })

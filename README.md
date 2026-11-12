@@ -69,3 +69,6 @@ Classify playing, paused, buffering, stopped and unknown observations. Exclude d
 
 ## Series library (0.11.0)
 Group exact Trakt episode identities into parent shows and seasons while retaining original sessions. History separates shows, movies and unidentified viewing. Home includes unfinished sampled viewing; series cards show locally identified and synced episode counts. Explicit catalogue season lookup shows full episode lists, local completion and next unconfirmed regular episode. Specials remain separate. No assumptions about unaired episodes or remote history. Anime uses Trakt season/episode identity; absolute numbering conversion is not included.
+
+## Trakt account library (0.12.0)
+Browse paginated authenticated history, watchlist, ratings and saved playback progress. Download history pages into a separate account-scoped cache keyed by remote history event ID; local sampled playback and completion queues are unchanged. Display matching local sessions and account-level show progress. Explicitly confirm watchlist and rating mutations, and verify the connected account before sending. Existing approved history upload worker remains unchanged. Clear remote cache on disconnect; cached view requires current account verification. No automatic full-history refresh or remote-history deletion.
