@@ -339,6 +339,7 @@ class MainActivity : Activity() {
         button("Appearance accent") { choose("Accent color",listOf("Violet","Blue","Green")) { prefs.edit().putString("accent",listOf("violet","blue","green")[it]).apply(); recreate() } }
         button("Franchise viewing guides") { franchises() }
         button("Recently deleted viewing") { recentlyDeleted() }
+        button("Share or import collections") { shareCollections() }
         button("Personal collections") { collections() }
         button("Favorite titles") { favorites() }
         button("Automation shortcuts") { automationShortcuts() }
@@ -455,6 +456,30 @@ class MainActivity : Activity() {
             val edit=getSharedPreferences("library_status",MODE_PRIVATE).edit()
             if(index==statuses.lastIndex) edit.remove(type+":"+id) else edit.putString(type+":"+id,statuses[index])
             edit.apply(); refreshHistory()
+        }
+    }
+    private fun shareCollections() {
+        val store=getSharedPreferences("collections",MODE_PRIVATE)
+        val names=store.all.keys.sorted()
+        choose("Collection exchange",listOf("Share a collection","Import collection text")) { action ->
+            if(action==0) choose("Select collection",names) { index ->
+                val name=names[index]
+                val payload=org.json.JSONObject().put("format","traktbridge-collection-v1").put("name",name).put("items",JSONArray(store.getString(name,"[]"))).toString()
+                startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT,payload),"Share collection"))
+            } else {
+                val field=EditText(this).apply { hint="Paste a shared TraktBridge collection"; minLines=4 }
+                android.app.AlertDialog.Builder(this).setTitle("Import collection").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Preview") { _,_->
+                    val parsed=runCatching { CollectionExchange.parse(field.text.toString()) }
+                    parsed.fold({ incoming ->
+                        android.app.AlertDialog.Builder(this).setTitle("Import "+incoming.first+"?").setMessage(incoming.second.length().toString()+" titles. Existing collections will not be overwritten.").setNegativeButton("Cancel",null).setPositiveButton("Import") { _,_->
+                            var name=incoming.first; var suffix=2
+                            while(store.contains(name)) { name=incoming.first+" ("+suffix+")"; suffix++ }
+                            store.edit().putString(name,incoming.second.toString()).apply()
+                            Toast.makeText(this,"Imported "+name,Toast.LENGTH_LONG).show()
+                        }.show()
+                    },{ Toast.makeText(this,"Invalid collection format",Toast.LENGTH_LONG).show() })
+                }.show()
+            }
         }
     }
     private fun collections() {
