@@ -20,7 +20,7 @@ object RemotePlayback {
     private val entries=ConcurrentHashMap<String,Entry>()
     fun put(peer: DevicePairing.Peer,rows: JSONArray) { entries[peer.id]=Entry(peer,rows,SystemClock.elapsedRealtime()) }
     fun visible(context: Context): List<Entry> {
-        if(!PlaybackSharing.enabled(context)) return emptyList()
+        if(!PlaybackSharing.enabled(context) || !PlaybackSharing.localWifi(context)) return emptyList()
         val ids=DevicePairing.peers(context).map { it.id }.toSet()
         val now=SystemClock.elapsedRealtime()
         entries.entries.removeIf { !PlaybackSharing.fresh(now-it.value.received) || it.key !in ids }
