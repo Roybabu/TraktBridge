@@ -255,7 +255,9 @@ class MainActivity : Activity() {
         i.action = null; i.data = null
         ViewingNotifications.cancel(this,id)
         val r = history.record(id) ?: return
-        if (r.status == "pending" || r.status == "reviewed") identify(r)
+        if (r.status == "pending" || r.status == "reviewed") {
+            if(r.traktId>0) android.app.AlertDialog.Builder(this).setTitle("Review viewing").setMessage(r.matchLabel+"\nDid you finish this title?").setNegativeButton("Not finished",null).setNeutralButton("Wrong title") { _,_-> identify(r) }.setPositiveButton("Finished") { _,_->approveUpload(r) }.show() else identify(r)
+        }
     }
     private val apps = PlayerRules.apps
     override fun onCreate(savedInstanceState: Bundle?) {

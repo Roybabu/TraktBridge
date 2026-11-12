@@ -32,9 +32,10 @@ object ViewingNotifications {
         val ignore = PendingIntent.getBroadcast(context,0,Intent(context,ReviewReceiver::class.java).setAction(IGNORE).setData(uri),PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val title = record.title.ifBlank { "Unidentified video" }
         val time = if (record.watched >= 60000) (record.watched / 60000).toString() + " min" else (record.watched / 1000).toString() + " sec"
-        val text = if(record.id.startsWith("usage:")) title+" • Possible viewing; title and playback unverified. Review before matching." else title + " • " + time + " sampled watch time. Review your Trakt match."
+        val nearEnd=PlaybackAccuracy.nearEnd(record.position,record.duration)
+        val text = if(record.id.startsWith("usage:")) title+" • Possible viewing; title and playback unverified. Review before matching." else title + " • " + time + " sampled watch time. "+if(nearEnd) "Near end; did you finish?" else "Review your Trakt match."
         val publicVersion = Notification.Builder(context,CHANNEL).setSmallIcon(android.R.drawable.ic_media_play).setContentTitle("Viewing activity detected").setContentText("Unlock to review.").build()
-        val notification = Notification.Builder(context,CHANNEL).setSmallIcon(android.R.drawable.ic_media_play).setContentTitle("Viewing activity detected").setContentText(text).setStyle(Notification.BigTextStyle().bigText(text)).setVisibility(Notification.VISIBILITY_PRIVATE).setPublicVersion(publicVersion).setContentIntent(review).setAutoCancel(true).setOnlyAlertOnce(true).addAction(Notification.Action.Builder(null,"Review / identify",review).build()).addAction(Notification.Action.Builder(null,"Dismiss reminder",ignore).build()).build()
+        val notification = Notification.Builder(context,CHANNEL).setSmallIcon(android.R.drawable.ic_media_play).setContentTitle(if(nearEnd) "Finished watching?" else "Viewing activity detected").setContentText(text).setStyle(Notification.BigTextStyle().bigText(text)).setVisibility(Notification.VISIBILITY_PRIVATE).setPublicVersion(publicVersion).setContentIntent(review).setAutoCancel(true).setOnlyAlertOnce(true).addAction(Notification.Action.Builder(null,"Review viewing",review).build()).addAction(Notification.Action.Builder(null,"Not now",ignore).build()).build()
         return try { manager.notify(record.id,ID,notification); true } catch (_: SecurityException) { false }
     }
     fun postUsage(context: Context, activity: AppActivity): Boolean {
