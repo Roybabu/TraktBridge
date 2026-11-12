@@ -63,6 +63,7 @@ object RemotePlayback {
 /** User-enabled foreground-service-scoped local synchronization. DNS-SD is only rendezvous. */
 class LocalPlaybackSync(context: Context): java.io.Closeable {
     private val app=context.applicationContext
+    private val network=requireNotNull(DeviceNetwork.local(app))
     private val main=Handler(Looper.getMainLooper())
     private val nsd=app.getSystemService(NsdManager::class.java)
     private val ssl=DeviceTls.context(app)
@@ -114,7 +115,7 @@ class LocalPlaybackSync(context: Context): java.io.Closeable {
         override fun onServiceLost(info:NsdServiceInfo) { main.post { endpoints.remove(info.serviceName); pending.removeAll { it.serviceName==info.serviceName } } }
     }
     fun isClosed()=closed
-    private fun allowed()=!closed && PlaybackSharing.enabled(app) && PlaybackSharing.localWifi(app)
+    private fun allowed()=!closed && PlaybackSharing.enabled(app) && DeviceNetwork.local(app)==network
     private val poll=object:Runnable {
         override fun run() {
             if(closed) return
@@ -129,6 +130,7 @@ class LocalPlaybackSync(context: Context): java.io.Closeable {
                                 try {
                                 if(!allowed()) return@use
                                 DeviceTls.configure(socket,false)
+                                network.bindSocket(socket)
                                 socket.connect(target,2000)
                                 val peer=DeviceTls.authenticate(app,socket)
                                 if(allowed()) {

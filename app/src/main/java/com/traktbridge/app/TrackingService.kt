@@ -12,6 +12,14 @@ class TrackingService: Service() {
     private var deviceSync: LocalPlaybackSync?=null
     private var relaySync: RelayPlaybackSync?=null
     private var lastPeers=emptySet<String>()
+    private var localNetwork:android.net.Network?=null
+    private var networkRegistered=false
+    private val connectivity by lazy { getSystemService(android.net.ConnectivityManager::class.java) }
+    private val networkCallback=object:android.net.ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network:android.net.Network) { handler.post { if(running) updateDeviceSync() } }
+        override fun onLost(network:android.net.Network) { handler.post { if(running) updateDeviceSync() } }
+        override fun onCapabilitiesChanged(network:android.net.Network,caps:android.net.NetworkCapabilities) { handler.post { if(running) updateDeviceSync() } }
+    }
     private fun updateDeviceSync() {
         val peers=DevicePairing.peers(this).map { it.id }.toSet()
         if(peers!=lastPeers) {
@@ -25,7 +33,9 @@ class TrackingService: Service() {
             relaySync?.close(); relaySync=null
             if(config!=null) runCatching { RelayPlaybackSync(this,config).also { it.start(); relaySync=it } }.onFailure { DebugTrace.failure("relay-sync",it) }
         }
-        val allowed=PlaybackSharing.enabled(this) && PlaybackSharing.localWifi(this) && peers.isNotEmpty()
+        val network=if(PlaybackSharing.enabled(this) && peers.isNotEmpty()) DeviceNetwork.local(this) else null
+        if(network!=localNetwork) { deviceSync?.close(); deviceSync=null; RemotePlayback.clearLocal(); localNetwork=network }
+        val allowed=network!=null
         if(!allowed) { deviceSync?.close(); deviceSync=null; return }
         if(deviceSync==null) runCatching {
             val sync=LocalPlaybackSync(this)
@@ -64,6 +74,7 @@ class TrackingService: Service() {
             DebugTrace.failure("foreground-start",e); prefs.edit().putBoolean("foreground_running",false).putString("sample_error","Foreground start failed").apply(); handler.removeCallbacks(heartbeat); stopSelf(); return START_NOT_STICKY
         }
         running=true
+        if(!networkRegistered) runCatching { connectivity.registerDefaultNetworkCallback(networkCallback); networkRegistered=true }
         prefs.edit().putBoolean("foreground_running",true).putLong("foreground_started_elapsed",SystemClock.elapsedRealtime()).apply()
         DebugTrace.event("foreground","started")
         handler.removeCallbacks(heartbeat); handler.post(heartbeat)
@@ -71,6 +82,7 @@ class TrackingService: Service() {
     }
     override fun onDestroy() {
         running=false
+        if(networkRegistered) { runCatching { connectivity.unregisterNetworkCallback(networkCallback) }; networkRegistered=false }
         handler.removeCallbacks(heartbeat)
         deviceSync?.close(); deviceSync=null
         relaySync?.close(); relaySync=null; RemotePlayback.clear()
