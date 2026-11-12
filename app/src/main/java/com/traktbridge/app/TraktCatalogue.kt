@@ -60,6 +60,16 @@ object TraktCatalogue {
             if (n <= 0 || eid <= 0) null else CatalogueItem("episode",eid,show.title + " — " + o.optString("title","Episode " + n),show.year,show.id,season,n,o.optInt("runtime"))
         }.distinctBy { it.id }.sortedBy { it.episode }
     }
+    fun searchExternal(id:String,namespace:String,done:(Result<List<CatalogueItem>>)->Unit)=request(done) {
+        require(namespace in setOf("imdb","tmdb") && id.matches(if(namespace=="imdb") Regex("tt[0-9]{5,12}") else Regex("[0-9]{1,12}")))
+        objects(get("/search/"+namespace+"/"+id+"?type=movie,show&extended=full")).mapNotNull { row ->
+            val type=row.optString("type")
+            if(type !in setOf("movie","show")) return@mapNotNull null
+            val o=row.optJSONObject(type) ?: return@mapNotNull null
+            val key=id(o); val title=o.optString("title")
+            if(key<=0 || title.isBlank()) null else CatalogueItem(type,key,title,o.optInt("year"),runtimeMinutes=o.optInt("runtime"))
+        }.distinctBy { it.type+":"+it.id }
+    }
     fun related(type:String,id:Long,done:(Result<List<CatalogueItem>>)->Unit)=request(done) {
         require(type in setOf("movie","show") && id>0)
         objects(get("/"+RemoteRules.plural(type)+"/"+id+"/related?limit=30&extended=full")).mapNotNull { o ->

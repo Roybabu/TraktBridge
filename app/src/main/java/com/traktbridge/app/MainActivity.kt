@@ -640,6 +640,21 @@ class MainActivity : Activity() {
             android.app.AlertDialog.Builder(this).setTitle("Upcoming episodes").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
         }
     }
+    private fun externalIdentity(record:WatchRecord) {
+        val field=EditText(this).apply { hint="IMDb tt1234567 or TMDB numeric ID"; setSingleLine(true) }
+        choose("External catalogue identifier",listOf("IMDb","TMDB")) { index ->
+            val namespace=if(index==0) "imdb" else "tmdb"
+            android.app.AlertDialog.Builder(this).setTitle("Enter "+namespace.uppercase()+" ID").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Search") { _,_->
+                val id=field.text.toString().trim()
+                if(!id.matches(if(namespace=="imdb") Regex("tt[0-9]{5,12}") else Regex("[0-9]{1,12}"))) { Toast.makeText(this,"Invalid identifier",Toast.LENGTH_LONG).show(); return@setPositiveButton }
+                lookup("Resolving external identifier",{ done -> TraktCatalogue.searchExternal(id,namespace,done) }) { rows:List<CatalogueItem> ->
+                    choose("Confirm exact result",rows.map { it.label() }) { i ->
+                        val item=rows[i]; if(item.type=="movie") confirmMatch(record,item) else selectSuggestedEpisode(record,item)
+                    }
+                }
+            }.show()
+        }
+    }
     private fun universalSearch() {
         val field=EditText(this).apply { hint="Movie, show or anime title"; setSingleLine(true) }
         android.app.AlertDialog.Builder(this).setTitle("Universal search").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Search") { _,_->
@@ -1140,6 +1155,7 @@ class MainActivity : Activity() {
     private fun identify(r: WatchRecord) {
         val field = EditText(this).apply { setText(RecognitionEngine.query(r.title)); hint = "Movie, show or anime title"; setSingleLine(true) }
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(24,12,24,12); addView(field); addView(TextView(this@MainActivity).apply { text = "Search sends this title to Trakt. Select the exact movie or episode; nothing is uploaded to your history." }) }
+        box.addView(actionButton("Search by IMDb / TMDB ID") { externalIdentity(r) })
         val learned=history.learned(r)
         if(learned!=null && r.traktId==0L) box.addView(actionButton("Use learned match: "+learned.label()) { confirmMatch(r,learned) })
         val dialog = android.app.AlertDialog.Builder(this).setTitle("Identify viewing record").setView(box).setNegativeButton("Cancel",null).setNeutralButton("TV / Anime",null).setPositiveButton("Movie",null).create()
