@@ -35,7 +35,8 @@ object PlaybackSharing {
                 .put("package",row.optString("package").take(150)).put("state",state)
                 .put("durationMs",duration).put("positionMs",position)
                 .put("sessionId",row.optString("sessionId").takeIf { DeviceControl.valid(it) }.orEmpty())
-                .put("controlMask",row.optInt("controlMask").coerceIn(0,3)))
+                .put("controlMask",row.optInt("controlMask").coerceIn(0,3))
+                .put("contentId",PlaybackHandoff.validId(row.optString("package"),row.optString("contentId"))))
         }
         return out
     }

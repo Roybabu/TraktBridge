@@ -1457,6 +1457,40 @@ class MainActivity : ComponentActivity() {
             android.app.AlertDialog.Builder(this).setTitle("Viewing journal").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
         }
     }
+    private fun continueOnThisDevice() {
+        val choices=RemotePlayback.visible(this).flatMap { entry ->
+            (0 until entry.rows.length()).mapNotNull { i -> entry.rows.optJSONObject(i)?.let { entry to it } }
+        }
+        if(choices.isEmpty()) { Toast.makeText(this,"No fresh paired-device playback",Toast.LENGTH_LONG).show(); return }
+        choose("Continue watching",choices.map { it.first.device.label+" • "+it.second.optString("title") }) { index ->
+            val (entry,row)=choices[index]
+            val source=row.optString("package")
+            val packages=PlaybackHandoff.packages(source).let { if(tvMode) it else it.reversed() }
+            val link=PlaybackHandoff.link(source,row.optString("contentId"),row.optLong("positionMs",-1))
+            val position=row.optLong("positionMs",-1)
+            val detail=row.optString("title")+"\n"+row.optString("subtitle")+"\n"+if(position>=0) "Resume near "+durationText(position) else "Resume position unavailable"
+            val builder=android.app.AlertDialog.Builder(this).setTitle("Continue on this device").setMessage(detail+"\n\nThe player may require you to find the title or seek manually. The source device keeps playing unless you pause it.")
+                .setNegativeButton("Cancel",null).setPositiveButton("Open player") { _,_->
+                    if(RemotePlayback.visible(this).none { it.device.id==entry.device.id }) { Toast.makeText(this,"Playback observation expired",Toast.LENGTH_LONG).show() }
+                    else {
+                        val launch=packages.firstNotNullOfOrNull { pkg ->
+                            if(link!=null) {
+                                val direct=Intent(Intent.ACTION_VIEW,android.net.Uri.parse(link)).setPackage(pkg)
+                                if(direct.resolveActivity(packageManager)!=null) direct else null
+                            } else null
+                        } ?: packages.firstNotNullOfOrNull { pkg -> (if(tvMode) packageManager.getLeanbackLaunchIntentForPackage(pkg) else null) ?: packageManager.getLaunchIntentForPackage(pkg) }
+                        if(launch==null) Toast.makeText(this,"Supported provider app not installed or unavailable",Toast.LENGTH_LONG).show()
+                        else runCatching { startActivity(launch) }.onFailure { Toast.makeText(this,"Unable to open player",Toast.LENGTH_LONG).show() }
+                    }
+                }
+            if(DeviceControl.permits(row.optInt("controlMask"),"pause")) builder.setNeutralButton("Pause source") { _,_->
+                RemotePlayback.control(this,entry,row.optString("sessionId"),"pause") { ok ->
+                    if(!isDestroyed && !isFinishing) { Toast.makeText(this,if(ok) "Pause command sent" else "Pause rejected",Toast.LENGTH_SHORT).show(); continueOnThisDevice() }
+                }
+            }
+            builder.show()
+        }
+    }
     private fun remotePlaybackControls() {
         val choices=RemotePlayback.visible(this).flatMap { entry ->
             (0 until entry.rows.length()).mapNotNull { i -> entry.rows.optJSONObject(i)?.takeIf { it.optInt("controlMask")>0 && DeviceControl.valid(it.optString("sessionId")) }?.let { entry to it } }
@@ -1476,6 +1510,7 @@ class MainActivity : ComponentActivity() {
         val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(12),dp(16),dp(12)) }
         val status=txt("",16,ink,true); body.addView(status)
         body.addView(actionButton("Remote playback controls") { remotePlaybackControls() })
+        body.addView(actionButton("Continue watching on this device") { continueOnThisDevice() })
         val content=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }; body.addView(content)
         val dialog=android.app.AlertDialog.Builder(this).setTitle("Now Playing • All devices").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).create()
         val handler=android.os.Handler(android.os.Looper.getMainLooper())

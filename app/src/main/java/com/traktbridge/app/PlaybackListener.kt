@@ -148,6 +148,7 @@ class PlaybackListener : NotificationListenerService() {
                 put("package", c.packageName)
                 put("sessionLabel","Session "+key.substringAfterLast(":").take(8))
                 put("sessionId",key.substringAfterLast(":"))
+                put("contentId",PlaybackHandoff.extract(c.packageName,m?.getString(MediaMetadata.METADATA_KEY_MEDIA_URI).orEmpty()))
                 put("controlMask",if(DeviceControl.enabled(this@PlaybackListener)) DeviceControl.mask(p?.actions ?: 0L) else 0)
                 put("title", title)
                 put("displayTitle", m?.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE) ?: "")
