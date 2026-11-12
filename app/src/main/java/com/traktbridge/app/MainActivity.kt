@@ -43,6 +43,46 @@ class MainActivity : Activity() {
         super.onActivityResult(requestCode,resultCode,data)
         if(requestCode==57 && resultCode==RESULT_OK) data?.data?.let { inspectVideo(it) }
         if(requestCode==58 && resultCode==RESULT_OK) data?.data?.let { inspectImport(it) }
+        if(resultCode==RESULT_OK && requestCode in 60..62) data?.data?.let { historyTransfer(requestCode,it) }
+    }
+    private fun pickBackup(code:Int) {
+        val intent=if(code==62) Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*") else Intent(Intent.ACTION_CREATE_DOCUMENT).setType(if(code==60) "application/json" else "text/csv").putExtra(Intent.EXTRA_TITLE,if(code==60) "traktbridge-history.json" else "traktbridge-history.csv")
+        startActivityForResult(intent.addCategory(Intent.CATEGORY_OPENABLE),code)
+    }
+    private fun historyTransfer(code:Int,uri:android.net.Uri) {
+        Thread {
+            val result=runCatching {
+                if(code==62) {
+                    val text=contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { reader ->
+                        val out=StringBuilder(); val buf=CharArray(8192)
+                        while(true) { val n=reader.read(buf); if(n<0) break; require(out.length+n<=HistoryBackup.MAX_CHARS) { "Backup too large" }; out.append(buf,0,n) }
+                        out.toString()
+                    } ?: error("Cannot open backup")
+                    val rows=HistoryBackup.parse(text)
+                    runOnUiThread {
+                        if(isDestroyed || isFinishing) return@runOnUiThread
+                        android.app.AlertDialog.Builder(this).setTitle("Restore viewing history").setMessage(rows.size.toString()+" records. Existing IDs will be skipped. Restored entries will not be queued for Trakt upload.").setNegativeButton("Cancel",null).setPositiveButton("Merge") { _,_->
+                            Thread {
+                                val merged=runCatching { WatchHistory(applicationContext).use { HistoryBackup.merge(it,rows) } }
+                                runOnUiThread { if(!isDestroyed && !isFinishing) { merged.fold({ counts -> Toast.makeText(this,counts.first.toString()+" restored; "+counts.second+" skipped",Toast.LENGTH_LONG).show(); showTab(1) },{ Toast.makeText(this,"Restore failed",Toast.LENGTH_LONG).show() }) } }
+                            }.start()
+                        }.show()
+                    }
+                } else {
+                    val payload=WatchHistory(applicationContext).use { if(code==60) HistoryBackup.snapshot(it).toString() else HistoryBackup.csv(it) }
+                    require(payload.length<=HistoryBackup.MAX_CHARS) { "Export too large" }
+                    contentResolver.openOutputStream(uri,"wt")?.bufferedWriter(Charsets.UTF_8)?.use { it.write(payload) } ?: error("Cannot write export")
+                    runOnUiThread { if(!isDestroyed && !isFinishing) Toast.makeText(this,"History exported",Toast.LENGTH_LONG).show() }
+                }
+            }
+            result.onFailure { runOnUiThread { if(!isDestroyed && !isFinishing) Toast.makeText(this,it.message ?: "History transfer failed",Toast.LENGTH_LONG).show() } }
+        }.start()
+    }
+    private fun checkHistoryIntegrity() {
+        Thread {
+            val ok=runCatching { WatchHistory(applicationContext).use { HistoryBackup.integrity(it) } }.getOrDefault(false)
+            runOnUiThread { if(!isDestroyed && !isFinishing) android.app.AlertDialog.Builder(this).setTitle("Database integrity").setMessage(if(ok) "SQLite quick check passed" else "Integrity check failed or database unavailable").setPositiveButton("OK",null).show() }
+        }.start()
     }
     private var importSource="com.netflix.mediaclient"
     private fun chooseImportProvider() {
@@ -245,6 +285,10 @@ class MainActivity : Activity() {
         fun label(s: String) { root.addView(txt(s,15,muted)) }
         fun button(s: String, action: () -> Unit) { root.addView(actionButton(s,action)) }
         label("SETTINGS • Account and tracking")
+        button("Back up viewing history (JSON)") { pickBackup(60) }
+        button("Export viewing history (CSV)") { pickBackup(61) }
+        button("Restore viewing history (JSON)") { pickBackup(62) }
+        button("Check history database integrity") { checkHistoryIntegrity() }
         button("Import streaming viewing history (CSV)") { chooseImportProvider() }
         button("Identify local video file") { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("video/*"),57) }
         button("Identify shared movie link") { val field=EditText(this).apply { hint="Paste shared title or link" }; android.app.AlertDialog.Builder(this).setTitle("Identify shared content").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Continue") { _,_-> presentShared(SharedContent.fromText(field.text.toString())) }.show() }
