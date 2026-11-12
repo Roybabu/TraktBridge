@@ -1197,6 +1197,7 @@ class MainActivity : ComponentActivity() {
             if(d.rating>0) body.addView(txt("Trakt rating: "+String.format(java.util.Locale.US,"%.1f",d.rating)+"/10",16,violet))
             if(prefs.getBoolean("hide_spoilers",true)) body.addView(actionButton("Reveal synopsis") { android.app.AlertDialog.Builder(this).setTitle(d.title).setMessage(d.overview.ifBlank { "No overview available" }).setPositiveButton("Close",null).show() }) else body.addView(txt(d.overview.ifBlank { "No overview available" },16))
             if(d.released.isNotBlank()) body.addView(txt("Release: "+d.released,13,muted))
+            body.addView(actionButton("Cast and directors") { lookup("Loading credits",{ done -> TraktCatalogue.credits(type,id,done) }) { names:List<String> -> android.app.AlertDialog.Builder(this).setTitle("Cast and crew").setMessage(names.joinToString("\n").ifBlank { "No credits returned" }).setPositiveButton("Close",null).show() } })
             body.addView(actionButton("Check title on Trakt (availability varies by region)") { openTraktWatchPage(type,id) })
             body.addView(actionButton("Watchlist / rating") { lookup("Checking account",{ done -> TraktLibrary.accountId(this,done) }) { account:String -> remoteActions(RemoteItem(type,id,d.title),account) } })
             if(d.trailer.startsWith("https://")) body.addView(actionButton("Open trailer") { runCatching { startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse(d.trailer))) } })

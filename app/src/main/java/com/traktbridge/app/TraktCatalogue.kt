@@ -105,6 +105,19 @@ object TraktCatalogue {
             if(id<=0 || title.isBlank()) null else CatalogueItem(type,id,title,o.optInt("year"),runtimeMinutes=o.optInt("runtime"))
         }.distinctBy { it.id }
     }
+    fun credits(type:String,id:Long,done:(Result<List<String>>)->Unit)=request(done) {
+        require(type in setOf("movie","show") && id>0)
+        val c=URL("https://api.trakt.tv/"+RemoteRules.plural(type)+"/"+id+"/people").openConnection() as HttpsURLConnection
+        try {
+            c.connectTimeout=15000; c.readTimeout=15000; c.instanceFollowRedirects=false
+            c.setRequestProperty("trakt-api-key",TraktAuth.CLIENT_ID); c.setRequestProperty("trakt-api-version","2")
+            require(c.responseCode in 200..299)
+            val o=JSONObject(c.inputStream.bufferedReader().use { reader -> val out=StringBuilder(); val buf=CharArray(8192); while(true) { val n=reader.read(buf); if(n<0) break; require(out.length+n<=8_000_000); out.append(buf,0,n) }; out.toString() })
+            val cast=objects(o.optJSONArray("cast") ?: JSONArray()).mapNotNull { row -> row.optJSONObject("person")?.optString("name")?.takeIf { it.isNotBlank() }?.let { name -> name+" • "+row.optString("character","Cast") } }
+            val directors=objects(o.optJSONObject("crew")?.optJSONArray("directing") ?: JSONArray()).mapNotNull { row -> row.optJSONObject("person")?.optString("name")?.takeIf { it.isNotBlank() }?.let { name -> name+" • "+row.optString("job","Directing") } }
+            (directors+cast).distinct().take(100)
+        } finally { c.disconnect() }
+    }
     fun details(type:String,id:Long,done:(Result<TitleDetails>)->Unit)=request(done) {
         require(id>0 && type in setOf("movie","show"))
         val c=URL("https://api.trakt.tv/"+RemoteRules.plural(type)+"/"+id+"?extended=full").openConnection() as HttpsURLConnection
