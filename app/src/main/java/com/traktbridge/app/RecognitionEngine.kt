@@ -9,12 +9,18 @@ data class EpisodeNumber(val season:Int,val episode:Int)
 data class RankedMatch(val item:CatalogueItem,val score:Int,val reason:String)
 object RecognitionEngine {
     private val episode=Regex("(?i)\\bS(\\d{1,3})[ ._-]*E(\\d{1,4})\\b|\\bSeason\\s+(\\d{1,3})\\s*[,·•:-]?\\s*Episode\\s+(\\d{1,4})\\b")
+    private val alternateEpisode=Regex("(?i)\\b(\\d{1,3})x(\\d{1,4})\\b")
+    private val multiEpisode=Regex("(?i)\\bS\\d{1,3}[ ._-]*E\\d{1,4}(?:[ ._-]*E\\d{1,4}|[ ]*[-–][ ]*(?:E)?\\d{1,4}\\b)")
     private val year=Regex("\\b(19\\d{2}|20\\d{2})\\b")
     fun episodeOf(value:String):EpisodeNumber? {
+        if(multiEpisode.containsMatchIn(value)) return null
         val matches=episode.findAll(value).map { m ->
             val s=(m.groupValues[1].ifBlank { m.groupValues[3] }).toIntOrNull()
             val e=(m.groupValues[2].ifBlank { m.groupValues[4] }).toIntOrNull()
             if(s!=null && e!=null && e>0) EpisodeNumber(s,e) else null
+        }.toList()+alternateEpisode.findAll(value).map { m ->
+            val s=m.groupValues[1].toInt(); val e=m.groupValues[2].toInt()
+            if(e>0) EpisodeNumber(s,e) else null
         }.toList()
         return matches.filterNotNull().distinct().singleOrNull()?.takeIf { matches.none { it == null } }
     }
@@ -29,7 +35,7 @@ object RecognitionEngine {
         val top=groups.first()
         val best=top.maxBy { it.weight }
         val evidenceText=top.map { it.title+" "+it.detail }
-        val ambiguous=evidenceText.any { episode.containsMatchIn(it) && episodeOf(it)==null }
+        val ambiguous=evidenceText.any { ambiguousEpisode(it) }
         val episodes=evidenceText.mapNotNull { episodeOf(it) }.distinct()
         val years=top.mapNotNull { year.find(it.title)?.value }.distinct()
         val conflict=duplicateConflict || groups.size>1 || episodes.size>1 || ambiguous || years.size>1
@@ -37,7 +43,7 @@ object RecognitionEngine {
         val score=(top.maxOf { it.weight }+(top.size-1)*12-(if(conflict) 25 else 0)).coerceIn(0,if(conflict) 49 else 100)
         return Recognition(best.title,detail,score,top.map { it.source },conflict)
     }
-    fun ambiguousEpisode(value:String):Boolean = episode.containsMatchIn(value) && episodeOf(value)==null
+    fun ambiguousEpisode(value:String):Boolean = (episode.containsMatchIn(value) || alternateEpisode.containsMatchIn(value) || multiEpisode.containsMatchIn(value)) && episodeOf(value)==null
     fun exactEpisode(showId:Long,number:EpisodeNumber,items:List<CatalogueItem>):CatalogueItem? = items.filter { it.type=="episode" && it.id>0 && it.showId==showId && it.season==number.season && it.episode==number.episode }.singleOrNull()
     fun rank(title:String,detail:String,duration:Long,items:List<CatalogueItem>):List<RankedMatch> {
         val q=normalized(query(title))
@@ -56,7 +62,7 @@ object RecognitionEngine {
                 val runtime=item.runtimeMinutes*60000L
                 if(kotlin.math.abs(duration-runtime)<=maxOf(180000L,runtime/20)) { score+=10; reasons.add("runtime agrees") } else { score-=10; reasons.add("runtime differs") }
             }
-            if(ep!=null && item.type=="movie") { score-=45; reasons.add("episode evidence") }
+            if((ep!=null || ambiguousEpisode(title+" "+detail)) && item.type=="movie") { score-=45; reasons.add("episode evidence") }
             RankedMatch(item,score.coerceIn(0,100),reasons.joinToString(" • "))
         }.sortedByDescending { it.score }
     }
@@ -64,7 +70,7 @@ object RecognitionEngine {
     fun key(source:String,title:String,detail:String,itemType:String):String? {
         if(!ContentRecognition.usable(title)) return null
         val ep=episodeOf(title+" "+detail)
-        if(episode.containsMatchIn(title+" "+detail) && ep==null) return null
+        if(ambiguousEpisode(title+" "+detail)) return null
         if(itemType=="episode" && ep==null) return null
         if(itemType=="movie" && ep!=null) return null
         val normalized=normalized(title)
