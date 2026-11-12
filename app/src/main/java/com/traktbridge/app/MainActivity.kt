@@ -463,6 +463,7 @@ class MainActivity : ComponentActivity() {
         fun label(s: String) { root.addView(txt(s,15,muted)) }
         fun button(s: String, action: () -> Unit) { root.addView(actionButton(s,action)) }
         label("SETTINGS • Account and tracking")
+        button("Configure optional cloud relay") { configureDeviceRelay() }
         button("Allow remote playback controls") {
             val enabled=prefs.getBoolean("device_controls",false)
             android.app.AlertDialog.Builder(this).setTitle(if(enabled) "Disable remote controls?" else "Allow paired devices to control playback?")
@@ -1457,6 +1458,22 @@ class MainActivity : ComponentActivity() {
             android.app.AlertDialog.Builder(this).setTitle("Viewing journal").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
         }
     }
+    private fun configureDeviceRelay() {
+        val current=RelaySettings.load(this)
+        val host=EditText(this).apply { hint="Relay hostname"; setText(current?.host.orEmpty()); setSingleLine(true) }
+        val port=EditText(this).apply { hint="Port"; inputType=android.text.InputType.TYPE_CLASS_NUMBER; setText((current?.port ?: 8765).toString()) }
+        val secret=EditText(this).apply { hint="43-character deployment secret"; inputType=android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD; setSingleLine(true) }
+        val content=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; addView(host); addView(port); addView(secret) }
+        android.app.AlertDialog.Builder(this).setTitle("Optional self-hosted cloud relay")
+            .setMessage("Use only a relay you trust. Playback is encrypted end-to-end between paired devices. The relay can see connection metadata. Mobile data may be used. No hosted service is configured by default.")
+            .setView(content).setNegativeButton("Cancel",null).setNeutralButton("Disable") { _,_->
+                runCatching { RelaySettings.disable(this); RemotePlayback.clear(); if(prefs.getBoolean("enabled",false)) startTracking() }
+            }.setPositiveButton("Save and enable") { _,_->
+                val config=RelaySettings.Config(host.text.toString().trim(),port.text.toString().toIntOrNull() ?: 0,secret.text.toString().trim().ifBlank { current?.secret.orEmpty() })
+                runCatching { RelaySettings.save(this,config); if(prefs.getBoolean("enabled",false)) startTracking() }
+                    .fold({ Toast.makeText(this,"Optional relay configured",Toast.LENGTH_LONG).show() },{ Toast.makeText(this,"Invalid relay settings or secure storage unavailable",Toast.LENGTH_LONG).show() })
+            }.show()
+    }
     private fun continueOnThisDevice() {
         val choices=RemotePlayback.visible(this).flatMap { entry ->
             (0 until entry.rows.length()).mapNotNull { i -> entry.rows.optJSONObject(i)?.let { entry to it } }
@@ -1549,7 +1566,7 @@ class MainActivity : ComponentActivity() {
                 for(entry in remote) {
                     val deviceCard=panel(content)
                     deviceCard.addView(txt(entry.device.label,18,ink,true))
-                    deviceCard.addView(txt("Verified device • "+entry.device.id.take(12),12,muted))
+                    deviceCard.addView(txt("Verified device • "+entry.device.id.take(12)+if(entry.endpoint==null) " • Relay" else " • Local Wi-Fi",12,muted))
                     if(entry.rows.length()==0) deviceCard.addView(txt("Connected • no visible playback",14,muted))
                     for(j in 0 until entry.rows.length()) {
                         val row=entry.rows.optJSONObject(j) ?: continue

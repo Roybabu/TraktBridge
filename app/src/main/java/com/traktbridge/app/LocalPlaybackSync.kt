@@ -16,14 +16,22 @@ import javax.net.ssl.SSLServerSocket
 import javax.net.ssl.SSLSocket
 
 object RemotePlayback {
-    data class Entry(val device: DevicePairing.Peer,val rows: JSONArray,val received: Long,val endpoint: InetSocketAddress)
+    data class Entry(val device: DevicePairing.Peer,val rows: JSONArray,val received: Long,val endpoint: InetSocketAddress?)
     private val entries=ConcurrentHashMap<String,Entry>()
-    fun put(peer: DevicePairing.Peer,rows: JSONArray,endpoint: InetSocketAddress) { entries[peer.id]=Entry(peer,rows,SystemClock.elapsedRealtime(),endpoint) }
+    fun put(peer: DevicePairing.Peer,rows: JSONArray,endpoint: InetSocketAddress?) {
+        val now=SystemClock.elapsedRealtime()
+        entries.compute(peer.id) { _,old ->
+            if(endpoint==null && old?.endpoint!=null && PlaybackSharing.fresh(now-old.received)) old
+            else Entry(peer,rows,now,endpoint)
+        }
+    }
     fun visible(context: Context): List<Entry> {
-        if(!PlaybackSharing.enabled(context) || !PlaybackSharing.localWifi(context)) return emptyList()
+        if(!PlaybackSharing.enabled(context)) return emptyList()
+        val wifi=PlaybackSharing.localWifi(context)
+        val relay=RelaySettings.configured(context)
         val ids=DevicePairing.peers(context).map { it.id }.toSet()
         val now=SystemClock.elapsedRealtime()
-        entries.entries.removeIf { !PlaybackSharing.fresh(now-it.value.received) || it.key !in ids }
+        entries.entries.removeIf { !PlaybackSharing.fresh(now-it.value.received) || it.key !in ids || (it.value.endpoint==null && !relay) || (it.value.endpoint!=null && !wifi) }
         return entries.values.sortedBy { it.device.label }
     }
     private val commands=ThreadPoolExecutor(1,1,0,TimeUnit.SECONDS,ArrayBlockingQueue(4))
@@ -35,7 +43,7 @@ object RemotePlayback {
                 require(visible(app).any { it.device.id==entry.device.id } && DeviceControl.valid(session))
                 val ssl=DeviceTls.context(app)
                 (ssl.socketFactory.createSocket() as SSLSocket).use { socket ->
-                    DeviceTls.configure(socket,false); socket.connect(entry.endpoint,2000)
+                    DeviceTls.configure(socket,false); socket.connect(requireNotNull(entry.endpoint),2000)
                     require(DeviceTls.authenticate(app,socket).id==entry.device.id)
                     val current=PlaybackSharing.read(DataInputStream(socket.inputStream))
                     require((0 until current.length()).any { i -> current.optJSONObject(i)?.let { it.optString("sessionId")==session && DeviceControl.permits(it.optInt("controlMask"),action) }==true })
@@ -47,6 +55,7 @@ object RemotePlayback {
         }
         try { commands.execute(job) } catch(_:RejectedExecutionException) { main.post { done(false) } }
     }
+    fun clearLocal() { entries.entries.removeIf { it.value.endpoint!=null } }
     fun clear()=entries.clear()
 }
 
@@ -171,6 +180,6 @@ class LocalPlaybackSync(context: Context): java.io.Closeable {
         if(registered) runCatching { nsd.unregisterService(registration) }
         runCatching { server.close() }
         workers.shutdown(); client.shutdownNow()
-        endpoints.clear(); pending.clear(); RemotePlayback.clear()
+        endpoints.clear(); pending.clear(); RemotePlayback.clearLocal()
     }
 }

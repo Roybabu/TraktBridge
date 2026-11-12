@@ -9,7 +9,13 @@ class TrackingService: Service() {
     private val prefs by lazy { getSharedPreferences("tracker",MODE_PRIVATE) }
     private val handler=Handler(Looper.getMainLooper())
     private var deviceSync: LocalPlaybackSync?=null
+    private var relaySync: RelayPlaybackSync?=null
     private fun updateDeviceSync() {
+        val config=if(PlaybackSharing.enabled(this)) RelaySettings.load(this) else null
+        if(relaySync?.config!=config) {
+            relaySync?.close(); relaySync=null
+            if(config!=null) runCatching { RelayPlaybackSync(this,config).also { it.start(); relaySync=it } }.onFailure { DebugTrace.failure("relay-sync",it) }
+        }
         val allowed=PlaybackSharing.enabled(this) && PlaybackSharing.localWifi(this)
         if(!allowed) { deviceSync?.close(); deviceSync=null; return }
         if(deviceSync==null) runCatching {
@@ -56,6 +62,7 @@ class TrackingService: Service() {
     override fun onDestroy() {
         handler.removeCallbacks(heartbeat)
         deviceSync?.close(); deviceSync=null
+        relaySync?.close(); relaySync=null; RemotePlayback.clear()
         prefs.edit().putBoolean("foreground_running",false).apply()
         DebugTrace.event("foreground","stopped")
         super.onDestroy()
