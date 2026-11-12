@@ -62,7 +62,7 @@ object RecognitionEngine {
                 val runtime=item.runtimeMinutes*60000L
                 if(kotlin.math.abs(duration-runtime)<=maxOf(180000L,runtime/20)) { score+=10; reasons.add("runtime agrees") } else { score-=10; reasons.add("runtime differs") }
             }
-            if((ep!=null || ambiguousEpisode(title+" "+detail)) && item.type=="movie") { score-=45; reasons.add("episode evidence") }
+            if((ep!=null || ambiguousEpisode(title+" "+detail) || AnimeEpisodeMapping.absoluteNumber(title+" "+detail)!=null || AnimeEpisodeMapping.specialNumber(title+" "+detail)!=null) && item.type=="movie") { score-=45; reasons.add("episode evidence") }
             RankedMatch(item,score.coerceIn(0,100),reasons.joinToString(" • "))
         }.sortedByDescending { it.score }
     }
@@ -72,7 +72,7 @@ object RecognitionEngine {
         val ep=episodeOf(title+" "+detail)
         if(ambiguousEpisode(title+" "+detail)) return null
         if(itemType=="episode" && ep==null) return null
-        if(itemType=="movie" && ep!=null) return null
+        if(itemType=="movie" && (ep!=null || AnimeEpisodeMapping.absoluteNumber(title+" "+detail)!=null || AnimeEpisodeMapping.specialNumber(title+" "+detail)!=null)) return null
         val normalized=normalized(title)
         if(normalized.isBlank()) return null
         return source+"|"+normalized+"|"+(ep?.let { "S"+it.season+"E"+it.episode } ?: "movie")

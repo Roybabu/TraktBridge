@@ -161,3 +161,6 @@ Provider-specific metadata weights, retention windows and screen timing policies
 
 ## v0.101.0
 Explicit ad metadata and fresh, opt-in accessibility player controls identify possible intro, recap, credits and advertisement segments. Flagged intervals are excluded from sampled watch time; ads are not ingested. No automatic skipping or inference of unseen segment boundaries. Provider cue availability and real-device accuracy remain unverified.
+
+## v0.102.0
+Absolute episode and OVA/special evidence is distinguished from ordinary season/episode numbering. Explicit specials can be reviewed against season zero; absolute numbering requires manual season confirmation rather than guessed conversion. A conservative ordinal mapping helper is tested but not wired to remote catalogue retrieval. Movie learning is blocked for these episode cues.

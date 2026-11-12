@@ -1800,8 +1800,13 @@ class MainActivity : ComponentActivity() {
         android.app.AlertDialog.Builder(this).setTitle(title).setItems(labels.toTypedArray()) { _, index -> selected(index) }.setNegativeButton("Cancel",null).show()
     }
     private fun selectSuggestedEpisode(r:WatchRecord,show:CatalogueItem) {
-        val ep=RecognitionEngine.episodeOf(r.title+" "+r.subtitle)
-        if(ep==null) { selectSeason(r,show); return }
+        val evidence=r.title+" "+r.subtitle
+        val ep=RecognitionEngine.episodeOf(evidence) ?: AnimeEpisodeMapping.specialNumber(evidence)
+        if(ep==null) {
+            val absolute=AnimeEpisodeMapping.absoluteNumber(evidence)
+            if(absolute==null) selectSeason(r,show) else android.app.AlertDialog.Builder(this).setTitle("Episode numbering").setMessage("Detected episode "+absolute+". Absolute anime numbering may differ from catalogue season numbering. Choose the exact season and episode manually.").setPositiveButton("Choose episode") { _,_->selectSeason(r,show) }.setNegativeButton("Cancel",null).show()
+            return
+        }
         lookup("Checking detected episode", { done -> TraktCatalogue.episodes(show,ep.season,done) }) { episodes:List<CatalogueItem> ->
             val exact=RecognitionEngine.exactEpisode(show.id,ep,episodes)
             if(exact==null) selectSeason(r,show) else android.app.AlertDialog.Builder(this).setTitle("Detected episode").setMessage(exact.label()+"\nSeason and episode agree with the detected text. Confirm the exact episode.").setNegativeButton("Cancel",null).setNeutralButton("Choose another") { _,_->selectSeason(r,show) }.setPositiveButton("Review match") { _,_->confirmMatch(r,exact) }.show()
