@@ -12,7 +12,7 @@ import java.util.concurrent.Executors
 import org.json.JSONObject
 
 object Artwork {
-    private val worker=Executors.newFixedThreadPool(2)
+    private val worker=java.util.concurrent.ThreadPoolExecutor(2,2,30,java.util.concurrent.TimeUnit.SECONDS,java.util.concurrent.ArrayBlockingQueue<Runnable>(64),java.util.concurrent.ThreadPoolExecutor.DiscardOldestPolicy())
     private val main=Handler(Looper.getMainLooper())
     private val attempted=mutableMapOf<String,Long>()
     fun load(context:Context,type:String,id:Long,view:ImageView) {
@@ -27,16 +27,18 @@ object Artwork {
                 if(!file.exists() || System.currentTimeMillis()-file.lastModified()>7*86400000L) {
                     val fetch=synchronized(attempted) {
                         val now=System.currentTimeMillis()
-                        if(now-(attempted[key] ?: 0)<60000) false else { attempted[key]=now; true }
+                        if(now-(attempted[key] ?: 0)<60000) false else { if(attempted.size>=500) attempted.entries.removeAll { now-it.value>60000 }; if(attempted.size>=500) attempted.clear(); attempted[key]=now; true }
                     }
-                    if(fetch) {
+                    val cm=context.applicationContext.getSystemService(android.net.ConnectivityManager::class.java)
+                    val wifiOnly=context.applicationContext.getSharedPreferences("tracker",Context.MODE_PRIVATE).getBoolean("artwork_unmetered",false)
+                    if(fetch && (!wifiOnly || !cm.isActiveNetworkMetered)) {
                         val endpoint=if(type=="movie") "movies" else "shows"
                         val connection=URL("https://api.trakt.tv/"+endpoint+"/"+id+"?extended=full").openConnection() as HttpsURLConnection
                         val data=try {
                             connection.connectTimeout=10000; connection.readTimeout=10000; connection.instanceFollowRedirects=false
                             connection.setRequestProperty("trakt-api-key",TraktAuth.CLIENT_ID); connection.setRequestProperty("trakt-api-version","2")
                             if(connection.responseCode!=200) error("Artwork metadata unavailable")
-                            JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+                            JSONObject(connection.inputStream.bufferedReader().use { reader -> val out=StringBuilder(); val buf=CharArray(8192); while(true) { val n=reader.read(buf); if(n<0) break; require(out.length+n<=2_000_000); out.append(buf,0,n) }; out.toString() })
                         } finally { connection.disconnect() }
                         val raw=data.optJSONObject("images")?.optJSONArray("poster")?.optString(0).orEmpty()
                         if(raw.isBlank()) error("No poster")
@@ -51,7 +53,8 @@ object Artwork {
                                 val buffer=ByteArray(8192); var total=0
                                 while(true) { val n=input.read(buffer); if(n<0) break; total+=n; require(total<=2*1024*1024); output.write(buffer,0,n) }
                             } }
-                            require(BitmapFactory.decodeFile(temp.path)!=null)
+                            val bounds=BitmapFactory.Options().apply { inJustDecodeBounds=true }; BitmapFactory.decodeFile(temp.path,bounds)
+                            require(bounds.outWidth in 1..4096 && bounds.outHeight in 1..4096 && bounds.outWidth.toLong()*bounds.outHeight<=8000000)
                             check(temp.renameTo(file))
                             dir.listFiles()?.filter { it.extension=="webp" }?.sortedByDescending { it.lastModified() }?.drop(100)?.forEach { it.delete() }
                         } finally { image.disconnect(); temp.delete() }
