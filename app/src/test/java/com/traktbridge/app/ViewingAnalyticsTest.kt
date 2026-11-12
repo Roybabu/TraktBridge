@@ -14,4 +14,8 @@ class ViewingAnalyticsTest {
  @Test fun filterByDateAndSource() { assertEquals(listOf("a"),ViewingAnalytics.filter(listOf(row("a",12),row("b",1),row("c",12,"prime")),HistoryFilter(source="netflix",period=7),today,zone).map { it.id }) }
  @Test fun statusAndSearch() { assertEquals("a",ViewingAnalytics.filter(listOf(row("a",12,status="synced"),row("b",12)),HistoryFilter(query="movie",status="completed"),today,zone).single().id) }
  @Test fun calendarUsesEndDate() { val days=ViewingAnalytics.calendar(listOf(row("a",12),row("b",12,time=0)),YearMonth.of(2026,11),zone); assertEquals(30,days.size); assertEquals(60000L,days[11].sampledMs); assertEquals(2,days[11].sessions) }
+ @Test fun annualRecapCountsOnlyMeasuredDaysAndStreaks() {
+  val recap=ViewingAnalytics.recap(listOf(row("a",1),row("b",2),row("c",4,time=0),row("d",5,status="active")),2026,zone)
+  assertEquals(120000L,recap.sampledMs); assertEquals(2,recap.activeDays); assertEquals(2,recap.longestStreak); assertEquals(11,recap.busiestMonth); assertEquals("netflix",recap.topSource)
+ }
 }
