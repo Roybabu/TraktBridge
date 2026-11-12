@@ -32,6 +32,7 @@ class MainActivity : ComponentActivity() {
     private var unlocked=false
     private var historyFilter=HistoryFilter()
     private var historyLimit=100
+    private var librarySelection=""
     private var analyticsPeriod=30
     private var analyticsSource=""
     private var calendarMonth=java.time.YearMonth.now()
@@ -429,6 +430,7 @@ class MainActivity : ComponentActivity() {
         DebugTrace.init(this)
         DebugTrace.event("activity","main opened")
         tab=(savedInstanceState?.getInt("tab") ?: DashboardPreferences.startTab(prefs.getInt("startup_tab",0))).coerceIn(0,4)
+        librarySelection=savedInstanceState?.getString("library_selection").orEmpty()
         importSource=savedInstanceState?.getString("import_source") ?: "com.netflix.mediaclient"
         historyFilter=HistoryFilter(savedInstanceState?.getString("filter_q").orEmpty(),savedInstanceState?.getString("filter_source").orEmpty(),savedInstanceState?.getInt("filter_period") ?: 0,savedInstanceState?.getString("filter_type").orEmpty(),savedInstanceState?.getString("filter_status").orEmpty(),savedInstanceState?.getString("filter_sort") ?: "recent")
         analyticsPeriod=savedInstanceState?.getInt("analytics_period") ?: 30
@@ -932,7 +934,7 @@ class MainActivity : ComponentActivity() {
         runCatching { startActivityForResult(intent,96) }.onFailure { privacyPrompt=false; finish() }
     }
     override fun onDestroy() { bridgeModel.cancel(); if (::history.isInitialized) history.close(); super.onDestroy() }
-    override fun onSaveInstanceState(outState: Bundle) { outState.putInt("tab",tab); outState.putString("import_source",importSource); outState.putString("filter_q",historyFilter.query); outState.putString("filter_source",historyFilter.source); outState.putInt("filter_period",historyFilter.period); outState.putString("filter_type",historyFilter.type); outState.putString("filter_status",historyFilter.status); outState.putString("filter_sort",historyFilter.sort); outState.putInt("analytics_period",analyticsPeriod); outState.putString("analytics_source",analyticsSource); outState.putString("calendar_month",calendarMonth.toString()); super.onSaveInstanceState(outState) }
+    override fun onSaveInstanceState(outState: Bundle) { outState.putString("library_selection",librarySelection); outState.putInt("tab",tab); outState.putString("import_source",importSource); outState.putString("filter_q",historyFilter.query); outState.putString("filter_source",historyFilter.source); outState.putInt("filter_period",historyFilter.period); outState.putString("filter_type",historyFilter.type); outState.putString("filter_status",historyFilter.status); outState.putString("filter_sort",historyFilter.sort); outState.putInt("analytics_period",analyticsPeriod); outState.putString("analytics_source",analyticsSource); outState.putString("calendar_month",calendarMonth.toString()); super.onSaveInstanceState(outState) }
     private fun dp(n:Int)= (n*resources.displayMetrics.density+0.5f).toInt()
     private fun rounded(color:Int,radius:Int=16)=android.graphics.drawable.GradientDrawable().apply { setColor(color); cornerRadius=dp(radius).toFloat() }
     private fun txt(value:String,size:Int=15,color:Int=ink,bold:Boolean=false)=TextView(this).apply {
@@ -1083,6 +1085,11 @@ class MainActivity : ComponentActivity() {
                 val visible=items.take(historyLimit)
                 if(items.size>visible.size && historyLimit<1000) dashboard.addView(actionButton("Show more ("+visible.size+" of "+items.size+")") { historyLimit=ResourcePolicy.nextPage(historyLimit); refreshHistory() })
                 else if(items.size>visible.size) dashboard.addView(txt("Showing first 1000 titles. Use filters to narrow the remaining history.",13,muted))
+                if(tab==1 && adaptiveLayout.mode==AdaptiveUi.Mode.EXPANDED && visible.isNotEmpty()) {
+                    val entries=visible.map { g -> val r=g.representative; LibraryEntry(r.id,r.matchLabel.ifBlank { r.title },g.platforms.joinToString(" • ") { appLabel(it) },g.sessions.size.toString()+" sessions • "+durationText(g.sampledMs)+" sampled") { showSessions(g) } }
+                    dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeMasterDetail(violet,entries,librarySelection) { librarySelection=it } } })
+                    section(dashboard,"Full library")
+                }
                 if(tab==1) {
                     val series=SeriesLibrary.build(visible)
                     if(series.isNotEmpty()) { section(dashboard,"Series and anime"); cards(dashboard,series) { parent,item -> seriesCard(parent,item) } }
