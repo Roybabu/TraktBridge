@@ -44,7 +44,7 @@ class PlaybackListener : NotificationListenerService() {
         }
     }
     override fun onListenerConnected() { super.onListenerConnected(); connected=true; DeviceControl.dispatch={ session,action -> runCatching { remoteCommand(session,action) }.getOrDefault(false) }; DebugTrace.event("listener","connected"); prefs.edit().putBoolean("listener_connected",true).apply(); handler.removeCallbacks(poll); handler.post(poll) }
-    override fun onListenerDisconnected() { connected=false; DeviceControl.dispatch=null; DebugTrace.event("listener","disconnected"); handler.removeCallbacks(poll); prefs.edit().putBoolean("listener_connected",false).apply(); runCatching { history.finishAll() }; retained.clear(); sessionIds.clear(); mediaTitles.clear(); super.onListenerDisconnected() }
+    override fun onListenerDisconnected() { connected=false; DeviceControl.dispatch=null; DebugTrace.event("listener","disconnected"); handler.removeCallbacks(poll); prefs.edit().putBoolean("listener_connected",false).apply(); TrackingRecovery.clearObservation(this); runCatching { history.finishAll() }; retained.clear(); sessionIds.clear(); mediaTitles.clear(); super.onListenerDisconnected() }
     override fun onDestroy() { connected=false; DeviceControl.dispatch=null; DebugTrace.event("listener","destroyed"); handler.removeCallbacks(poll); prefs.edit().putBoolean("listener_connected",false).apply(); runCatching { history.finishAll() }; runCatching { serverSampler.close() }; runCatching { history.close() }; super.onDestroy() }
     private fun notifyPending() {
         if (!getSharedPreferences("tracker",MODE_PRIVATE).getBoolean("enabled",false) || !ViewingNotifications.enabled(this)) return

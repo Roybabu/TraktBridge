@@ -6,6 +6,7 @@ import android.content.pm.ServiceInfo
 import android.os.*
 
 class TrackingService: Service() {
+    companion object { @Volatile var running=false; private set }
     private val prefs by lazy { getSharedPreferences("tracker",MODE_PRIVATE) }
     private val handler=Handler(Looper.getMainLooper())
     private var deviceSync: LocalPlaybackSync?=null
@@ -39,7 +40,7 @@ class TrackingService: Service() {
             val now=System.currentTimeMillis()
             val last=prefs.getLong("last_sample",0)
             val tick=SystemClock.elapsedRealtime()
-            if(TrackingHealthPolicy.shouldRebind(now,last,tick,lastRebind)) {
+            if(TrackingRecovery.listenerGranted(this@TrackingService) && TrackingHealthPolicy.shouldRebind(now,last,tick,lastRebind)) {
                 lastRebind=tick
                 DebugTrace.event("foreground","listener stale; requesting rebind")
                 runCatching { android.service.notification.NotificationListenerService.requestRebind(ComponentName(this@TrackingService,PlaybackListener::class.java)) }
@@ -62,16 +63,19 @@ class TrackingService: Service() {
         try { if(Build.VERSION.SDK_INT>=34) startForeground(721,n,ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE) else startForeground(721,n) } catch(e:Exception) {
             DebugTrace.failure("foreground-start",e); prefs.edit().putBoolean("foreground_running",false).putString("sample_error","Foreground start failed").apply(); handler.removeCallbacks(heartbeat); stopSelf(); return START_NOT_STICKY
         }
-        prefs.edit().putBoolean("foreground_running",true).apply()
+        running=true
+        prefs.edit().putBoolean("foreground_running",true).putLong("foreground_started_elapsed",SystemClock.elapsedRealtime()).apply()
         DebugTrace.event("foreground","started")
         handler.removeCallbacks(heartbeat); handler.post(heartbeat)
         return START_STICKY
     }
     override fun onDestroy() {
+        running=false
         handler.removeCallbacks(heartbeat)
         deviceSync?.close(); deviceSync=null
         relaySync?.close(); relaySync=null; RemotePlayback.clear()
-        prefs.edit().putBoolean("foreground_running",false).apply()
+        prefs.edit().putBoolean("foreground_running",false).remove("foreground_started_elapsed").apply()
+        if(!prefs.getBoolean("enabled",false)) TrackingRecovery.clearObservation(this)
         DebugTrace.event("foreground","stopped")
         super.onDestroy()
     }

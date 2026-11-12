@@ -936,7 +936,11 @@ class MainActivity : ComponentActivity() {
         }.onFailure { DebugTrace.failure("foreground",it); Toast.makeText(this,"Unable to start tracking",Toast.LENGTH_LONG).show() }
     }
     override fun onPause() { super.onPause(); if(prefs.getBoolean("privacy_lock",false) && !privacyPrompt) { unlocked=false; if(::shell.isInitialized) shell.visibility=android.view.View.INVISIBLE } }
-    override fun onResume() { super.onResume(); if (::output.isInitialized) refresh(); if (::historyList.isInitialized) refreshHistory(); requirePrivacyUnlock() }
+    override fun onResume() { super.onResume(); if (::output.isInitialized) refresh(); if (::historyList.isInitialized) refreshHistory(); requirePrivacyUnlock(); recoverTrackingWhenVisible() }
+    private fun recoverTrackingWhenVisible() {
+        val permitted=!prefs.getBoolean("privacy_lock",false) || unlocked
+        if(TrackingRecovery.shouldStart(prefs.getBoolean("enabled",false),permitted,TrackingService.running,TrackingRecovery.listenerGranted(this))) startTracking()
+    }
     private fun requirePrivacyUnlock() {
         if(!::shell.isInitialized) return
         if(!prefs.getBoolean("privacy_lock",false) || unlocked) { shell.visibility=android.view.View.VISIBLE; return }
