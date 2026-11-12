@@ -384,6 +384,15 @@ class MainActivity : Activity() {
             android.app.AlertDialog.Builder(this).setTitle("App updates").setMessage("Installed: "+current+"\nRepository: "+latest+"\n"+if(newer) "Newer source version available. Download only a successful permanently signed build." else "No newer repository version detected.").setNegativeButton("Close",null).setPositiveButton("GitHub builds") { _,_->startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://github.com/Roybabu/TraktBridge/actions"))) }.show()
         }
     }
+    private fun libraryStatus(type:String,id:Long):String=getSharedPreferences("library_status",MODE_PRIVATE).getString(type+":"+id,"").orEmpty()
+    private fun setLibraryStatus(type:String,id:Long,label:String) {
+        val statuses=listOf("Watching","Completed locally","Plan to watch","On hold","Dropped","Rewatching","Clear status")
+        choose("Personal status • "+label,statuses) { index ->
+            val edit=getSharedPreferences("library_status",MODE_PRIVATE).edit()
+            if(index==statuses.lastIndex) edit.remove(type+":"+id) else edit.putString(type+":"+id,statuses[index])
+            edit.apply(); refreshHistory()
+        }
+    }
     private fun isFavorite(type:String,id:Long)=getSharedPreferences("favorites",MODE_PRIVATE).contains(type+":"+id)
     private fun toggleFavorite(type:String,id:Long,label:String) {
         val store=getSharedPreferences("favorites",MODE_PRIVATE)
@@ -686,6 +695,7 @@ class MainActivity : Activity() {
         details.addView(txt(series.platforms.joinToString(" • ") { appLabel(it) },13,muted))
         details.addView(txt("Sampled: "+durationText(series.sampledMs),13,muted))
         series.resume?.let { details.addView(txt("Continue: S"+it.representative.season+" E"+it.representative.episode,14,violet,true)) }
+        card.addView(actionButton("Personal status: "+libraryStatus("show",series.id).ifBlank { "Not set" }) { setLibraryStatus("show",series.id,series.title) })
         card.addView(actionButton("Series details") { titleDetails("show",series.id,series.title) })
         card.addView(actionButton(if(isFavorite("show",series.id)) "Remove favorite" else "Add favorite") { toggleFavorite("show",series.id,series.title); refreshHistory() })
         card.addView(actionButton("Browse seasons and episodes") { showSeries(series.id) })
@@ -826,6 +836,7 @@ class MainActivity : Activity() {
         if(r.traktId<=0) details.addView(txt("Identify exact title to combine sessions.",12,muted))
         if(r.traktId>0) card.addView(actionButton("Title details") { titleDetails(if(r.matchType=="episode") "show" else "movie",if(r.matchType=="episode") r.showId else r.traktId,r.matchLabel) })
         if(!g.confirmed) card.addView(actionButton("Open playback app") { openPlaybackApp(g.platforms) })
+        if(r.traktId>0) card.addView(actionButton("Personal status: "+libraryStatus(r.matchType,r.traktId).ifBlank { "Not set" }) { setLibraryStatus(r.matchType,r.traktId,r.matchLabel) })
         if(r.traktId>0) card.addView(actionButton(if(isFavorite(r.matchType,r.traktId)) "Remove favorite" else "Add favorite") { toggleFavorite(r.matchType,r.traktId,r.matchLabel); refreshHistory() })
         if(expanded || g.pending || g.queued) card.addView(actionButton(if(g.confirmed) "View sessions" else "Review / view sessions") { showSessions(g) })
         else card.addView(actionButton("View sessions") { showSessions(g) })

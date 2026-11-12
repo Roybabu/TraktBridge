@@ -12,6 +12,7 @@ class TrackingTile:TileService() {
         val prefs=getSharedPreferences("tracker",MODE_PRIVATE)
         qsTile?.apply { state=if(prefs.getBoolean("enabled",false)) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE; label="TraktBridge"; updateTile() }
     }
+    @android.annotation.SuppressLint("StartActivityAndCollapseDeprecated")
     override fun onClick() {
         super.onClick()
         val prefs=getSharedPreferences("tracker",MODE_PRIVATE)
