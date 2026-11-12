@@ -51,6 +51,9 @@ class MainActivity : ComponentActivity() {
         if(resultCode==RESULT_OK && requestCode in 63..64) data?.data?.let { encryptedTransfer(requestCode,it) }
         if(resultCode==RESULT_OK && requestCode in 60..62) data?.data?.let { historyTransfer(requestCode,it) }
     }
+    private fun deviceTransferGuide() {
+        android.app.AlertDialog.Builder(this).setTitle("Move your library to another device").setMessage("1. Export a password-encrypted history backup.\n2. Export personal settings separately.\n3. Transfer both files using your preferred private file-sharing method.\n4. Restore them on the other device.\n\nThis is manual transfer, not live synchronization. Account credentials and upload approvals never transfer. Reconnect Trakt separately.").setNegativeButton("Close",null).setNeutralButton("Export settings") { _,_->startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/octet-stream").putExtra(Intent.EXTRA_TITLE,"traktbridge-settings.tbenc"),65) }.setPositiveButton("Export history") { _,_->startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/octet-stream").putExtra(Intent.EXTRA_TITLE,"traktbridge-history.tbenc"),63) }.show()
+    }
     private fun settingsTransfer(code:Int,uri:android.net.Uri) {
         val field=EditText(this).apply { hint="Password (10+ characters)"; inputType=android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD }
         android.app.AlertDialog.Builder(this).setTitle("Personal settings backup").setMessage("Includes default-profile collections, notes, favorites and selected display settings. Excludes tokens, tracking permissions, other profiles and learned mappings. Existing settings are not overwritten on import.").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Continue") { _,_->
@@ -366,6 +369,7 @@ class MainActivity : ComponentActivity() {
         button("Appearance accent") { choose("Accent color",listOf("Violet","Blue","Green")) { prefs.edit().putString("accent",listOf("violet","blue","green")[it]).apply(); recreate() } }
         button("Franchise viewing guides") { franchises() }
         button("Recently deleted viewing") { recentlyDeleted() }
+        button("Transfer data to another device") { deviceTransferGuide() }
         button("Share or import collections") { shareCollections() }
         button("Smart collections") { smartCollections() }
         button("Personal collection profiles") { collectionProfiles() }
