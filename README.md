@@ -209,3 +209,6 @@ Prioritized reconciliation of uncertain uploads, bounded queue processing, recov
 
 ## v0.117.0
 Artwork cache bounded by 32 MiB and 100 files, manual artwork cleanup, power-saver idle polling, and bounded history rendering. Active playback polling remains unchanged. Real battery, CPU and memory profiling remains outstanding.
+
+## v0.118.0
+Dependency audit resolves debug and release runtime Maven coordinates, checks known OSV advisories in batches, and fails on findings or incomplete scanning. Reports are retained. This is advisory matching, not a comprehensive code penetration test; build tooling and non-Maven native dependencies are not covered by this scanner.
