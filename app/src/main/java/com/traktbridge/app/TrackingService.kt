@@ -8,12 +8,15 @@ import android.os.*
 class TrackingService: Service() {
     private val prefs by lazy { getSharedPreferences("tracker",MODE_PRIVATE) }
     private val handler=Handler(Looper.getMainLooper())
+    private var lastRebind= -60000L
     private val heartbeat=object: Runnable {
         override fun run() {
             if(!prefs.getBoolean("enabled",false)) { stopSelf(); return }
             val now=System.currentTimeMillis()
             val last=prefs.getLong("last_sample",0)
-            if(last==0L || now-last>20000) {
+            val tick=SystemClock.elapsedRealtime()
+            if((last==0L || now-last>20000 || now<last) && tick-lastRebind>=60000L) {
+                lastRebind=tick
                 DebugTrace.event("foreground","listener stale; requesting rebind")
                 runCatching { android.service.notification.NotificationListenerService.requestRebind(ComponentName(this@TrackingService,PlaybackListener::class.java)) }
             }
@@ -36,7 +39,7 @@ class TrackingService: Service() {
         prefs.edit().putBoolean("foreground_running",true).apply()
         DebugTrace.event("foreground","started")
         handler.removeCallbacks(heartbeat); handler.post(heartbeat)
-        return START_NOT_STICKY
+        return START_STICKY
     }
     override fun onDestroy() {
         handler.removeCallbacks(heartbeat)
