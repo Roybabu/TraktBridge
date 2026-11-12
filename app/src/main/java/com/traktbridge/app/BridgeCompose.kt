@@ -169,3 +169,20 @@ fun BridgeEmptyState(accent:Int,title:String,detail:String,actionLabel:String,on
         }
     }
 }
+
+@Composable
+fun BridgeExpandedHome(accent:Int,live:Boolean,pending:Int,weekly:String,onTracking:()->Unit,onReview:()->Unit,onDiscover:()->Unit,onPlanner:()->Unit,onDevices:()->Unit) {
+    BridgeTheme(accent) {
+        Row(Modifier.fillMaxWidth().padding(vertical=6.dp),horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.weight(1.1f)) { BridgeHomeSummary(accent,live,pending,weekly,onTracking,onReview,onDiscover,onPlanner) }
+            Card(Modifier.weight(1f).padding(vertical=6.dp),colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surface)) {
+                Column(Modifier.padding(20.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
+                    Text("Connected devices",style=MaterialTheme.typography.headlineSmall)
+                    Text("See live playback across your paired phone, tablet and TV.",style=MaterialTheme.typography.bodyLarge)
+                    Button(onClick=onDevices,modifier=Modifier.fillMaxWidth()) { Text("Now Playing") }
+                    OutlinedButton(onClick=onTracking,modifier=Modifier.fillMaxWidth()) { Text("Device settings") }
+                }
+            }
+        }
+    }
+}
