@@ -26,8 +26,8 @@ class MainActivity : Activity() {
     private var analyticsPeriod=30
     private var calendarMonth=java.time.YearMonth.now()
     private val wide:Boolean get()=resources.configuration.screenWidthDp>=720
-    private val ink=0xfff1f0f6.toInt()
-    private val muted=0xffa9a8ba.toInt()
+    private val ink:Int get()=if(prefs.getBoolean("high_contrast",false)) 0xffffffff.toInt() else 0xfff1f0f6.toInt()
+    private val muted:Int get()=if(prefs.getBoolean("high_contrast",false)) 0xffe3e3ef.toInt() else 0xffa9a8ba.toInt()
     private val violet:Int get()=when(prefs.getString("accent","violet")) { "blue"->0xff80bfff.toInt(); "green"->0xff6ee7b7.toInt(); else->0xffb6a0ff.toInt() }
     private val surface=0xff1b1e2a.toInt()
     private val bg=0xff0d0f16.toInt()
@@ -323,6 +323,8 @@ class MainActivity : Activity() {
         button("Clear offline catalogue") { getSharedPreferences("offline_catalogue",MODE_PRIVATE).edit().clear().apply() }
         button("Check for app updates") { checkUpdates() }
         root.addView(Switch(this).apply { text="Hide catalogue spoilers"; isChecked=prefs.getBoolean("hide_spoilers",true); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("hide_spoilers",checked).apply() } })
+        root.addView(Switch(this).apply { text="High contrast text"; isChecked=prefs.getBoolean("high_contrast",false); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("high_contrast",checked).apply(); recreate() } })
+        button("Text size") { choose("Reading size",listOf("System default","Large","Extra large")) { prefs.edit().putInt("reading_size",it).apply(); recreate() } }
         button("Appearance accent") { choose("Accent color",listOf("Violet","Blue","Green")) { prefs.edit().putString("accent",listOf("violet","blue","green")[it]).apply(); recreate() } }
         button("Personal collections") { collections() }
         button("Favorite titles") { favorites() }
@@ -511,10 +513,10 @@ class MainActivity : Activity() {
     private fun dp(n:Int)= (n*resources.displayMetrics.density+0.5f).toInt()
     private fun rounded(color:Int,radius:Int=16)=android.graphics.drawable.GradientDrawable().apply { setColor(color); cornerRadius=dp(radius).toFloat() }
     private fun txt(value:String,size:Int=15,color:Int=ink,bold:Boolean=false)=TextView(this).apply {
-        text=value; textSize=size.toFloat(); setTextColor(color); if(bold) setTypeface(null,android.graphics.Typeface.BOLD)
+        text=value; textSize=size.toFloat()*when(prefs.getInt("reading_size",0)) { 1->1.15f; 2->1.3f; else->1f }; setTextColor(color); if(bold) setTypeface(null,android.graphics.Typeface.BOLD)
     }
     private fun actionButton(label:String,action:()->Unit)=Button(this).apply {
-        text=label; isAllCaps=false; setTextColor(ink); background=rounded(0xff302a48.toInt(),12); minHeight=dp(46)
+        text=label; isAllCaps=false; setTextColor(ink); textSize=14f*when(prefs.getInt("reading_size",0)) { 1->1.15f; 2->1.3f; else->1f }; background=rounded(0xff302a48.toInt(),12); minHeight=dp(48)
         layoutParams=LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(6) }; setOnClickListener { action() }
     }
     private fun panel(parent:LinearLayout):LinearLayout=LinearLayout(this).apply {
@@ -753,7 +755,7 @@ class MainActivity : Activity() {
     private fun heroCard(parent:LinearLayout,g:ViewingTitle) {
         val r=g.representative
         val card=panel(parent)
-        val image=ImageView(this).apply { scaleType=ImageView.ScaleType.CENTER_CROP; setBackgroundColor(0xff343448.toInt()); contentDescription="Featured title artwork" }
+        val image=ImageView(this).apply { scaleType=ImageView.ScaleType.CENTER_CROP; setBackgroundColor(0xff343448.toInt()); contentDescription="Artwork for "+r.matchLabel.ifBlank { r.title } }
         card.addView(image,LinearLayout.LayoutParams(-1,dp(if(wide) 280 else 190)))
         if(r.traktId>0) Artwork.load(this,if(r.matchType=="episode") "show" else "movie",if(r.matchType=="episode") r.showId else r.traktId,image)
         card.addView(txt(r.matchLabel.ifBlank { r.title.ifBlank { "Unidentified video" } },24,ink,true))
@@ -852,7 +854,7 @@ class MainActivity : Activity() {
     private fun seriesCard(parent:LinearLayout,series:SeriesGroup) {
         val card=panel(parent)
         val row=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL }; card.addView(row)
-        val poster=ImageView(this).apply { scaleType=ImageView.ScaleType.CENTER_CROP; setImageResource(android.R.drawable.ic_media_play); contentDescription="Series poster" }
+        val poster=ImageView(this).apply { scaleType=ImageView.ScaleType.CENTER_CROP; setImageResource(android.R.drawable.ic_media_play); contentDescription="Poster for "+series.title }
         row.addView(poster,LinearLayout.LayoutParams(dp(94),dp(141)).apply { rightMargin=dp(14) })
         Artwork.load(this,"show",series.id,poster)
         val details=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }; row.addView(details,LinearLayout.LayoutParams(0,-2,1f))
@@ -982,7 +984,7 @@ class MainActivity : Activity() {
         val card=panel(parent)
         val row=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL }
         card.addView(row)
-        val poster=ImageView(this).apply { scaleType=ImageView.ScaleType.CENTER_CROP; setImageResource(android.R.drawable.ic_media_play); setBackgroundColor(0xff343448.toInt()); contentDescription="Title poster" }
+        val poster=ImageView(this).apply { scaleType=ImageView.ScaleType.CENTER_CROP; setImageResource(android.R.drawable.ic_media_play); setBackgroundColor(0xff343448.toInt()); contentDescription="Poster for "+r.matchLabel.ifBlank { r.title } }
         row.addView(poster,LinearLayout.LayoutParams(dp(94),dp(141)).apply { rightMargin=dp(14) })
         if(r.traktId>0) Artwork.load(this,if(r.matchType=="episode") "show" else "movie",if(r.matchType=="episode") r.showId else r.traktId,poster)
         val details=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
@@ -1018,7 +1020,7 @@ class MainActivity : Activity() {
         val card=panel(parent)
         val row=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=android.view.Gravity.TOP }
         card.addView(row)
-        val poster=ImageView(this).apply { scaleType=ImageView.ScaleType.CENTER_CROP; setImageResource(android.R.drawable.ic_media_play); setBackgroundColor(0xff343448.toInt()); contentDescription="Poster artwork" }
+        val poster=ImageView(this).apply { scaleType=ImageView.ScaleType.CENTER_CROP; setImageResource(android.R.drawable.ic_media_play); setBackgroundColor(0xff343448.toInt()); contentDescription="Poster for "+r.matchLabel.ifBlank { r.title } }
         row.addView(poster,LinearLayout.LayoutParams(dp(94),dp(141)).apply { rightMargin=dp(14) })
         if(r.traktId>0) Artwork.load(this,if(r.matchType=="episode") "show" else "movie",if(r.matchType=="episode") r.showId else r.traktId,poster)
         val details=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
