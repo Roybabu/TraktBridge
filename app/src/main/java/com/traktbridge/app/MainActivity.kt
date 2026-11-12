@@ -611,12 +611,11 @@ class MainActivity : ComponentActivity() {
                 if(recent.isEmpty()) panel(dashboard).addView(txt("Your viewing history will appear here.",15,muted)) else cards(dashboard,recent) { parent,g -> titleCard(parent,g,false) }
             }
             1,2 -> {
-                section(dashboard,if(tab==1) "Viewing history" else "Needs your review")
-                dashboard.addView(actionButton("Log a watch manually") { manualLog() })
+                if(tab==1) dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeLibraryToolbar(violet,groups.size.toString()+" identified titles and provisional groups",{ universalSearch() },{ editHistoryFilter(records) },{ manualLog() }) } })
+                else { section(dashboard,"Needs your review"); dashboard.addView(actionButton("Log a watch manually") { manualLog() }) }
                 dashboard.addView(actionButton("Refresh") { refreshHistory() })
                 if(tab==2) { dashboard.addView(actionButton("Review recent app activity") { reviewUsage() }); dashboard.addView(actionButton("Retry approved sync queue") { HistorySync.schedule(this); refreshHistory() }) }
                 if(tab==1) {
-                    dashboard.addView(actionButton("Search and filter history") { editHistoryFilter(records) })
                     dashboard.addView(txt("Filters: "+listOfNotNull(historyFilter.query.takeIf { it.isNotBlank() }?.let { "Search: "+it },historyFilter.source.takeIf { it.isNotBlank() }?.let { appLabel(it) },historyFilter.period.takeIf { it>0 }?.let { "Last "+it+" days" },historyFilter.type.takeIf { it.isNotBlank() },historyFilter.status.takeIf { it.isNotBlank() } ).joinToString(" • ").ifBlank { "All viewing" },13,muted))
                     if(historyFilter!=HistoryFilter()) dashboard.addView(actionButton("Reset filters") { historyFilter=HistoryFilter(); historyLimit=100; refreshHistory() })
                 }
@@ -1265,10 +1264,11 @@ class MainActivity : ComponentActivity() {
         if(r.traktId<=0) details.addView(txt("Identify exact title to combine sessions.",12,muted))
         if(r.traktId>0) card.addView(actionButton("Title details") { titleDetails(if(r.matchType=="episode") "show" else "movie",if(r.matchType=="episode") r.showId else r.traktId,r.matchLabel) })
         if(!g.confirmed) card.addView(actionButton("Open playback app") { openPlaybackApp(g.platforms) })
-        if(r.traktId>0) card.addView(actionButton("Personal status: "+libraryStatus(r.matchType,r.traktId).ifBlank { "Not set" }) { setLibraryStatus(r.matchType,r.traktId,r.matchLabel) })
-        if(r.traktId>0) card.addView(actionButton(if(isFavorite(r.matchType,r.traktId)) "Remove favorite" else "Add favorite") { toggleFavorite(r.matchType,r.traktId,r.matchLabel); refreshHistory() })
-        if(r.traktId>0) card.addView(actionButton("My notes and tags") { editTitleNotes(r.matchType,r.traktId,r.matchLabel) })
-        if(r.traktId>0) card.addView(actionButton("Add to collection") { addCollection(r.matchType,r.traktId,r.matchLabel) })
+        if(r.traktId>0) card.addView(actionButton("More title actions") {
+            choose("Manage title",listOf("Personal status: "+libraryStatus(r.matchType,r.traktId).ifBlank { "Not set" },if(isFavorite(r.matchType,r.traktId)) "Remove favorite" else "Add favorite","Notes and tags","Add to collection")) { action ->
+                when(action) { 0->setLibraryStatus(r.matchType,r.traktId,r.matchLabel); 1->{ toggleFavorite(r.matchType,r.traktId,r.matchLabel); refreshHistory() }; 2->editTitleNotes(r.matchType,r.traktId,r.matchLabel); 3->addCollection(r.matchType,r.traktId,r.matchLabel) }
+            }
+        })
         if(expanded || g.pending || g.queued) card.addView(actionButton(if(g.confirmed) "View sessions" else "Review / view sessions") { showSessions(g) })
         else card.addView(actionButton("View sessions") { showSessions(g) })
     }
