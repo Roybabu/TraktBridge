@@ -10,13 +10,21 @@ class TrackingService: Service() {
     private val handler=Handler(Looper.getMainLooper())
     private var deviceSync: LocalPlaybackSync?=null
     private var relaySync: RelayPlaybackSync?=null
+    private var lastPeers=emptySet<String>()
     private fun updateDeviceSync() {
-        val config=if(PlaybackSharing.enabled(this)) RelaySettings.load(this) else null
+        val peers=DevicePairing.peers(this).map { it.id }.toSet()
+        if(peers!=lastPeers) {
+            deviceSync?.close(); deviceSync=null
+            relaySync?.close(); relaySync=null
+            RemotePlayback.clear(); lastPeers=peers
+        }
+        if(deviceSync?.isClosed()==true) deviceSync=null
+        val config=if(PlaybackSharing.enabled(this) && peers.isNotEmpty()) RelaySettings.load(this) else null
         if(relaySync?.config!=config) {
             relaySync?.close(); relaySync=null
             if(config!=null) runCatching { RelayPlaybackSync(this,config).also { it.start(); relaySync=it } }.onFailure { DebugTrace.failure("relay-sync",it) }
         }
-        val allowed=PlaybackSharing.enabled(this) && PlaybackSharing.localWifi(this)
+        val allowed=PlaybackSharing.enabled(this) && PlaybackSharing.localWifi(this) && peers.isNotEmpty()
         if(!allowed) { deviceSync?.close(); deviceSync=null; return }
         if(deviceSync==null) runCatching {
             val sync=LocalPlaybackSync(this)

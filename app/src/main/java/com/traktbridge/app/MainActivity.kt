@@ -463,6 +463,7 @@ class MainActivity : ComponentActivity() {
         fun label(s: String) { root.addView(txt(s,15,muted)) }
         fun button(s: String, action: () -> Unit) { root.addView(actionButton(s,action)) }
         label("SETTINGS • Account and tracking")
+        button("Manage paired devices and revoke access") { managePairedDevices() }
         button("Cross-device history sharing") {
             val enabled=prefs.getBoolean("device_history",false)
             android.app.AlertDialog.Builder(this).setTitle(if(enabled) "Disable history sharing?" else "Share viewing history with paired devices?")
@@ -725,7 +726,7 @@ class MainActivity : ComponentActivity() {
     private fun privacyMode() {
         android.app.AlertDialog.Builder(this).setTitle("Pause all playback tracking?").setMessage("Sampling, title hints and optional usage reminders stop. Existing history and already approved uploads are retained. Restart tracking manually in Settings.").setNegativeButton("Cancel",null).setPositiveButton("Pause tracking") { _,_->
             val generation=prefs.getLong("ocr_generation",0)+1
-            val edit=prefs.edit().putBoolean("enabled",false).putBoolean("title_optin",false).remove("usage_since").remove("sessions").remove("last_nonempty_sessions")
+            val edit=prefs.edit().putBoolean("enabled",false).putBoolean("device_sharing",false).putBoolean("device_controls",false).putBoolean("device_history",false).putBoolean("title_optin",false).remove("usage_since").remove("sessions").remove("last_nonempty_sessions")
             prefs.all.keys.filter { it.startsWith("ocr_") || it.startsWith("title_hint:") || it.startsWith("title_detail:") || it.startsWith("title_time:") }.forEach { edit.remove(it) }
             edit.putLong("ocr_generation",generation).apply(); stopService(Intent(this,TrackingService::class.java)); recreate()
         }.show()
@@ -1466,6 +1467,23 @@ class MainActivity : ComponentActivity() {
                 if(items.size>20) body.addView(txt("More entries in the viewing calendar.",13,muted))
             }
             android.app.AlertDialog.Builder(this).setTitle("Viewing journal").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
+        }
+    }
+    private fun managePairedDevices() {
+        val peers=DevicePairing.peers(this).sortedBy { it.label }
+        if(peers.isEmpty()) { Toast.makeText(this,"No authorized devices",Toast.LENGTH_SHORT).show(); return }
+        val labels=peers.map { it.label+" • "+it.id.take(12) }+"Revoke all devices"
+        choose("Manage paired devices",labels) { i ->
+            val peer=peers.getOrNull(i)
+            android.app.AlertDialog.Builder(this).setTitle(if(peer==null) "Revoke all devices?" else "Revoke "+peer.label+"?")
+                .setMessage("Access to playback, history and remote controls will be removed. Received history from revoked devices will be deleted locally. Pair again with a fresh invitation to restore access. Local viewing history and Trakt approvals remain unchanged.")
+                .setNegativeButton("Cancel",null).setPositiveButton("Revoke") { _,_->
+                    runCatching {
+                        if(peer==null) DevicePairing.revokeAll(this) else DevicePairing.revoke(this,peer.id)
+                        if(prefs.getBoolean("enabled",false)) startTracking()
+                        Thread { runCatching { DeviceHistory.clear(applicationContext,peer?.id) } }.start()
+                    }.fold({ Toast.makeText(this,"Device access revoked",Toast.LENGTH_LONG).show() },{ Toast.makeText(this,"Unable to revoke device",Toast.LENGTH_LONG).show() })
+                }.show()
         }
     }
     private fun showDeviceHistory() {

@@ -14,7 +14,7 @@ object DevicePairing {
     private const val TTL = 120000L
     private val encoder = Base64.getUrlEncoder().withoutPadding()
     private val decoder = Base64.getUrlDecoder()
-    data class Peer(val id: String, val key: ByteArray, val label: String)
+    data class Peer(val id: String, val key: ByteArray, val label: String,val expires: Long=0,val nonce:String="")
     fun encode(bytes: ByteArray): String = encoder.encodeToString(bytes)
     fun decode(value: String): ByteArray = decoder.decode(value)
     fun verificationCode(token: String): String {
@@ -45,14 +45,32 @@ object DevicePairing {
         signature.initVerify(publicKey)
         signature.update(fields.take(5).joinToString(".").toByteArray(Charsets.US_ASCII))
         require(signature.verify(decode(fields[5])))
-        return Peer(DeviceIdentity.fingerprint(key),key,label)
+        return Peer(DeviceIdentity.fingerprint(key),key,label,expires,fields[4])
     }
     @Synchronized fun approve(context: Context, peer: Peer) {
         require(peer.id==DeviceIdentity.fingerprint(peer.key) && peer.id!=DeviceIdentity.register(context).id)
         val prefs=context.getSharedPreferences("paired_devices",Context.MODE_PRIVATE)
+        require(peer.expires>=System.currentTimeMillis() && peer.nonce.isNotBlank())
+        val used=context.getSharedPreferences("used_device_invitations",Context.MODE_PRIVATE)
+        val now=System.currentTimeMillis()
+        val edit=used.edit()
+        used.all.forEach { (key,value) -> if((value as? Long ?: 0L)<now) edit.remove(key) }
+        val nonceKey=peer.id+":"+peer.nonce
+        require(!used.contains(nonceKey) && used.all.count { (it.value as? Long ?: 0L)>=now }<256)
         require(prefs.contains(peer.id) || prefs.all.size<32)
+        check(edit.putLong(nonceKey,peer.expires).commit())
         check(prefs.edit().putString(peer.id,encode(peer.key)+"."+encode(peer.label.toByteArray(Charsets.UTF_8))).commit())
     }
+    @Synchronized fun revoke(context:Context,id:String) {
+        require(id.matches(Regex("[0-9a-f]{64}")))
+        check(context.getSharedPreferences("paired_devices",Context.MODE_PRIVATE).edit().remove(id).commit())
+        RemotePlayback.remove(id)
+    }
+    @Synchronized fun revokeAll(context:Context) {
+        check(context.getSharedPreferences("paired_devices",Context.MODE_PRIVATE).edit().clear().commit())
+        RemotePlayback.clear()
+    }
+    fun authorized(context:Context,id:String)=peers(context).any { it.id==id }
     fun peers(context: Context): List<Peer> =
         context.getSharedPreferences("paired_devices",Context.MODE_PRIVATE).all.mapNotNull { (id,value) ->
             runCatching {

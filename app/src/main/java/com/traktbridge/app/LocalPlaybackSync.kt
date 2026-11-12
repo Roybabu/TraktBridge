@@ -55,6 +55,7 @@ object RemotePlayback {
         }
         try { commands.execute(job) } catch(_:RejectedExecutionException) { main.post { done(false) } }
     }
+    fun remove(id:String) { entries.remove(id) }
     fun clearLocal() { entries.entries.removeIf { it.value.endpoint!=null } }
     fun clear()=entries.clear()
 }
@@ -68,6 +69,7 @@ class LocalPlaybackSync(context: Context): java.io.Closeable {
     private val server=ssl.serverSocketFactory.createServerSocket(0) as SSLServerSocket
     private val workers=ThreadPoolExecutor(2,2,0,TimeUnit.SECONDS,ArrayBlockingQueue(8))
     private val client=ThreadPoolExecutor(1,1,0,TimeUnit.SECONDS,ArrayBlockingQueue(2))
+    private val sockets=ConcurrentHashMap.newKeySet<SSLSocket>()
     private val endpoints=linkedMapOf<String,InetSocketAddress>()
     private val pending=ArrayDeque<NsdServiceInfo>()
     private var resolving=false
@@ -78,7 +80,7 @@ class LocalPlaybackSync(context: Context): java.io.Closeable {
     private var actual=name
     private val registration=object:NsdManager.RegistrationListener {
         override fun onServiceRegistered(info:NsdServiceInfo) { main.post { actual=info.serviceName; if(closed) runCatching { nsd.unregisterService(this) } } }
-        override fun onRegistrationFailed(info:NsdServiceInfo,code:Int) {}
+        override fun onRegistrationFailed(info:NsdServiceInfo,code:Int) { main.post { close() } }
         override fun onServiceUnregistered(info:NsdServiceInfo) {}
         override fun onUnregistrationFailed(info:NsdServiceInfo,code:Int) {}
     }
@@ -102,7 +104,7 @@ class LocalPlaybackSync(context: Context): java.io.Closeable {
     private val discovery=object:NsdManager.DiscoveryListener {
         override fun onDiscoveryStarted(type:String) {}
         override fun onDiscoveryStopped(type:String) {}
-        override fun onStartDiscoveryFailed(type:String,code:Int) {}
+        override fun onStartDiscoveryFailed(type:String,code:Int) { main.post { close() } }
         override fun onStopDiscoveryFailed(type:String,code:Int) {}
         override fun onServiceFound(info:NsdServiceInfo) { main.post {
             if(!closed && DeviceDiscovery.validName(info.serviceName) && info.serviceName!=name && info.serviceName!=actual && pending.size<32 && endpoints.size<32) {
@@ -111,6 +113,7 @@ class LocalPlaybackSync(context: Context): java.io.Closeable {
         } }
         override fun onServiceLost(info:NsdServiceInfo) { main.post { endpoints.remove(info.serviceName); pending.removeAll { it.serviceName==info.serviceName } } }
     }
+    fun isClosed()=closed
     private fun allowed()=!closed && PlaybackSharing.enabled(app) && PlaybackSharing.localWifi(app)
     private val poll=object:Runnable {
         override fun run() {
@@ -122,18 +125,22 @@ class LocalPlaybackSync(context: Context): java.io.Closeable {
                         if(!allowed()) break
                         runCatching {
                             (ssl.socketFactory.createSocket() as SSLSocket).use { socket ->
+                                sockets.add(socket)
+                                try {
+                                if(!allowed()) return@use
                                 DeviceTls.configure(socket,false)
                                 socket.connect(target,2000)
                                 val peer=DeviceTls.authenticate(app,socket)
                                 if(allowed()) {
                                     val rows=PlaybackSharing.read(DataInputStream(socket.inputStream))
                                     if(allowed() && DevicePairing.peers(app).any { it.id==peer.id }) RemotePlayback.put(peer,rows,target)
-                                    if(allowed() && DeviceHistory.enabled(app)) runCatching {
+                                    if(allowed() && DeviceHistory.enabled(app) && DevicePairing.authorized(app,peer.id)) runCatching {
                                         val output=DataOutputStream(socket.outputStream); output.writeByte(2); output.flush()
                                         val history=DeviceHistory.read(DataInputStream(socket.inputStream))
                                         if(allowed()) DeviceHistory.merge(app,peer.id,history)
                                     }
                                 }
+                                } finally { sockets.remove(socket) }
                             }
                         }
                     }
@@ -148,19 +155,25 @@ class LocalPlaybackSync(context: Context): java.io.Closeable {
         Thread {
             while(!closed) {
                 val socket=try { server.accept() as SSLSocket } catch(_:Exception) { break }
+                sockets.add(socket)
+                if(closed) { sockets.remove(socket); socket.close(); break }
                 try { workers.execute {
-                    socket.use {
+                    try { socket.use {
                         runCatching {
                             if(!allowed()) return@runCatching
                             DeviceTls.configure(it,true)
                             val peer=DeviceTls.authenticate(app,it)
-                            if(allowed() && DevicePairing.peers(app).any { p -> p.id==peer.id })
-                                {
+                            if(allowed() && DevicePairing.authorized(app,peer.id)) {
                                 val output=DataOutputStream(it.outputStream)
-                                PlaybackSharing.write(output,PlaybackSharing.snapshot(app))
+                                val snapshot=PlaybackSharing.snapshot(app)
+                                if(!allowed() || !DevicePairing.authorized(app,peer.id)) return@runCatching
+                                PlaybackSharing.write(output,snapshot)
                                 val input=DataInputStream(it.inputStream)
                                 when(input.readUnsignedByte()) {
-                                2 -> if(allowed() && DevicePairing.peers(app).any { p -> p.id==peer.id }) DeviceHistory.write(output,DeviceHistory.snapshot(app))
+                                2 -> if(allowed() && DevicePairing.authorized(app,peer.id)) {
+                                    val snapshot=DeviceHistory.snapshot(app)
+                                    if(allowed() && DevicePairing.authorized(app,peer.id)) DeviceHistory.write(output,snapshot)
+                                }
                                 1 -> {
                                     val session=input.readUTF(); val action=input.readUTF()
                                     output.writeBoolean(DeviceControl.execute(app,peer.id,session,action)); output.flush()
@@ -168,8 +181,8 @@ class LocalPlaybackSync(context: Context): java.io.Closeable {
                                 }
                             }
                         }
-                    }
-                } } catch(_:RejectedExecutionException) { runCatching { socket.close() } }
+                    } } finally { sockets.remove(socket) }
+                } } catch(_:RejectedExecutionException) { sockets.remove(socket); runCatching { socket.close() } }
             }
         }.apply { isDaemon=true; start() }
         try {
@@ -187,7 +200,8 @@ class LocalPlaybackSync(context: Context): java.io.Closeable {
         if(discovering) runCatching { nsd.stopServiceDiscovery(discovery) }
         if(registered) runCatching { nsd.unregisterService(registration) }
         runCatching { server.close() }
-        workers.shutdown(); client.shutdownNow()
+        sockets.forEach { runCatching { it.close() } }; sockets.clear()
+        workers.shutdownNow(); client.shutdownNow()
         endpoints.clear(); pending.clear(); RemotePlayback.clearLocal()
     }
 }

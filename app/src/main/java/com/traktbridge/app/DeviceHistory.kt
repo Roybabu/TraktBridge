@@ -58,7 +58,7 @@ object DeviceHistory {
         val now=System.currentTimeMillis()
         return (0 until rows.length()).mapNotNull { i -> runCatching { parse(rows.getJSONObject(i)) }.getOrNull()?.takeIf { valid(it,now) } }.distinctBy { it.id }
     }
-    fun merge(context:Context,peer:String,events:List<Event>) {
+    @Synchronized fun merge(context:Context,peer:String,events:List<Event>) {
         if(!enabled(context) || DevicePairing.peers(context).none { it.id==peer }) return
         val helper=WatchHistory(context)
         try {
@@ -97,7 +97,7 @@ object DeviceHistory {
             return out
         } finally { helper.close() }
     }
-    fun clear(context:Context,peer:String?=null) {
+    @Synchronized fun clear(context:Context,peer:String?=null) {
         val db=WatchHistory(context)
         try { if(peer==null) db.writableDatabase.delete("device_history",null,null) else db.writableDatabase.delete("device_history","peer=?",arrayOf(peer)) } finally { db.close() }
     }

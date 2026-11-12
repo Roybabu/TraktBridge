@@ -64,9 +64,10 @@ class RelayPlaybackSync(context:Context,val config:RelaySettings.Config):java.io
                     (ssl.socketFactory.createSocket(raw,config.host,config.port,true) as SSLSocket).use { secure ->
                         DeviceTls.configure(secure,role==1)
                         val peer=DeviceTls.authenticate(app,secure)
-                        require(peer.id==expected.id && allowed())
+                        require(peer.id==expected.id && allowed() && DevicePairing.authorized(app,peer.id))
                         val outgoing=PlaybackSharing.snapshot(app)
                         for(i in 0 until outgoing.length()) outgoing.optJSONObject(i)?.put("controlMask",0)
+                        require(allowed() && DevicePairing.authorized(app,peer.id))
                         PlaybackSharing.write(DataOutputStream(secure.outputStream),outgoing)
                         val incoming=PlaybackSharing.read(DataInputStream(secure.inputStream))
                         for(i in 0 until incoming.length()) incoming.optJSONObject(i)?.put("controlMask",0)
@@ -76,9 +77,20 @@ class RelayPlaybackSync(context:Context,val config:RelaySettings.Config):java.io
                             // Exchange consent first; either side may decline history independently.
                             output.writeBoolean(DeviceHistory.enabled(app)); output.flush()
                             val remoteConsent=input.readBoolean()
-                            if(remoteConsent && DeviceHistory.enabled(app) && allowed()) {
-                                if(role==0) { DeviceHistory.write(output,DeviceHistory.snapshot(app)); DeviceHistory.merge(app,peer.id,DeviceHistory.read(input)) }
-                                else { val records=DeviceHistory.read(input); if(allowed()) DeviceHistory.merge(app,peer.id,records); DeviceHistory.write(output,DeviceHistory.snapshot(app)) }
+                            if(remoteConsent && DeviceHistory.enabled(app) && allowed() && DevicePairing.authorized(app,peer.id)) {
+                                if(role==0) {
+                                    val history=DeviceHistory.snapshot(app)
+                                    require(allowed() && DevicePairing.authorized(app,peer.id))
+                                    DeviceHistory.write(output,history)
+                                    val records=DeviceHistory.read(input)
+                                    if(allowed()) DeviceHistory.merge(app,peer.id,records)
+                                } else {
+                                    val records=DeviceHistory.read(input)
+                                    if(allowed()) DeviceHistory.merge(app,peer.id,records)
+                                    val history=DeviceHistory.snapshot(app)
+                                    require(allowed() && DevicePairing.authorized(app,peer.id))
+                                    DeviceHistory.write(output,history)
+                                }
                             }
                         }
                     }
