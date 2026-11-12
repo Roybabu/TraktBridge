@@ -12,6 +12,7 @@ import javax.net.ssl.HttpsURLConnection
 data class CatalogueItem(val type: String, val id: Long, val title: String, val year: Int = 0, val showId: Long = 0, val season: Int = -1, val episode: Int = -1, val runtimeMinutes: Int = 0) {
     fun label(): String = if (type == "episode") title + " • S" + season + " E" + episode else title + (if (year > 0) " (" + year + ")" else "") + " • " + type
 }
+data class TitleDetails(val title:String,val overview:String,val year:Int,val runtime:Int,val rating:Double,val genres:String,val trailer:String,val released:String)
 data class CatalogueSeason(val number: Int, val title: String)
 
 object TraktCatalogue {
@@ -59,5 +60,17 @@ object TraktCatalogue {
             if (n <= 0 || eid <= 0) null else CatalogueItem("episode",eid,show.title + " — " + o.optString("title","Episode " + n),show.year,show.id,season,n,o.optInt("runtime"))
         }.distinctBy { it.id }.sortedBy { it.episode }
     }
+    fun details(type:String,id:Long,done:(Result<TitleDetails>)->Unit)=request(done) {
+        require(id>0 && type in setOf("movie","show"))
+        val c=URL("https://api.trakt.tv/"+RemoteRules.plural(type)+"/"+id+"?extended=full").openConnection() as HttpsURLConnection
+        try {
+            c.connectTimeout=15000; c.readTimeout=15000; c.instanceFollowRedirects=false
+            c.setRequestProperty("trakt-api-key",TraktAuth.CLIENT_ID); c.setRequestProperty("trakt-api-version","2")
+            require(c.responseCode in 200..299) { "Catalogue unavailable" }
+            val o=JSONObject(c.inputStream.bufferedReader().use { it.readText() })
+            TitleDetails(o.optString("title"),o.optString("overview"),o.optInt("year"),o.optInt("runtime"),o.optDouble("rating",0.0),objectsGenres(o.optJSONArray("genres")),o.optString("trailer"),o.optString("released",o.optString("first_aired")))
+        } finally { c.disconnect() }
+    }
+    private fun objectsGenres(a:JSONArray?):String=(0 until (a?.length() ?: 0)).map { a?.optString(it).orEmpty() }.joinToString(" • ")
     fun suggestedQuery(title: String): String = TitleNormalizer.suggestedQuery(title)
 }

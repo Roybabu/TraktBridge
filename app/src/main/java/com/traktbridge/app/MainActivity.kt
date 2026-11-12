@@ -472,6 +472,21 @@ class MainActivity : Activity() {
             }
         }
     }
+    private fun titleDetails(type:String,id:Long,label:String) {
+        lookup("Loading title details",{ done -> TraktCatalogue.details(type,id,done) }) { d:TitleDetails ->
+            val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(12),dp(16),dp(12)) }
+            val image=ImageView(this).apply { scaleType=ImageView.ScaleType.FIT_CENTER; contentDescription="Poster" }
+            body.addView(image,LinearLayout.LayoutParams(-1,dp(240))); Artwork.load(this,type,id,image)
+            body.addView(txt(d.title.ifBlank { label },24,ink,true))
+            body.addView(txt(listOf(d.year.takeIf { it>0 }?.toString().orEmpty(),d.runtime.takeIf { it>0 }?.let { it.toString()+" min" }.orEmpty(),d.genres).filter { it.isNotBlank() }.joinToString(" • "),14,muted))
+            if(d.rating>0) body.addView(txt("Trakt rating: "+String.format(java.util.Locale.US,"%.1f",d.rating)+"/10",16,violet))
+            body.addView(txt(d.overview.ifBlank { "No overview available" },16))
+            if(d.released.isNotBlank()) body.addView(txt("Release: "+d.released,13,muted))
+            body.addView(actionButton("Watchlist / rating") { lookup("Checking account",{ done -> TraktLibrary.accountId(this,done) }) { account:String -> remoteActions(RemoteItem(type,id,d.title),account) } })
+            if(d.trailer.startsWith("https://")) body.addView(actionButton("Open trailer") { runCatching { startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse(d.trailer))) } })
+            android.app.AlertDialog.Builder(this).setTitle("Title details").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
+        }
+    }
     private fun heroCard(parent:LinearLayout,g:ViewingTitle) {
         val r=g.representative
         val card=panel(parent)
@@ -484,6 +499,7 @@ class MainActivity : Activity() {
             card.addView(ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal).apply { progress=(g.positionMs.toDouble()/g.durationMs*100).toInt().coerceIn(0,100); progressTintList=android.content.res.ColorStateList.valueOf(violet) })
             card.addView(txt(durationText(g.remainingMs)+" remaining",14,muted))
         }
+        if(r.traktId>0) card.addView(actionButton("Title details") { titleDetails(if(r.matchType=="episode") "show" else "movie",if(r.matchType=="episode") r.showId else r.traktId,r.matchLabel) })
         card.addView(actionButton("View title and sessions") { showSessions(g) })
     }
     private fun <T> cards(parent:LinearLayout,items:List<T>,render:(LinearLayout,T)->Unit) {
@@ -581,6 +597,7 @@ class MainActivity : Activity() {
         details.addView(txt(series.platforms.joinToString(" • ") { appLabel(it) },13,muted))
         details.addView(txt("Sampled: "+durationText(series.sampledMs),13,muted))
         series.resume?.let { details.addView(txt("Continue: S"+it.representative.season+" E"+it.representative.episode,14,violet,true)) }
+        card.addView(actionButton("Series details") { titleDetails("show",series.id,series.title) })
         card.addView(actionButton("Browse seasons and episodes") { showSeries(series.id) })
     }
     private fun showSeries(id:Long) {
@@ -717,6 +734,7 @@ class MainActivity : Activity() {
         } else { if(g.catalogueRuntimeMs>0) details.addView(txt("Catalogue runtime: "+durationText(g.catalogueRuntimeMs),13,muted)); details.addView(txt("Remaining time unavailable • player position unknown",13,muted)) }
         if(g.bufferingMs>0 || g.pausedMs>0 || g.seeks>0 || g.uncertainMs>0) details.addView(txt("Paused: "+durationText(g.pausedMs)+" • Buffering: "+durationText(g.bufferingMs)+" • Seeks: "+g.seeks+" • Uncertain: "+durationText(g.uncertainMs),12,muted))
         if(r.traktId<=0) details.addView(txt("Identify exact title to combine sessions.",12,muted))
+        if(r.traktId>0) card.addView(actionButton("Title details") { titleDetails(if(r.matchType=="episode") "show" else "movie",if(r.matchType=="episode") r.showId else r.traktId,r.matchLabel) })
         if(expanded || g.pending || g.queued) card.addView(actionButton(if(g.confirmed) "View sessions" else "Review / view sessions") { showSessions(g) })
         else card.addView(actionButton("View sessions") { showSessions(g) })
     }
