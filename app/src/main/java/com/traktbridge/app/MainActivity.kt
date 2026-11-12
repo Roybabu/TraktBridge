@@ -328,6 +328,7 @@ class MainActivity : Activity() {
         button("Text size") { choose("Reading size",listOf("System default","Large","Extra large")) { prefs.edit().putInt("reading_size",it).apply(); recreate() } }
         button("Appearance accent") { choose("Accent color",listOf("Violet","Blue","Green")) { prefs.edit().putString("accent",listOf("violet","blue","green")[it]).apply(); recreate() } }
         button("Franchise viewing guides") { franchises() }
+        button("Recently deleted viewing") { recentlyDeleted() }
         button("Personal collections") { collections() }
         button("Favorite titles") { favorites() }
         button("Guided tracking setup") { setupGuide() }
@@ -685,6 +686,12 @@ class MainActivity : Activity() {
                 lookup("Searching Trakt",{ done -> TraktCatalogue.search(title.substringBeforeLast(" ("),"movie",done) }) { rows:List<CatalogueItem> -> choose("Select exact movie",rows.map { it.label() }) { j -> titleDetails("movie",rows[j].id,rows[j].title) } }
             }) }
             android.app.AlertDialog.Builder(this).setTitle(guide.first).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
+        }
+    }
+    private fun recentlyDeleted() {
+        val rows=history.trashed()
+        choose("Recently deleted",rows.map { it.matchLabel.ifBlank { it.title.ifBlank { "Unidentified video" } } }) { i ->
+            android.app.AlertDialog.Builder(this).setTitle("Restore viewing record?").setMessage("Restore for local review. Nothing will be uploaded.").setNegativeButton("Cancel",null).setPositiveButton("Restore") { _,_->history.restoreTrash(rows[i].id); refreshHistory() }.show()
         }
     }
     private fun peopleSearch(q:String) {
@@ -1207,7 +1214,7 @@ class MainActivity : Activity() {
                     val title = field.text.toString().trim(); if (title.isNotEmpty()) { history.review(r.id,title); ViewingNotifications.cancel(this@MainActivity,r.id); refreshHistory() }
                 }.show()
             } })
-            if (r.status in setOf("pending","reviewed")) card.addView(Button(this).apply { text = "Delete viewing record"; setOnClickListener { android.app.AlertDialog.Builder(this@MainActivity).setTitle("Delete this local record?").setNegativeButton("Cancel",null).setPositiveButton("Delete") { _,_ -> history.discard(r.id); ViewingNotifications.cancel(this@MainActivity,r.id); refreshHistory() }.show() } })
+            if (r.status in setOf("pending","reviewed")) card.addView(Button(this).apply { text = "Delete viewing record"; setOnClickListener { android.app.AlertDialog.Builder(this@MainActivity).setTitle("Delete this local record?").setNegativeButton("Cancel",null).setPositiveButton("Delete") { _,_ -> history.trash(r.id); ViewingNotifications.cancel(this@MainActivity,r.id); refreshHistory() }.show() } })
 
     }
     private fun appLabel(pkg: String): String = mapOf("server.plex" to "Plex server","server.jellyfin" to "Jellyfin server","server.emby" to "Emby server","server.kodi" to "Kodi server")[pkg] ?: apps.entries.firstOrNull { it.value == pkg }?.key ?: runCatching {

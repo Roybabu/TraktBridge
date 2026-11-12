@@ -276,5 +276,8 @@ class WatchHistory(context: Context): SQLiteOpenHelper(context.applicationContex
     }
     fun overlapsActivity(source: String,started: Long,ended: Long): Boolean =
         readableDatabase.rawQuery("SELECT 1 FROM viewing WHERE source=? AND started<=? AND ended>=? LIMIT 1",arrayOf(source,ended.toString(),started.toString())).use { it.moveToFirst() }
+    fun trash(id:String):Boolean = writableDatabase.update("viewing",ContentValues().apply { put("status","trashed"); put("sync_message","Deleted locally") },"id=? AND status IN ('pending','reviewed')",arrayOf(id))==1
+    fun trashed():List<WatchRecord> { val ids=mutableListOf<String>(); readableDatabase.rawQuery("SELECT id FROM viewing WHERE status='trashed' ORDER BY ended DESC",null).use { c -> while(c.moveToNext()) ids.add(c.getString(0)) }; return ids.mapNotNull { record(it) } }
+    fun restoreTrash(id:String):Boolean = writableDatabase.update("viewing",ContentValues().apply { put("status","pending"); put("sync_message","") },"id=? AND status='trashed'",arrayOf(id))==1
     fun discard(id: String) { writableDatabase.delete("viewing", "id=? AND status IN ('pending','reviewed')", arrayOf(id)) }
 }
