@@ -51,3 +51,6 @@ Accessibility labels use normalized window coordinates across portrait and lands
 
 ## Shared content and local files (0.9.5)
 Receive Android text/plain and video/* shares, paste title links or choose a local video through the system document picker. Parse supported provider IDs and shared titles locally; opaque links require manual title input. Read user-granted video metadata and normalize filenames with episode hints. Attach suggestions to a selected recent pending session or create an unverified identification record. No URL fetching, broad storage permission, playback inference from sharing, or automatic Trakt upload.
+
+## Streaming history import (0.9.6)
+Import Netflix viewing activity or generic CSV with Title,Date (ISO or US date) or Title,Start Time (ISO timestamp). Select the provider, preview valid rows and confirm import. Stable IDs prevent repeat-file duplicates while preserving repeated activity rows. Imported dates are not playback evidence; sampled time and completion remain unknown. Exact provider/title/day local candidates can be reconciled explicitly without double-counting. No account scraping or automatic upload.

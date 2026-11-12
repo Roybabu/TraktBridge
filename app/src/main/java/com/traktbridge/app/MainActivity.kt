@@ -38,6 +38,55 @@ class MainActivity : Activity() {
     override fun onActivityResult(requestCode:Int,resultCode:Int,data:Intent?) {
         super.onActivityResult(requestCode,resultCode,data)
         if(requestCode==57 && resultCode==RESULT_OK) data?.data?.let { inspectVideo(it) }
+        if(requestCode==58 && resultCode==RESULT_OK) data?.data?.let { inspectImport(it) }
+    }
+    private var importSource="com.netflix.mediaclient"
+    private fun chooseImportProvider() {
+        val providers=PlayerRules.apps.entries.toList()
+        choose("Choose history source",providers.map { it.key }) { i ->
+            importSource=providers[i].value
+            startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*").putExtra(Intent.EXTRA_MIME_TYPES,arrayOf("text/csv","text/plain","application/vnd.ms-excel","application/octet-stream")),58)
+        }
+    }
+    private fun inspectImport(uri:android.net.Uri) {
+        val source=importSource
+        Thread {
+            val result=runCatching {
+                val input=contentResolver.openInputStream(uri) ?: error("Unable to open CSV")
+                val text=input.bufferedReader(Charsets.UTF_8).use { reader ->
+                    val out=StringBuilder(); val buffer=CharArray(8192)
+                    while(true) { val n=reader.read(buffer); if(n<0) break; require(out.length+n<=HistoryImport.MAX_CHARS) { "CSV exceeds size limit" }; out.append(buffer,0,n) }
+                    out.toString()
+                }
+                HistoryImport.parse(text,source)
+            }
+            runOnUiThread {
+                if(isFinishing || isDestroyed) return@runOnUiThread
+                result.fold({ preview ->
+                    val sample=preview.rows.take(5).joinToString("\n") { it.day.toString()+" • "+it.title }
+                    android.app.AlertDialog.Builder(this).setTitle("Review history import").setMessage(appLabel(source)+"\n"+preview.rows.size+" valid rows • "+preview.skipped+" skipped\n\n"+sample+"\n\nImported activity does not prove playback or completion. Dates without times remain date-only. Nothing is uploaded to Trakt.").setNegativeButton("Cancel",null).setPositiveButton("Import") { _,_->
+                        Thread {
+                            val saved=runCatching { WatchHistory(applicationContext).use { it.importViewing(preview.rows) } }
+                            runOnUiThread {
+                                if(!isDestroyed && !isFinishing) saved.fold({ counts -> showTab(2); android.app.AlertDialog.Builder(this).setTitle("Import complete").setMessage(counts.first.toString()+" added • "+counts.second+" already imported").setPositiveButton("OK",null).show() },{ Toast.makeText(this,"Import failed",Toast.LENGTH_LONG).show() })
+                            }
+                        }.start()
+                    }.show()
+                },{ android.app.AlertDialog.Builder(this).setTitle("Cannot import CSV").setMessage(it.message ?: "Invalid history file").setPositiveButton("OK",null).show() })
+            }
+        }.start()
+    }
+    private fun reconcileImported(r:WatchRecord) {
+        val zone=java.time.ZoneId.systemDefault()
+        val day=java.time.Instant.ofEpochMilli(r.started).atZone(zone).toLocalDate()
+        val row=ImportedViewing(r.source,r.title,r.subtitle,day,null,r.id)
+        val matches=HistoryImport.candidates(row,history.records(0),zone)
+        if(matches.isEmpty()) { android.app.AlertDialog.Builder(this).setTitle("No exact local match").setMessage("No local viewing with the same provider, date and title. Keep this record or identify it on Trakt.").setPositiveButton("OK",null).show(); return }
+        choose("Reconcile with local viewing",matches.map { it.title+" • "+durationText(it.watched)+" sampled • "+java.text.DateFormat.getDateTimeInstance().format(java.util.Date(it.started)) }) { index ->
+            android.app.AlertDialog.Builder(this).setTitle("Link imported activity?").setMessage("Keep the existing local viewing record and hide this duplicate import. No watch time or completion will be added.").setNegativeButton("Cancel",null).setPositiveButton("Reconcile") { _,_->
+                if(history.reconcileImport(r.id,matches[index].id)) refreshHistory()
+            }.show()
+        }
     }
     private fun handleShared(i:Intent) {
         if(i.action!=Intent.ACTION_SEND) return
@@ -71,7 +120,7 @@ class MainActivity : Activity() {
             if(!ContentRecognition.usable(title)) { field.error="Enter the movie or show title"; return@setOnClickListener }
             dialog.dismiss()
             val now=System.currentTimeMillis()
-            val recent=history.records(0).filter { it.status=="pending" && it.traktId==0 && now-it.ended in 0..1800000L && !it.id.startsWith("shared:") && (candidate.source.isBlank() || candidate.source=="local.file" && it.source in setOf("org.videolan.vlc","com.mxtech.videoplayer.ad","com.mxtech.videoplayer.pro") || it.source==candidate.source) }.take(10)
+            val recent=history.records(0).filter { it.status=="pending" && it.traktId==0L && now-it.ended in 0..1800000L && !it.id.startsWith("shared:") && (candidate.source.isBlank() || candidate.source=="local.file" && it.source in setOf("org.videolan.vlc","com.mxtech.videoplayer.ad","com.mxtech.videoplayer.pro") || it.source==candidate.source) }.take(10)
             fun create() { val id=history.addSharedCandidate(candidate.source.ifBlank { "shared.content" },title,candidate.detail,candidate.runtime); showTab(2); history.record(id)?.let { identify(it) } }
             if(recent.isEmpty()) create() else {
                 val labels=recent.map { appLabel(it.source)+" • "+it.title.ifBlank { "Unidentified video" }+" • "+java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(it.ended)) }+"Create separate identification"
@@ -118,6 +167,7 @@ class MainActivity : Activity() {
         fun label(s: String) { root.addView(txt(s,15,muted)) }
         fun button(s: String, action: () -> Unit) { root.addView(actionButton(s,action)) }
         label("SETTINGS • Account and tracking")
+        button("Import streaming viewing history (CSV)") { chooseImportProvider() }
         button("Identify local video file") { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("video/*"),57) }
         button("Identify shared movie link") { val field=EditText(this).apply { hint="Paste shared title or link" }; android.app.AlertDialog.Builder(this).setTitle("Identify shared content").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Continue") { _,_-> presentShared(SharedContent.fromText(field.text.toString())) }.show() }
         button("Open diagnostic recorder") { startActivity(Intent(this,DebugActivity::class.java)) }
@@ -323,6 +373,7 @@ class MainActivity : Activity() {
         if(r.duration>0 && r.position>=0) details.addView(ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal).apply { progress=(r.position.toDouble()/r.duration*100).toInt().coerceIn(0,100); progressTintList=android.content.res.ColorStateList.valueOf(violet) })
         if(!expanded) { card.addView(actionButton("View details") { android.app.AlertDialog.Builder(this).setTitle("Viewing details").setMessage(r.matchLabel.ifBlank { r.title.ifBlank { "Unidentified video" } }+"\n"+r.subtitle).setNegativeButton("Close",null).setPositiveButton("Open history") { _,_->showTab(1) }.show() }); return }
             if (r.traktId > 0) card.addView(TextView(this).apply { text = "Matched: " + r.matchLabel + " • Trakt ID " + r.traktId })
+            if(r.id.startsWith("import:") && r.status=="pending") card.addView(actionButton("Reconcile with local history") { reconcileImported(r) })
             if (r.status in setOf("pending","reviewed")) card.addView(Button(this).apply { text = if (r.traktId > 0) "Change Trakt match" else "Identify on Trakt"; setOnClickListener { identify(r) } })
             if (r.traktId > 0 && r.status in setOf("pending","reviewed")) card.addView(Button(this).apply { text = "Remove Trakt match"; setOnClickListener { history.clearMatch(r.id); refreshHistory() } })
             if (r.status == "reviewed" && r.traktId > 0 && !completionAlreadyRecorded) card.addView(Button(this).apply { text = "Mark watched on Trakt"; setOnClickListener { approveUpload(r) } })

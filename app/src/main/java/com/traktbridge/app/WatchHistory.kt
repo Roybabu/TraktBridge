@@ -159,6 +159,38 @@ class WatchHistory(context: Context): SQLiteOpenHelper(context.applicationContex
         writableDatabase.insertWithOnConflict("viewing",null,values,SQLiteDatabase.CONFLICT_IGNORE)
         return id
     }
+    fun importViewing(rows:List<ImportedViewing>,zone:java.time.ZoneId=java.time.ZoneId.systemDefault()):Pair<Int,Int> {
+        val db=writableDatabase
+        var added=0
+        var duplicates=0
+        db.beginTransaction()
+        try {
+            for(row in rows) {
+                // Date-only records use local midnight as a storage anchor, not an observed playback time.
+                val anchor=row.timestamp ?: row.day.atStartOfDay(zone).toInstant().toEpochMilli()
+                val values=ContentValues().apply {
+                    put("id",row.id); put("source",row.source); put("title",row.title); put("subtitle",row.detail+" • "+row.day)
+                    put("started",anchor); put("ended",anchor); put("watched",0L); put("duration",0L); put("position",-1L); put("status","pending"); put("notified",1)
+                }
+                if(db.insertWithOnConflict("viewing",null,values,SQLiteDatabase.CONFLICT_IGNORE)==-1L) duplicates++ else added++
+            }
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+        return added to duplicates
+    }
+    fun reconcileImport(importId:String,localId:String):Boolean {
+        val db=writableDatabase
+        db.beginTransaction()
+        try {
+            val imported=record(importId) ?: return false
+            val local=record(localId) ?: return false
+            if(!importId.startsWith("import:") || localId.startsWith("import:") || imported.status!="pending" || imported.traktId>0 || local.status=="active" || imported.source!=local.source) return false
+            // Keep the import ID as a hidden tombstone so re-importing the file cannot recreate it.
+            val ok=db.update("viewing",ContentValues().apply { put("status","reconciled"); put("sync_message","Reconciled to "+localId) },"id=? AND status='pending'",arrayOf(importId))==1
+            db.setTransactionSuccessful()
+            return ok
+        } finally { db.endTransaction() }
+    }
     fun addSharedCandidate(source:String,title:String,detail:String,runtime:Long):String {
         val now=System.currentTimeMillis()
         val id="shared:"+UUID.randomUUID()
