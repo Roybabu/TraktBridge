@@ -672,6 +672,7 @@ class MainActivity : ComponentActivity() {
         handleTrackingShortcut(intent)
         handleAutomation(intent)
         if(!prefs.getBoolean("setup_seen",false)) { prefs.edit().putBoolean("setup_seen",true).apply(); setupGuide() }
+        CrashRecovery.consume(this)?.let { DebugTrace.event("recovery","Previous process ended with "+it); Toast.makeText(this,"Previous session ended unexpectedly. Check tracking health if needed.",Toast.LENGTH_LONG).show() }
         StartupTiming.report(startup,"activity-created")
         shell.viewTreeObserver.addOnPreDrawListener(object:android.view.ViewTreeObserver.OnPreDrawListener {
             override fun onPreDraw():Boolean { shell.viewTreeObserver.removeOnPreDrawListener(this); StartupTiming.report(startup,"first-pre-draw"); return true }
