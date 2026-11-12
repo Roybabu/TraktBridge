@@ -22,7 +22,7 @@ class ViewingRepository(private val app:Application) {
 
 class BridgeViewModel(app:Application):AndroidViewModel(app) {
     private val repository=ViewingRepository(app)
-    private val worker=Executors.newSingleThreadExecutor()
+    private val worker=java.util.concurrent.ThreadPoolExecutor(1,1,0,java.util.concurrent.TimeUnit.MILLISECONDS,java.util.concurrent.LinkedBlockingQueue<Runnable>())
     private val main=android.os.Handler(android.os.Looper.getMainLooper())
     private var task:java.util.concurrent.Future<*>?=null
     private var generation=0L
@@ -32,8 +32,11 @@ class BridgeViewModel(app:Application):AndroidViewModel(app) {
     fun load(deliver:(Result<HistorySnapshot>)->Unit) {
         val request=++generation
         task?.cancel(true)
+        worker.purge()
         task=worker.submit {
+            val start=android.os.SystemClock.elapsedRealtime()
             val result=runCatching { repository.snapshot() }
+            StartupTiming.report(start,"history-read")
             if(!Thread.currentThread().isInterrupted) main.post { if(request==generation) deliver(result) }
         }
     }

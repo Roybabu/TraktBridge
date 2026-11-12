@@ -433,6 +433,7 @@ class MainActivity : ComponentActivity() {
     }
     private val apps = PlayerRules.apps
     override fun onCreate(savedInstanceState: Bundle?) {
+        val startup=android.os.SystemClock.elapsedRealtime()
         super.onCreate(savedInstanceState)
         applyScreenProtection()
         DebugTrace.init(this)
@@ -455,7 +456,7 @@ class MainActivity : ComponentActivity() {
         val workspace=LinearLayout(this).apply { orientation=if(wide) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL }
         shell.addView(workspace,LinearLayout.LayoutParams(-1,0,1f))
         val root=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(adaptiveLayout.padding),dp(8),dp(adaptiveLayout.padding),dp(24)) }
-        settingsPage=ScrollView(this).apply { isFillViewport=true; addView(root) }; frame.addView(settingsPage)
+        settingsPage=ScrollView(this).apply { isFillViewport=true; visibility=android.view.View.GONE; addView(root) }; frame.addView(settingsPage)
         dashboard=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(adaptiveLayout.padding),dp(8),dp(adaptiveLayout.padding),dp(24)) }
         contentPage=ScrollView(this).apply { isFillViewport=true; addView(dashboard) }; frame.addView(contentPage)
         nav=LinearLayout(this).apply { orientation=if(wide) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL; setPadding(dp(8),dp(8),dp(8),dp(8)); setBackgroundColor(surface) }
@@ -669,6 +670,10 @@ class MainActivity : ComponentActivity() {
         handleTrackingShortcut(intent)
         handleAutomation(intent)
         if(!prefs.getBoolean("setup_seen",false)) { prefs.edit().putBoolean("setup_seen",true).apply(); setupGuide() }
+        StartupTiming.report(startup,"activity-created")
+        shell.viewTreeObserver.addOnPreDrawListener(object:android.view.ViewTreeObserver.OnPreDrawListener {
+            override fun onPreDraw():Boolean { shell.viewTreeObserver.removeOnPreDrawListener(this); StartupTiming.report(startup,"first-pre-draw"); return true }
+        })
     }
     private fun betaFeedback() {
         val field=EditText(this).apply { hint="Describe the issue and steps to reproduce"; minLines=4; maxLines=8 }
