@@ -22,6 +22,8 @@ class PlaybackListener : NotificationListenerService() {
     private val serverSampler by lazy { ServerSampler(applicationContext) }
     private data class RetainedTitle(val title:String,val detail:String,val observed:Long)
     private val retained=mutableMapOf<String,RetainedTitle>()
+    private val sessionIds=mutableMapOf<android.media.session.MediaSession.Token,String>()
+    private fun sessionKey(controller:android.media.session.MediaController):String = sessionIds.getOrPut(controller.sessionToken) { controller.packageName+":"+java.util.UUID.randomUUID().toString() }
     private val mediaTitles=mutableMapOf<String,Pair<Long,String>>()
     override fun onNotificationPosted(sbn: android.service.notification.StatusBarNotification?) {
         val n=sbn ?: return
@@ -42,7 +44,7 @@ class PlaybackListener : NotificationListenerService() {
         }
     }
     override fun onListenerConnected() { super.onListenerConnected(); connected=true; DebugTrace.event("listener","connected"); prefs.edit().putBoolean("listener_connected",true).apply(); handler.removeCallbacks(poll); handler.post(poll) }
-    override fun onListenerDisconnected() { connected=false; DebugTrace.event("listener","disconnected"); handler.removeCallbacks(poll); prefs.edit().putBoolean("listener_connected",false).apply(); runCatching { history.finishAll() }; retained.clear(); mediaTitles.clear(); super.onListenerDisconnected() }
+    override fun onListenerDisconnected() { connected=false; DebugTrace.event("listener","disconnected"); handler.removeCallbacks(poll); prefs.edit().putBoolean("listener_connected",false).apply(); runCatching { history.finishAll() }; retained.clear(); sessionIds.clear(); mediaTitles.clear(); super.onListenerDisconnected() }
     override fun onDestroy() { connected=false; DebugTrace.event("listener","destroyed"); handler.removeCallbacks(poll); prefs.edit().putBoolean("listener_connected",false).apply(); runCatching { history.finishAll() }; runCatching { serverSampler.close() }; runCatching { history.close() }; super.onDestroy() }
     private fun notifyPending() {
         if (!getSharedPreferences("tracker",MODE_PRIVATE).getBoolean("enabled",false) || !ViewingNotifications.enabled(this)) return
@@ -87,7 +89,8 @@ class PlaybackListener : NotificationListenerService() {
         val rows = JSONArray()
         val samples = mutableListOf<WatchSample>()
         val selected=sessions.filter { it.packageName in allowed }
-        val keys=selected.map { it.packageName+":"+it.sessionToken.hashCode() }.toSet()
+        sessionIds.keys.retainAll(selected.map { it.sessionToken }.toSet())
+        val keys=selected.map { sessionKey(it) }.toSet()
         retained.keys.retainAll(keys)
         selected.forEach { c ->
             val profile=DetectionProfiles.forPackage(c.packageName)
@@ -99,7 +102,7 @@ class PlaybackListener : NotificationListenerService() {
             val explicitSegment=SegmentDetection.metadata(m?.getString(MediaMetadata.METADATA_KEY_TITLE).orEmpty())
             val segment=if(explicitSegment!=PlaybackSegment.UNKNOWN) explicitSegment else if(selected.count { it.packageName==c.packageName }==1) TitleAccessibility.segment(this,c.packageName,now) else PlaybackSegment.UNKNOWN
             val note=mediaTitles[c.packageName]?.takeIf { now-it.first in 0..120000 }?.second.orEmpty()
-            val key=c.packageName+":"+c.sessionToken.hashCode()
+            val key=sessionKey(c)
             val phase=when(p?.state) {
                 PlaybackState.STATE_PLAYING -> PlaybackPhase.PLAYING
                 PlaybackState.STATE_BUFFERING,PlaybackState.STATE_CONNECTING -> PlaybackPhase.BUFFERING
@@ -132,6 +135,7 @@ class PlaybackListener : NotificationListenerService() {
             if(recognition?.conflict!=true && segment!=PlaybackSegment.ADVERTISEMENT) samples.add(WatchSample(key,c.packageName,title,subtitle,duration,position,playing,phase,if(screen!=null) "screen" else if(mediaPosition>=0) "media" else "unknown",p?.playbackSpeed?.takeIf { it>0 } ?: 1f,segment))
             rows.put(JSONObject().apply {
                 put("package", c.packageName)
+                put("sessionLabel","Session "+key.substringAfterLast(":").take(8))
                 put("title", title)
                 put("displayTitle", m?.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE) ?: "")
                 put("subtitle", subtitle)
@@ -149,12 +153,9 @@ class PlaybackListener : NotificationListenerService() {
         val remote=serverSampler.samples(System.currentTimeMillis())
         // Avoid double-counting local player sessions when the explicitly selected server client is active.
         val remotePackages=remote.map { when(it.source) { "server.plex"->"com.plexapp.android"; "server.jellyfin"->"org.jellyfin.mobile"; "server.emby"->"com.mb.android"; "server.kodi"->"org.xbmc.kodi"; else->"" } }.toSet()
-        val local=samples.filterNot { it.source in remotePackages }.groupBy { it.source }.flatMap { (_,group) ->
-            val playingRows=group.filter { it.playing }
-            if(playingRows.size>1) emptyList() else group
-        }
+        val local=ConcurrentPlayback.select(samples.filterNot { it.source in remotePackages })
         history.ingest(local+remote, SystemClock.elapsedRealtime(), System.currentTimeMillis())
-        prefs.edit().putString("sessions", rows.toString()).putInt("session_count",sessions.size).apply {
+        prefs.edit().putString("sessions", rows.toString()).putInt("session_count",selected.size).putInt("tracked_session_count",local.size+remote.size).apply {
             if(rows.length()>0) putString("last_nonempty_sessions",rows.toString())
         }.apply()
     }

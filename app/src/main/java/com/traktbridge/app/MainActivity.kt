@@ -1209,7 +1209,7 @@ class MainActivity : ComponentActivity() {
                     val row=sessions.optJSONObject(i) ?: continue
                     val card=panel(content)
                     val title=row.optString("title").ifBlank { "Unidentified video" }
-                    card.addView(txt(title,20,ink,true)); card.addView(txt(appLabel(row.optString("package"))+" • "+row.optString("output","unknown")+" output",14,muted))
+                    card.addView(txt(title,20,ink,true)); card.addView(txt(appLabel(row.optString("package"))+" • "+row.optString("output","unknown")+" output",14,muted)); card.addView(txt(row.optString("sessionLabel","Session unavailable"),12,muted))
                     val state=when(row.optInt("state")) { 3->"Playing"; 2->"Paused"; 6,8->"Buffering or connecting"; else->"Playback state unknown or stopped" }
                     card.addView(txt(state,15,violet,true))
                     val position=row.optLong("positionMs",-1); val duration=row.optLong("durationMs",0)
@@ -1831,7 +1831,7 @@ class MainActivity : ComponentActivity() {
         val access=if(android.os.Build.VERSION.SDK_INT>=27) manager.isNotificationListenerAccessGranted(android.content.ComponentName(this,PlaybackListener::class.java)) else Settings.Secure.getString(contentResolver,"enabled_notification_listeners").orEmpty().split(":").any { android.content.ComponentName.unflattenFromString(it)==android.content.ComponentName(this,PlaybackListener::class.java) }
         val last=prefs.getLong("last_sample",0)
         val age=if(last>0) ((System.currentTimeMillis()-last)/1000).coerceAtLeast(0) else -1
-        val info=listOf("Sampling enabled: "+prefs.getBoolean("enabled",false),"Notification listener access: "+access,"Listener connected (last reported): "+prefs.getBoolean("listener_connected",false),"Last sample: "+(if(age<0) "never" else age.toString()+" sec ago"),"Selected apps: "+(prefs.getStringSet("allowed",emptySet())?.size ?: 0),"Usage fallback: "+(prefs.contains("usage_since") && UsageFallback.allowed(this)),"Review notifications permitted: "+ViewingNotifications.enabled(this),"All active media sessions: "+prefs.getInt("session_count",0),"Last error: "+prefs.getString("sample_error","none")).joinToString("\n")
+        val info=listOf("Sampling enabled: "+prefs.getBoolean("enabled",false),"Notification listener access: "+access,"Listener connected (last reported): "+prefs.getBoolean("listener_connected",false),"Last sample: "+(if(age<0) "never" else age.toString()+" sec ago"),"Selected apps: "+(prefs.getStringSet("allowed",emptySet())?.size ?: 0),"Usage fallback: "+(prefs.contains("usage_since") && UsageFallback.allowed(this)),"Review notifications permitted: "+ViewingNotifications.enabled(this),"Selected media sessions: "+prefs.getInt("session_count",0),"Tracked sessions: "+prefs.getInt("tracked_session_count",0),"Last error: "+prefs.getString("sample_error","none")).joinToString("\n")
         val current=runCatching { JSONArray(raw).toString(2) }.getOrDefault("[]")
         val previous=runCatching { JSONArray(prefs.getString("last_nonempty_sessions","[]") ?: "[]").toString(2) }.getOrDefault("[]")
         output.text=info+"\n\nCurrent selected media sessions:\n"+current+"\n\nLast nonempty selected media sessions:\n"+previous

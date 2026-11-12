@@ -164,3 +164,6 @@ Explicit ad metadata and fresh, opt-in accessibility player controls identify po
 
 ## v0.102.0
 Absolute episode and OVA/special evidence is distinguished from ordinary season/episode numbering. Explicit specials can be reviewed against season zero; absolute numbering requires manual season confirmation rather than guessed conversion. A conservative ordinal mapping helper is tested but not wired to remote catalogue retrieval. Movie learning is blocked for these episode cues.
+
+## v0.103.0
+Distinct concurrent local sessions can be sampled when each has a distinct recognized identity and valid media timing. Duplicate or ambiguous same-provider sessions are suppressed. Process-local random session labels avoid hash collisions and expose local/cast output classification; server sessions retain existing server keys. Physical remote device names and identities are not inferred, and same-provider local/server overlap remains conservatively suppressed.
