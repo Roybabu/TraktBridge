@@ -705,9 +705,12 @@ class MainActivity : ComponentActivity() {
         parent.addView(this,LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(12) })
     }
     private fun section(parent:LinearLayout,title:String) { parent.addView(txt(title,20,ink,true),LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(10); bottomMargin=dp(12) }) }
-    override fun dispatchKeyEvent(event:android.view.KeyEvent):Boolean {
-        if(tvMode && event.action==android.view.KeyEvent.ACTION_DOWN && event.keyCode==android.view.KeyEvent.KEYCODE_MENU && ::nav.isInitialized) { nav.getChildAt(tab)?.requestFocus(); return true }
-        return super.dispatchKeyEvent(event)
+    override fun onKeyDown(keyCode:Int,event:android.view.KeyEvent):Boolean {
+        if(tvMode && keyCode==android.view.KeyEvent.KEYCODE_MENU && ::nav.isInitialized) {
+            nav.getChildAt(tab)?.requestFocus()
+            return true
+        }
+        return super.onKeyDown(keyCode,event)
     }
     private fun showTab(index:Int) {
         if(index !in 0..4) return
