@@ -48,3 +48,6 @@ Optional accessibility title suggestions recognize a unique video detail heading
 
 ## Full-player layout recognition (0.9.4)
 Accessibility labels use normalized window coordinates across portrait and landscape top, bottom and side regions. Playback controls and seek bars establish player context, ambiguous titles are rejected, and explicit elapsed/negative remaining timer pairs can supply progress when media metadata lacks it. Timer observations expire and are tied to the candidate title. No screen capture or raw text logging.
+
+## Shared content and local files (0.9.5)
+Receive Android text/plain and video/* shares, paste title links or choose a local video through the system document picker. Parse supported provider IDs and shared titles locally; opaque links require manual title input. Read user-granted video metadata and normalize filenames with episode hints. Attach suggestions to a selected recent pending session or create an unverified identification record. No URL fetching, broad storage permission, playback inference from sharing, or automatic Trakt upload.

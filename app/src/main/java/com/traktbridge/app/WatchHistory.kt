@@ -159,6 +159,24 @@ class WatchHistory(context: Context): SQLiteOpenHelper(context.applicationContex
         writableDatabase.insertWithOnConflict("viewing",null,values,SQLiteDatabase.CONFLICT_IGNORE)
         return id
     }
+    fun addSharedCandidate(source:String,title:String,detail:String,runtime:Long):String {
+        val now=System.currentTimeMillis()
+        val id="shared:"+UUID.randomUUID()
+        val values=ContentValues().apply {
+            put("id",id); put("source",source); put("title",title); put("subtitle","Shared content; viewing not verified"+if(detail.isBlank()) "" else " • "+detail)
+            put("started",now); put("ended",now); put("watched",0L); put("duration",runtime.coerceAtLeast(0)); put("position",-1L); put("status","pending")
+        }
+        check(writableDatabase.insertWithOnConflict("viewing",null,values,SQLiteDatabase.CONFLICT_ABORT)!=-1L)
+        return id
+    }
+    fun attachSharedCandidate(id:String,title:String,detail:String,runtime:Long):Boolean {
+        val r=record(id) ?: return false
+        if(r.status!="pending" || r.traktId>0) return false
+        return writableDatabase.update("viewing",ContentValues().apply {
+            put("title",title); put("subtitle","Shared title suggestion"+if(detail.isBlank()) "" else " • "+detail)
+            if(r.duration<=0 && runtime>0 && r.position<0) put("duration",runtime)
+        },"id=? AND status='pending' AND trakt_id=0",arrayOf(id))==1
+    }
     fun addSuggestedActivity(source: String,title: String,detail: String,started: Long,ended: Long): String {
         val id=addManualActivity(source,title,started,ended)
         writableDatabase.update("viewing",ContentValues().apply { put("subtitle","Unverified player title suggestion"+if(detail.isBlank()) "" else " • "+detail) },"id=? AND status='pending'",arrayOf(id))

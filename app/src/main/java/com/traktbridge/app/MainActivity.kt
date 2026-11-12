@@ -34,7 +34,57 @@ class MainActivity : Activity() {
         showAuth("Connecting to Trakt…")
         auth.complete(uri) { showAuth(it) }
     }
-    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); handleCallback(intent); handleReview(intent) }
+    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); handleCallback(intent); handleReview(intent); handleShared(intent) }
+    override fun onActivityResult(requestCode:Int,resultCode:Int,data:Intent?) {
+        super.onActivityResult(requestCode,resultCode,data)
+        if(requestCode==57 && resultCode==RESULT_OK) data?.data?.let { inspectVideo(it) }
+    }
+    private fun handleShared(i:Intent) {
+        if(i.action!=Intent.ACTION_SEND) return
+        val type=i.type.orEmpty()
+        i.action=null
+        if(type.startsWith("video/")) {
+            val uri=if(android.os.Build.VERSION.SDK_INT>=33) i.getParcelableExtra(Intent.EXTRA_STREAM,android.net.Uri::class.java) else {
+                @Suppress("DEPRECATION")
+                i.getParcelableExtra<android.net.Uri>(Intent.EXTRA_STREAM)
+            }
+            if(uri!=null) inspectVideo(uri) else presentShared(null)
+        } else if(type=="text/plain") {
+            presentShared(SharedContent.fromText(i.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString().orEmpty(),i.getStringExtra(Intent.EXTRA_SUBJECT).orEmpty()))
+        }
+    }
+    private fun inspectVideo(uri:android.net.Uri) {
+        if(uri.scheme!="content") { presentShared(null); return }
+        Thread {
+            val result=runCatching { SharedVideo.read(applicationContext,uri) }.getOrNull()
+            runOnUiThread { if(!isDestroyed && !isFinishing) presentShared(result) }
+        }.start()
+    }
+    private fun presentShared(candidate:SharedCandidate?) {
+        if(candidate==null) { android.app.AlertDialog.Builder(this).setTitle("Content not identified").setMessage("Share a video file or a movie title with its link. Private downloads cannot be opened by TraktBridge.").setPositiveButton("OK",null).show(); return }
+        val field=EditText(this).apply { setSingleLine(true); hint="Movie, show or anime title"; setText(candidate.title) }
+        val box=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(24,12,24,12); addView(field)
+            addView(txt(listOfNotNull(candidate.detail.takeIf { it.isNotBlank() },candidate.providerId.takeIf { it.isNotBlank() }?.let { "Provider content ID: "+it },candidate.runtime.takeIf { it>0 }?.let { "File runtime: "+durationText(it) },"Confirm the title. Sharing content is not evidence of playback.").joinToString("\n"),14,muted)) }
+        val dialog=android.app.AlertDialog.Builder(this).setTitle("Identify shared content").setView(box).setNegativeButton("Cancel",null).setPositiveButton("Continue",null).create()
+        dialog.setOnShowListener { dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            val title=field.text.toString().trim()
+            if(!ContentRecognition.usable(title)) { field.error="Enter the movie or show title"; return@setOnClickListener }
+            dialog.dismiss()
+            val now=System.currentTimeMillis()
+            val recent=history.records(0).filter { it.status=="pending" && it.traktId==0 && now-it.ended in 0..1800000L && !it.id.startsWith("shared:") && (candidate.source.isBlank() || candidate.source=="local.file" && it.source in setOf("org.videolan.vlc","com.mxtech.videoplayer.ad","com.mxtech.videoplayer.pro") || it.source==candidate.source) }.take(10)
+            fun create() { val id=history.addSharedCandidate(candidate.source.ifBlank { "shared.content" },title,candidate.detail,candidate.runtime); showTab(2); history.record(id)?.let { identify(it) } }
+            if(recent.isEmpty()) create() else {
+                val labels=recent.map { appLabel(it.source)+" • "+it.title.ifBlank { "Unidentified video" }+" • "+java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(it.ended)) }+"Create separate identification"
+                choose("Attach to a recent viewing session?",labels) { index ->
+                    if(index==recent.size) create() else {
+                        val id=recent[index].id
+                        if(history.attachSharedCandidate(id,title,candidate.detail,candidate.runtime)) { showTab(2); history.record(id)?.let { identify(it) } } else Toast.makeText(this,"Viewing record changed. Try again.",Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+        } }
+        dialog.show()
+    }
     private fun handleReview(i: Intent) {
         if(i.action==ViewingNotifications.USAGE_REVIEW) { i.action=null; reviewUsage(); return }
         if (i.action != ViewingNotifications.REVIEW) return
@@ -68,6 +118,8 @@ class MainActivity : Activity() {
         fun label(s: String) { root.addView(txt(s,15,muted)) }
         fun button(s: String, action: () -> Unit) { root.addView(actionButton(s,action)) }
         label("SETTINGS • Account and tracking")
+        button("Identify local video file") { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("video/*"),57) }
+        button("Identify shared movie link") { val field=EditText(this).apply { hint="Paste shared title or link" }; android.app.AlertDialog.Builder(this).setTitle("Identify shared content").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Continue") { _,_-> presentShared(SharedContent.fromText(field.text.toString())) }.show() }
         button("Open diagnostic recorder") { startActivity(Intent(this,DebugActivity::class.java)) }
         auth = TraktAuth(applicationContext)
         account = TextView(this).apply { textSize = 16f }
@@ -134,6 +186,7 @@ class MainActivity : Activity() {
         showTab(tab)
         handleCallback(intent)
         handleReview(intent)
+        handleShared(intent)
     }
     private fun startTracking() {
         runCatching {
