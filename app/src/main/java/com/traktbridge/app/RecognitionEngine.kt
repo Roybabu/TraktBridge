@@ -11,10 +11,12 @@ object RecognitionEngine {
     private val episode=Regex("(?i)\\bS(\\d{1,3})[ ._-]*E(\\d{1,4})\\b|\\bSeason\\s+(\\d{1,3})\\s*[,·•:-]?\\s*Episode\\s+(\\d{1,4})\\b")
     private val year=Regex("\\b(19\\d{2}|20\\d{2})\\b")
     fun episodeOf(value:String):EpisodeNumber? {
-        val m=episode.find(value) ?: return null
-        val s=(m.groupValues[1].ifBlank { m.groupValues[3] }).toIntOrNull() ?: return null
-        val e=(m.groupValues[2].ifBlank { m.groupValues[4] }).toIntOrNull() ?: return null
-        return if(e>0) EpisodeNumber(s,e) else null
+        val matches=episode.findAll(value).map { m ->
+            val s=(m.groupValues[1].ifBlank { m.groupValues[3] }).toIntOrNull()
+            val e=(m.groupValues[2].ifBlank { m.groupValues[4] }).toIntOrNull()
+            if(s!=null && e!=null && e>0) EpisodeNumber(s,e) else null
+        }.toList()
+        return matches.filterNotNull().distinct().singleOrNull()?.takeIf { matches.none { it == null } }
     }
     fun normalized(value:String):String=Normalizer.normalize(value,Normalizer.Form.NFKC).lowercase(Locale.ROOT).replace(Regex("[^\\p{L}\\p{N}]+")," ").trim()
     fun query(value:String):String=TitleNormalizer.suggestedQuery(value).replace(Regex("\\s*\\((19\\d{2}|20\\d{2})\\)\\s*$"),"").trim()
@@ -24,9 +26,11 @@ object RecognitionEngine {
         val groups=usable.groupBy { normalized(query(it.title)) }.values.sortedByDescending { rows -> rows.maxOf { it.weight }+((rows.size-1)*12) }
         val top=groups.first()
         val best=top.maxBy { it.weight }
-        val episodes=top.mapNotNull { episodeOf(it.title+" "+it.detail) }.distinct()
-        val conflict=groups.size>1 || episodes.size>1
-        val detail=if(episodes.size==1) "S"+episodes.single().season+" E"+episodes.single().episode else best.detail.takeIf { episodes.size<2 }.orEmpty()
+        val evidenceText=top.map { it.title+" "+it.detail }
+        val ambiguous=evidenceText.any { episode.containsMatchIn(it) && episodeOf(it)==null }
+        val episodes=evidenceText.mapNotNull { episodeOf(it) }.distinct()
+        val conflict=groups.size>1 || episodes.size>1 || ambiguous
+        val detail=if(episodes.size==1 && !ambiguous) "S"+episodes.single().season+" E"+episodes.single().episode else best.detail.takeIf { episodes.size<2 && !ambiguous }.orEmpty()
         val score=(top.maxOf { it.weight }+(top.size-1)*12-(if(conflict) 25 else 0)).coerceIn(0,100)
         return Recognition(best.title,detail,score,top.map { it.source },conflict)
     }
@@ -55,6 +59,7 @@ object RecognitionEngine {
     fun key(source:String,title:String,detail:String,itemType:String):String? {
         if(!ContentRecognition.usable(title)) return null
         val ep=episodeOf(title+" "+detail)
+        if(episode.containsMatchIn(title+" "+detail) && ep==null) return null
         if(itemType=="episode" && ep==null) return null
         if(itemType=="movie" && ep!=null) return null
         val normalized=normalized(title)
