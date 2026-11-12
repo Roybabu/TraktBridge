@@ -919,7 +919,7 @@ class MainActivity : ComponentActivity() {
         }
         step("Notification access",if(access) "Granted" else "Required for media-session detection.") { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
         step("Video app selection",(prefs.getStringSet("allowed",emptySet())?.size ?: 0).toString()+" selected. Choose only apps you want tracked.") { chooseInstalledApps() }
-        step("Battery settings","Optional: allow background operation if your device interrupts tracking.") { runCatching { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) } }
+        step("Battery settings",BatteryCompatibility.guidance(android.os.Build.MANUFACTURER)+" Optional; no setting is changed automatically.") { runCatching { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) } }
         box.addView(txt("Accessibility title detection and app-activity fallback are optional and require separate consent in Settings. Trakt sign-in is not required for local tracking.",14,muted))
         android.app.AlertDialog.Builder(this).setTitle("Set up TraktBridge").setView(ScrollView(this).apply { addView(box) }).setNegativeButton("Later",null).setPositiveButton("Done") { _,_->showTab(4) }.show()
     }
@@ -1277,6 +1277,8 @@ class MainActivity : ComponentActivity() {
         val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
         val power=getSystemService(android.os.PowerManager::class.java)
         metricGrid(body,listOf("Sampling enabled" to if(prefs.getBoolean("enabled",false)) "Yes" else "No","Listener access" to if(access) "Granted" else "Missing","Last sample" to if(last>0 && age>=0) (age/1000).toString()+"s ago" else "Unknown","Battery exemption" to if(power.isIgnoringBatteryOptimizations(packageName)) "Yes" else "No","Selected apps" to (prefs.getStringSet("allowed",emptySet())?.size ?: 0).toString(),"Review notifications" to if(ViewingNotifications.enabled(this)) "Enabled" else "Off"))
+        val battery=BatteryCompatibility.status(this)
+        body.addView(txt("Background restricted: "+battery.restricted+" • Battery saver: "+battery.saver+"\n"+BatteryCompatibility.guidance(battery.manufacturer),14,muted))
         body.addView(txt("Last sampling error: "+prefs.getString("sample_error","none"),14,muted))
         body.addView(actionButton("Open guided setup") { setupGuide() })
         body.addView(actionButton("Inspect live sessions") { liveInspector() })
