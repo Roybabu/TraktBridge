@@ -61,10 +61,18 @@ class WatchHistory(context: Context): SQLiteOpenHelper(context.applicationContex
         db.beginTransaction()
         try {
             db.execSQL("DELETE FROM viewing WHERE status='active' AND watched < ?", arrayOf(MIN_WATCH))
-            db.execSQL("UPDATE viewing SET status='pending' WHERE status='active'")
+            db.execSQL("UPDATE viewing SET status='pending', sync_message='Interrupted session' WHERE status='active'")
             db.setTransactionSuccessful()
         } finally { db.endTransaction() }
         active.clear()
+    }
+    private fun resumeInterrupted(s:WatchSample,elapsed:Long,wall:Long):Active? {
+        val candidates=mutableListOf<String>()
+        readableDatabase.rawQuery("SELECT id FROM viewing WHERE status='pending' AND sync_message='Interrupted session' AND source=? AND ended BETWEEN ? AND ? ORDER BY ended DESC LIMIT 20",arrayOf(s.source,(wall-SessionContinuity.RESUME_WINDOW_MS).toString(),wall.toString())).use { cursor -> while(cursor.moveToNext()) candidates.add(cursor.getString(0)) }
+        val r=candidates.mapNotNull { record(it) }.filter { SessionContinuity.canResume(it,s,wall) }.singleOrNull() ?: return null
+        val changed=writableDatabase.update("viewing",ContentValues().apply { put("status","active"); put("sync_message","") },"id=? AND status='pending' AND sync_message='Interrupted session' AND trakt_id=0",arrayOf(r.id))
+        if(changed!=1) return null
+        return Active(r.id,s,elapsed,elapsed,r.watched,r.started,wall,r.pausedMs,r.bufferingMs,r.uncertainMs,r.seeks,r.rewinds,s.position,s.duration,s.positionSource)
     }
     private fun save(a: Active, status: String) {
         val v = ContentValues().apply {
@@ -94,7 +102,7 @@ class WatchHistory(context: Context): SQLiteOpenHelper(context.applicationContex
             if (old == null) {
                 if (!s.playing) continue
                 val valid=PlaybackPosition.valid(s.position,s.duration)
-                val a = Active(UUID.randomUUID().toString(), s, elapsed, elapsed, 0, wall, wall,resumePosition=if(valid) s.position else -1,resumeDuration=s.duration.coerceAtLeast(0),resumeSource=if(valid) s.positionSource else "unknown")
+                val a = resumeInterrupted(s,elapsed,wall) ?: Active(UUID.randomUUID().toString(), s, elapsed, elapsed, 0, wall, wall,resumePosition=if(valid) s.position else -1,resumeDuration=s.duration.coerceAtLeast(0),resumeSource=if(valid) s.positionSource else "unknown")
                 active[s.key] = a; save(a, "active")
             } else {
                 val interval=PlaybackAccuracy.interval(old.sample,s,elapsed-old.lastTick)
