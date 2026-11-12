@@ -463,6 +463,10 @@ class MainActivity : ComponentActivity() {
         }
         fun label(s: String) { root.addView(txt(s,15,muted)) }
         fun button(s: String, action: () -> Unit) { root.addView(actionButton(s,action)) }
+        if(tvMode) root.addView(ComposeView(this).apply {
+            setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
+            setContent { BridgeTvSettings(violet,listOf(UiAction("Connect Trakt") { try { startActivity(Intent(Intent.ACTION_VIEW,auth.begin())); showAuth("Complete sign-in in your browser") } catch(_:Exception) { showAuth("Unable to open sign-in") } },UiAction("Connected devices") { deviceCenter() },UiAction("Tracking setup") { setupGuide() },UiAction("Review queue") { showTab(2) },UiAction("Check account") { auth.check { showAuth(it) } },UiAction("Privacy controls") { privacyDashboard() })) }
+        })
         label("SETTINGS • Account and tracking")
         button("Connected devices • Pair and manage") { deviceCenter() }
         button("Manage paired devices and revoke access") { managePairedDevices() }
@@ -1072,7 +1076,7 @@ class MainActivity : ComponentActivity() {
             }
             1,2 -> {
                 if(tab==1) dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeLibraryToolbar(violet,groups.size.toString()+" identified titles and provisional groups",{ universalSearch() },{ editHistoryFilter(records) },{ manualLog() }) } })
-                else { dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeReviewSummary(violet,pending,{ manualLog() },{ HistorySync.schedule(this@MainActivity); refreshHistory() }) } }) }
+                else { if(tvMode) dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeTvSettings(violet,listOf(UiAction("Review recent activity") { reviewUsage() },UiAction("Retry approved uploads") { HistorySync.schedule(this@MainActivity); refreshHistory() })) } }); dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeReviewSummary(violet,pending,{ manualLog() },{ HistorySync.schedule(this@MainActivity); refreshHistory() }) } }) }
                 if(tab==1) { dashboard.addView(actionButton("Unified movie, TV and anime library") { unifiedLibrary() }); dashboard.addView(actionButton("Advanced search • tags and folders") { organizedLibrary() }) }
                 dashboard.addView(actionButton("Refresh") { refreshHistory() })
                 if(tab==2) { dashboard.addView(actionButton("Review recent app activity") { reviewUsage() }); dashboard.addView(actionButton("Retry approved sync queue") { HistorySync.schedule(this); refreshHistory() }) }

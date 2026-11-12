@@ -35,7 +35,7 @@ fun BridgeTvHome(accent:Int,live:Boolean,pending:Int,weekly:String,onDevices:()-
     }
 }
 @Composable
-private fun TvAction(title:String,detail:String,modifier:Modifier,onClick:()->Unit) {
+internal fun TvAction(title:String,detail:String,modifier:Modifier,onClick:()->Unit) {
     var focused by remember { mutableStateOf(false) }
     val shape=RoundedCornerShape(16.dp)
     androidx.compose.foundation.layout.Box(modifier.heightIn(min=112.dp)
