@@ -146,3 +146,6 @@ Non-destructive schema 8 migration adds indexes for recent history, pending noti
 
 ## v0.96.0
 Privacy dashboard exposes tracking, screen protection, credential lock, backup and remote refresh states, with explicit local data controls. Security boundary unit tests cover untrusted navigation and account separation. A full encryption audit and independent penetration testing remain outstanding; local SQLite remains unencrypted.
+
+## v0.97.0
+Automated deterministic playback soak simulation covers 24 hours of five-second samples, repeated gaps, pauses and navigation/identity integration. This is a JVM simulation, not a physical-device endurance test or Android UI instrumentation suite; those remain outstanding.
