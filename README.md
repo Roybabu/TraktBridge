@@ -137,3 +137,6 @@ Navigation labels are translated in Hindi and Spanish using Android locale resou
 
 ## v0.93.0
 Adaptive layouts collapse to one column at large system font scales; actionable controls have accessibility labels. Internal review URI and OAuth callback validation are tightened, and external review/share/navigation actions are blocked while the privacy lock is active. Unused biometric permission is removed (device credential uses system confirmation). Accessibility, component security and device regression testing remain outstanding.
+
+## v0.94.0
+Bounded polling backoff after sampling failures, encrypted backup verification before atomic replacement, and bounded recovery reads. Device battery and disaster-recovery testing remain outstanding.

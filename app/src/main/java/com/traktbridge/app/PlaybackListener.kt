@@ -18,6 +18,7 @@ class PlaybackListener : NotificationListenerService() {
     private var lastLearningCheck=0L
     private var lastTick=0L
     private var connected=false
+    private var consecutiveFailures=0
     private val serverSampler by lazy { ServerSampler(applicationContext) }
     private data class RetainedTitle(val title:String,val detail:String,val observed:Long)
     private val retained=mutableMapOf<String,RetainedTitle>()
@@ -37,7 +38,7 @@ class PlaybackListener : NotificationListenerService() {
     private val poll = object : Runnable {
         override fun run() {
             if(!connected) return
-            try { capture(); if(prefs.getBoolean("enabled",false) && prefs.getBoolean("learned_auto",false) && SystemClock.elapsedRealtime()-lastLearningCheck>=30000) { lastLearningCheck=SystemClock.elapsedRealtime(); val n=history.applyLearned(); if(n>0) DebugTrace.event("recognition","learned matches="+n) }; notifyPending(); notifyUsageFallback() } catch (e: Exception) { DebugTrace.failure("poll",e); prefs.edit().putString("sample_error",e.javaClass.simpleName).apply(); runCatching { history.finishAll() } } finally { if(connected) handler.postDelayed(this, PlaybackShortcuts.pollDelay(prefs.getBoolean("enabled",false),prefs.getInt("session_count",0)>0)) }
+            try { capture(); if(prefs.getBoolean("enabled",false) && prefs.getBoolean("learned_auto",false) && SystemClock.elapsedRealtime()-lastLearningCheck>=30000) { lastLearningCheck=SystemClock.elapsedRealtime(); val n=history.applyLearned(); if(n>0) DebugTrace.event("recognition","learned matches="+n) }; notifyPending(); notifyUsageFallback(); consecutiveFailures=0 } catch (e: Exception) { consecutiveFailures=(consecutiveFailures+1).coerceAtMost(3); DebugTrace.failure("poll",e); prefs.edit().putString("sample_error",e.javaClass.simpleName).apply(); runCatching { history.finishAll() } } finally { if(connected) handler.postDelayed(this, BackgroundPolicy.delay(prefs.getBoolean("enabled",false),prefs.getInt("session_count",0)>0,consecutiveFailures)) }
         }
     }
     override fun onListenerConnected() { super.onListenerConnected(); connected=true; DebugTrace.event("listener","connected"); prefs.edit().putBoolean("listener_connected",true).apply(); handler.removeCallbacks(poll); handler.post(poll) }

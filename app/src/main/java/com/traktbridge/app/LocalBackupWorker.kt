@@ -32,14 +32,20 @@ object LocalBackupVault {
         require(json.length<=HistoryBackup.MAX_CHARS)
         val cipher=Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE,key()) }
         val data=cipher.iv+cipher.doFinal(json.toByteArray(Charsets.UTF_8))
+        require(data.size<=EncryptedBackup.MAX_BYTES) { "Backup exceeds encrypted size limit" }
+        val verify=Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.DECRYPT_MODE,key(),GCMParameterSpec(128,data.copyOfRange(0,12))) }
+        check(String(verify.doFinal(data.copyOfRange(12,data.size)),Charsets.UTF_8)==json)
         val atomic=android.util.AtomicFile(file(context))
         val stream=atomic.startWrite()
         try { stream.write(data); atomic.finishWrite(stream) } catch(e:Exception) { atomic.failWrite(stream); throw e }
     }
     @Synchronized fun read(context:Context):String {
         val f=file(context)
-        require(f.length() in 29..EncryptedBackup.MAX_BYTES.toLong())
-        val data=android.util.AtomicFile(f).readFully()
+        val data=android.util.AtomicFile(f).openRead().use { input ->
+            val out=java.io.ByteArrayOutputStream(); val buffer=ByteArray(8192)
+            while(true) { val n=input.read(buffer); if(n<0) break; require(out.size()+n<=EncryptedBackup.MAX_BYTES); out.write(buffer,0,n) }; out.toByteArray()
+        }
+        require(data.size>=29)
         val cipher=Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.DECRYPT_MODE,key(),GCMParameterSpec(128,data.copyOfRange(0,12))) }
         return String(cipher.doFinal(data.copyOfRange(12,data.size)),Charsets.UTF_8)
     }
