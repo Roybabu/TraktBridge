@@ -1,0 +1,42 @@
+package com.traktbridge.app
+
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import java.util.concurrent.Executors
+
+data class HistorySnapshot(val records:List<WatchRecord>,val groups:List<ViewingTitle>)
+
+/** Read-only application repository. Approval and tracking writes stay in their existing owners. */
+class ViewingRepository(private val app:Application) {
+    fun snapshot():HistorySnapshot {
+        val db=WatchHistory(app)
+        try {
+            val rows=db.records(0)
+            return HistorySnapshot(rows,ViewingGroups.build(rows))
+        } finally { db.close() }
+    }
+}
+
+class BridgeViewModel(app:Application):AndroidViewModel(app) {
+    private val repository=ViewingRepository(app)
+    private val worker=Executors.newSingleThreadExecutor()
+    private val main=android.os.Handler(android.os.Looper.getMainLooper())
+    private var task:java.util.concurrent.Future<*>?=null
+    private var generation=0L
+    var selectedTab by mutableStateOf(0)
+        private set
+    fun select(index:Int) { if(index in 0..4) selectedTab=index }
+    fun load(deliver:(Result<HistorySnapshot>)->Unit) {
+        val request=++generation
+        task?.cancel(true)
+        task=worker.submit {
+            val result=runCatching { repository.snapshot() }
+            if(!Thread.currentThread().isInterrupted) main.post { if(request==generation) deliver(result) }
+        }
+    }
+    fun cancel() { generation++; task?.cancel(true); task=null }
+    override fun onCleared() { cancel(); worker.shutdownNow(); super.onCleared() }
+}

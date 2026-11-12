@@ -24,7 +24,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var contentPage: ScrollView
     private lateinit var nav: LinearLayout
     private var composeNav:ComposeView?=null
-    private var selectedNav by androidx.compose.runtime.mutableStateOf(0)
+    private val bridgeModel by lazy { androidx.lifecycle.ViewModelProvider(this)[BridgeViewModel::class.java] }
+    private val selectedNav get()=bridgeModel.selectedTab
     private lateinit var dashboard: LinearLayout
     private var tab=0
     private var privacyPrompt=false
@@ -33,9 +34,6 @@ class MainActivity : ComponentActivity() {
     private var historyLimit=100
     private var analyticsPeriod=30
     private var analyticsSource=""
-    private var historyRequest=0L
-    private val historyExecutor=java.util.concurrent.Executors.newSingleThreadExecutor()
-    private var historyTask:java.util.concurrent.Future<*>?=null
     private var calendarMonth=java.time.YearMonth.now()
     private val tvMode:Boolean get()=(getSystemService(android.app.UiModeManager::class.java).currentModeType==android.content.res.Configuration.UI_MODE_TYPE_TELEVISION)
     private val adaptiveLayout get()=resources.configuration.let { AdaptiveUi.layout(it.screenWidthDp,it.screenHeightDp,it.fontScale,tvMode) }
@@ -933,7 +931,7 @@ class MainActivity : ComponentActivity() {
         privacyPrompt=true
         runCatching { startActivityForResult(intent,96) }.onFailure { privacyPrompt=false; finish() }
     }
-    override fun onDestroy() { historyRequest++; historyTask?.cancel(true); historyExecutor.shutdownNow(); if (::history.isInitialized) history.close(); super.onDestroy() }
+    override fun onDestroy() { bridgeModel.cancel(); if (::history.isInitialized) history.close(); super.onDestroy() }
     override fun onSaveInstanceState(outState: Bundle) { outState.putInt("tab",tab); outState.putString("import_source",importSource); outState.putString("filter_q",historyFilter.query); outState.putString("filter_source",historyFilter.source); outState.putInt("filter_period",historyFilter.period); outState.putString("filter_type",historyFilter.type); outState.putString("filter_status",historyFilter.status); outState.putString("filter_sort",historyFilter.sort); outState.putInt("analytics_period",analyticsPeriod); outState.putString("analytics_source",analyticsSource); outState.putString("calendar_month",calendarMonth.toString()); super.onSaveInstanceState(outState) }
     private fun dp(n:Int)= (n*resources.displayMetrics.density+0.5f).toInt()
     private fun rounded(color:Int,radius:Int=16)=android.graphics.drawable.GradientDrawable().apply { setColor(color); cornerRadius=dp(radius).toFloat() }
@@ -962,7 +960,7 @@ class MainActivity : ComponentActivity() {
     }
     private fun showTab(index:Int) {
         if(index !in 0..4) return
-        tab=index; selectedNav=index; settingsPage.visibility=if(index==4) android.view.View.VISIBLE else android.view.View.GONE
+        tab=index; bridgeModel.select(index); settingsPage.visibility=if(index==4) android.view.View.VISIBLE else android.view.View.GONE
         contentPage.visibility=if(index==4) android.view.View.GONE else android.view.View.VISIBLE
         if(tvMode) for(i in 0 until nav.childCount) (nav.getChildAt(i) as TextView).apply { setTextColor(if(i==index) violet else muted); background=TvFocus.background(this@MainActivity,if(i==index) 0xff302a48.toInt() else surface,violet,i==index); isSelected=i==index }
         refreshHistory(); contentPage.scrollTo(0,0)
@@ -973,24 +971,19 @@ class MainActivity : ComponentActivity() {
     }
     private fun refreshHistory() {
         if(!::dashboard.isInitialized || tab==4 || isFinishing || isDestroyed) return
-        val request=++historyRequest
         val selectedTab=tab
-        historyTask?.cancel(true)
         dashboard.removeAllViews()
         dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeLoading(violet) } })
-        val app=applicationContext
-        historyTask=historyExecutor.submit {
-            val result=runCatching { val db=WatchHistory(app); try { val rows=db.records(0); rows to ViewingGroups.build(rows) } finally { db.close() } }
-            if(!Thread.currentThread().isInterrupted) runOnUiThread {
-                if(isDestroyed || isFinishing || request!=historyRequest || tab!=selectedTab) return@runOnUiThread
-                result.fold({ (records,groups) -> renderHistory(records,groups) }, {
-                    dashboard.removeAllViews()
-                    emptyState(dashboard,"History unavailable","Existing viewing data has not been cleared.","Retry") { refreshHistory() }
-                    dashboard.addView(actionButton("Check database integrity") { checkHistoryIntegrity() })
-                })
-            }
+        bridgeModel.load { result ->
+            if(isDestroyed || isFinishing || tab!=selectedTab) return@load
+            result.fold({ snapshot -> renderHistory(snapshot.records,snapshot.groups) }, {
+                dashboard.removeAllViews()
+                emptyState(dashboard,"History unavailable","Existing viewing data has not been cleared.","Retry") { refreshHistory() }
+                dashboard.addView(actionButton("Check database integrity") { checkHistoryIntegrity() })
+            })
         }
     }
+
     private fun customizeDashboard() {
         val keys=DashboardPreferences.order(prefs.getString("dashboard_order","").orEmpty()).toMutableList()
         val hidden=DashboardPreferences.visible(prefs.getString("dashboard_hidden","").orEmpty()).toMutableSet()
