@@ -16,3 +16,11 @@ Run on a physical Android 16 tablet with the permanently signed APK. Do not decl
 - Confirm CI unit tests, lint, stable signing fingerprint and actual APK artifact.
 
 Known gaps: no provider availability feed, exact streaming deep links, release reminder scheduler, independent profiles, personalized recommendation engine or automatic APK installer. Device test results are pending.
+
+## Extended milestones
+- Set and clear library status; verify no Trakt mutation.
+- Test related recommendations, title links, AniList search, collections and manual logs.
+- Verify spoiler toggle, journal share, encrypted backup round-trip, wrong password and corrupt file rejection.
+- Test offline title details after caching, account refresh and switching accounts.
+- Inspect remote media session output and picture-in-picture continuity; unsupported casting is not tracked.
+- Test large text, contrast, screen reader and tablet rotation.

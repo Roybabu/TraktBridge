@@ -58,6 +58,11 @@ object HistoryBackup {
             val status=r.getString("status")
             val type=r.getString("match_type")
             require(type in setOf("","movie","episode"))
+            val trakt=r.getLong("trakt_id")
+            require((type.isBlank() && trakt==0L) || (type.isNotBlank() && trakt>0L)) { "Invalid catalogue identity" }
+            require(type!="episode" || (r.getLong("show_id")>0 && r.getLong("season") in 0..Int.MAX_VALUE.toLong() && r.getLong("episode") in 1..Int.MAX_VALUE.toLong())) { "Invalid episode identity" }
+            require(r.getLong("seeks")<=Int.MAX_VALUE && r.getLong("rewinds")<=Int.MAX_VALUE)
+            require(r.getLong("position")<0 || (r.getLong("duration")>0 && r.getLong("position")<=r.getLong("duration"))) { "Invalid playback position" }
             require(status in setOf("pending","reviewed","queued","uncertain","blocked","synced","dismissed","reconciled","ignored"))
             ContentValues().apply {
                 textFields.forEach { k -> val s=r.getString(k); require(s.length<=16384); put(k,s) }

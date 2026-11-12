@@ -265,7 +265,7 @@ class MainActivity : Activity() {
             if(!ContentRecognition.usable(title)) { field.error="Enter the movie or show title"; return@setOnClickListener }
             dialog.dismiss()
             val now=System.currentTimeMillis()
-            val recent=history.records(0).filter { it.status=="pending" && it.traktId==0L && now-it.ended in 0..1800000L && !it.id.startsWith("shared:") && (candidate.source.isBlank() || candidate.source=="local.file" && it.source in setOf("org.videolan.vlc","com.mxtech.videoplayer.ad","com.mxtech.videoplayer.pro") || it.source==candidate.source) }.take(10)
+            val recent=history.records(0).filter { it.status=="pending" && it.traktId==0L && now-it.ended in 0..1800000L && !it.id.startsWith("shared:") && !it.id.startsWith("import:") && (candidate.source.isBlank() || candidate.source=="local.file" && it.source in setOf("org.videolan.vlc","com.mxtech.videoplayer.ad","com.mxtech.videoplayer.pro") || it.source==candidate.source) }.take(10)
             fun create() { val id=history.addSharedCandidate(candidate.source.ifBlank { "shared.content" },title,candidate.detail,candidate.runtime); history.providerRef(id,RecognitionEngine.providerKey(candidate.source,candidate.providerId)); showTab(2); history.record(id)?.let { identify(it) } }
             if(recent.isEmpty()) create() else {
                 val labels=recent.map { appLabel(it.source)+" • "+it.title.ifBlank { "Unidentified video" }+" • "+java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(it.ended)) }+"Create separate identification"
@@ -298,6 +298,7 @@ class MainActivity : Activity() {
         DebugTrace.init(this)
         DebugTrace.event("activity","main opened")
         tab=savedInstanceState?.getInt("tab") ?: 0
+        importSource=savedInstanceState?.getString("import_source") ?: "com.netflix.mediaclient"
         historyFilter=HistoryFilter(savedInstanceState?.getString("filter_q").orEmpty(),savedInstanceState?.getString("filter_source").orEmpty(),savedInstanceState?.getInt("filter_period") ?: 0,savedInstanceState?.getString("filter_type").orEmpty(),savedInstanceState?.getString("filter_status").orEmpty(),savedInstanceState?.getString("filter_sort") ?: "recent")
         analyticsPeriod=savedInstanceState?.getInt("analytics_period") ?: 30
         calendarMonth=runCatching { java.time.YearMonth.parse(savedInstanceState?.getString("calendar_month").orEmpty()) }.getOrDefault(java.time.YearMonth.now())
@@ -378,7 +379,7 @@ class MainActivity : Activity() {
         button("Start persistent tracking") { prefs.edit().putBoolean("enabled",true).apply(); startTracking(); recreate() }
         button("Stop persistent tracking") { prefs.edit().putBoolean("enabled",false).apply(); stopService(Intent(this,TrackingService::class.java)); recreate() }
         button("Battery optimization settings") { runCatching { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) } }
-        label("Optional show and episode title suggestions: reads only recognized player title controls in selected apps. No screenshots or automatic uploads.")
+        label("Optional title suggestions read recognized controls in selected apps. One-shot OCR requires separate explicit permission; no automatic uploads.")
         button("Enable title detection (Accessibility)") {
             android.app.AlertDialog.Builder(this).setTitle("Optional title detection").setMessage("Android Accessibility can expose screen content. TraktBridge checks selected video apps for player titles and video detail headings near play actions. Suggestions stay local and are never uploaded automatically. Enable only if you agree.").setNegativeButton("Cancel",null).setPositiveButton("Agree and open settings") { _,_ -> prefs.edit().putBoolean("title_optin",true).apply(); startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }.show()
         }
@@ -509,7 +510,7 @@ class MainActivity : Activity() {
     }
     override fun onResume() { super.onResume(); if (::output.isInitialized) refresh(); if (::historyList.isInitialized) refreshHistory() }
     override fun onDestroy() { if (::history.isInitialized) history.close(); super.onDestroy() }
-    override fun onSaveInstanceState(outState: Bundle) { outState.putInt("tab",tab); outState.putString("filter_q",historyFilter.query); outState.putString("filter_source",historyFilter.source); outState.putInt("filter_period",historyFilter.period); outState.putString("filter_type",historyFilter.type); outState.putString("filter_status",historyFilter.status); outState.putString("filter_sort",historyFilter.sort); outState.putInt("analytics_period",analyticsPeriod); outState.putString("calendar_month",calendarMonth.toString()); super.onSaveInstanceState(outState) }
+    override fun onSaveInstanceState(outState: Bundle) { outState.putInt("tab",tab); outState.putString("import_source",importSource); outState.putString("filter_q",historyFilter.query); outState.putString("filter_source",historyFilter.source); outState.putInt("filter_period",historyFilter.period); outState.putString("filter_type",historyFilter.type); outState.putString("filter_status",historyFilter.status); outState.putString("filter_sort",historyFilter.sort); outState.putInt("analytics_period",analyticsPeriod); outState.putString("calendar_month",calendarMonth.toString()); super.onSaveInstanceState(outState) }
     private fun dp(n:Int)= (n*resources.displayMetrics.density+0.5f).toInt()
     private fun rounded(color:Int,radius:Int=16)=android.graphics.drawable.GradientDrawable().apply { setColor(color); cornerRadius=dp(radius).toFloat() }
     private fun txt(value:String,size:Int=15,color:Int=ink,bold:Boolean=false)=TextView(this).apply {
@@ -616,7 +617,7 @@ class MainActivity : Activity() {
     private fun openTraktWatchPage(type:String,id:Long) {
         if(type !in setOf("movie","show") || id<=0) return
         // Resolve only through the official Trakt ID redirect; availability is not asserted.
-        val url="https://trakt.tv/"+RemoteRules.plural(type)+"/"+id
+        val url="https://trakt.tv/search/trakt/"+id+"?id_type="+type
         runCatching { startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse(url))) }.onFailure { Toast.makeText(this,"No browser available",Toast.LENGTH_LONG).show() }
     }
     private fun openPlaybackApp(sources:List<String>) {
@@ -735,7 +736,7 @@ class MainActivity : Activity() {
         lookup("Loading title details",{ done -> TraktCatalogue.details(type,id) { result ->
             val cached=runCatching { org.json.JSONObject(cache.getString(key,"")) }.getOrNull()
             if(result.isSuccess) {
-                val d=result.getOrThrow(); cache.edit().putString(key,org.json.JSONObject().put("title",d.title).put("overview",d.overview).put("year",d.year).put("runtime",d.runtime).put("rating",d.rating).put("genres",d.genres).put("trailer",d.trailer).put("released",d.released).toString()).apply(); done(result)
+                val d=result.getOrThrow(); if(cache.all.size>=200 && !cache.contains(key)) cache.edit().clear().apply(); cache.edit().putString(key,org.json.JSONObject().put("title",d.title).put("overview",d.overview).put("year",d.year).put("runtime",d.runtime).put("rating",d.rating).put("genres",d.genres).put("trailer",d.trailer).put("released",d.released).toString()).apply(); done(result)
             } else if(cached!=null) done(Result.success(TitleDetails(cached.optString("title"),cached.optString("overview"),cached.optInt("year"),cached.optInt("runtime"),cached.optDouble("rating",0.0),cached.optString("genres"),cached.optString("trailer"),cached.optString("released")))) else done(result)
         } }) { d:TitleDetails ->
             val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(12),dp(16),dp(12)) }

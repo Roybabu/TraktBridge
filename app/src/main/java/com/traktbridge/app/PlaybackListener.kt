@@ -15,6 +15,7 @@ class PlaybackListener : NotificationListenerService() {
     private lateinit var history: WatchHistory
     private val prefs by lazy { getSharedPreferences("tracker", MODE_PRIVATE) }
     private var lastUsageCheck=0L
+    private var lastLearningCheck=0L
     private var lastTick=0L
     private val serverSampler by lazy { ServerSampler(applicationContext) }
     private val retained=mutableMapOf<String,Pair<String,String>>()
@@ -33,7 +34,7 @@ class PlaybackListener : NotificationListenerService() {
     private val handler = Handler(Looper.getMainLooper())
     private val poll = object : Runnable {
         override fun run() {
-            try { capture(); if(prefs.getBoolean("learned_auto",false)) { val n=history.applyLearned(); if(n>0) DebugTrace.event("recognition","learned matches="+n) }; notifyPending(); notifyUsageFallback() } catch (e: Exception) { DebugTrace.failure("poll",e); prefs.edit().putString("sample_error",e.javaClass.simpleName).apply(); history.finishAll() } finally { handler.postDelayed(this, 5000) }
+            try { capture(); if(prefs.getBoolean("enabled",false) && prefs.getBoolean("learned_auto",false) && SystemClock.elapsedRealtime()-lastLearningCheck>=30000) { lastLearningCheck=SystemClock.elapsedRealtime(); val n=history.applyLearned(); if(n>0) DebugTrace.event("recognition","learned matches="+n) }; notifyPending(); notifyUsageFallback() } catch (e: Exception) { DebugTrace.failure("poll",e); prefs.edit().putString("sample_error",e.javaClass.simpleName).apply(); history.finishAll() } finally { handler.postDelayed(this, 5000) }
         }
     }
     override fun onListenerConnected() { super.onListenerConnected(); DebugTrace.event("listener","connected"); prefs.edit().putBoolean("listener_connected",true).apply(); handler.removeCallbacks(poll); handler.post(poll) }
@@ -70,8 +71,11 @@ class PlaybackListener : NotificationListenerService() {
         if(lastTick>0 && tick-lastTick>12000) DebugTrace.event("sampling","gapMs="+(tick-lastTick))
         lastTick=tick
         prefs.edit().putLong("last_sample",System.currentTimeMillis()).remove("sample_error").apply()
-        if (!prefs.getBoolean("enabled", false)) { DebugTrace.event("sampling","disabled"); history.finishAll(); serverSampler.clear(); retained.clear(); prefs.edit().remove("sessions").apply(); return }
+        if (!prefs.getBoolean("enabled", false)) { DebugTrace.event("sampling","disabled"); history.finishAll(); serverSampler.clear(); retained.clear(); mediaTitles.clear(); prefs.edit().remove("sessions").apply(); return }
         val allowed = prefs.getStringSet("allowed", emptySet()) ?: emptySet()
+        mediaTitles.keys.retainAll(allowed)
+        val wallNow=System.currentTimeMillis()
+        mediaTitles.entries.removeAll { wallNow-it.value.first !in 0..120000 }
         val sessions = try {
             getSystemService(MediaSessionManager::class.java).getActiveSessions(ComponentName(this, PlaybackListener::class.java))
         } catch (e: SecurityException) { DebugTrace.failure("media access",e); prefs.edit().putString("sample_error","Media session access denied").apply(); history.finishAll(); return }

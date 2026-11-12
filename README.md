@@ -78,3 +78,6 @@ Adaptive sidebar navigation and two-column content cards on wide screens, compac
 
 ## Pre-1.0 validation (0.25.0)
 Bound rendered history cards to increments of 100, retain filters and add release-readiness regression tests. See [device validation checklist](docs/DEVICE_VALIDATION.md) for physical-device cases and known limitations.
+
+## Extended pre-1.0 milestones (0.26–0.39)
+Local viewing statuses, history-seeded related recommendations, external Trakt lookup, public AniList title search, live inspector, manual logs, collections, spoiler controls, yearly journal, encrypted history backup, cached detail fallback, bounded account refresh, remote media output diagnostics, contrast and reading size. Version 0.39 bounds catalogue responses and cache growth, validates restored identities and positions, throttles learning, and tests encrypted backup authentication. No independent profiles, anime account sync, licensed availability feed, exact provider deep links, scheduled release reminders or full multilingual support. No physical-device validation completed.

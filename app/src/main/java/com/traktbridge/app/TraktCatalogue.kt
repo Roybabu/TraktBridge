@@ -28,7 +28,7 @@ object TraktCatalogue {
             val status = c.responseCode
             DebugTrace.event("catalogue","HTTP "+status)
             if (status !in 200..299) error(if (status == 429) "Trakt rate limit reached. Try again later." else "Trakt catalogue HTTP " + status)
-            return JSONArray(c.inputStream.bufferedReader().use { it.readText() })
+            return JSONArray(c.inputStream.bufferedReader().use { reader -> val out=StringBuilder(); val buf=CharArray(8192); while(true) { val n=reader.read(buf); if(n<0) break; require(out.length+n<=8_000_000) { "Catalogue response too large" }; out.append(buf,0,n) }; out.toString() })
         } finally { c.disconnect() }
     }
     private fun <T> request(done: (Result<T>) -> Unit, work: () -> T) {
@@ -82,7 +82,7 @@ object TraktCatalogue {
             c.connectTimeout=15000; c.readTimeout=15000; c.instanceFollowRedirects=false
             c.setRequestProperty("trakt-api-key",TraktAuth.CLIENT_ID); c.setRequestProperty("trakt-api-version","2")
             require(c.responseCode in 200..299) { "Catalogue unavailable" }
-            val o=JSONObject(c.inputStream.bufferedReader().use { it.readText() })
+            val o=JSONObject(c.inputStream.bufferedReader().use { reader -> val out=StringBuilder(); val buf=CharArray(8192); while(true) { val n=reader.read(buf); if(n<0) break; require(out.length+n<=8_000_000) { "Catalogue response too large" }; out.append(buf,0,n) }; out.toString() })
             TitleDetails(o.optString("title"),o.optString("overview"),o.optInt("year"),o.optInt("runtime"),o.optDouble("rating",0.0),objectsGenres(o.optJSONArray("genres")),o.optString("trailer"),o.optString("released",o.optString("first_aired")))
         } finally { c.disconnect() }
     }
