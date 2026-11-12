@@ -307,6 +307,7 @@ class MainActivity : ComponentActivity() {
     private val apps = PlayerRules.apps
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        applyScreenProtection()
         DebugTrace.init(this)
         DebugTrace.event("activity","main opened")
         tab=savedInstanceState?.getInt("tab") ?: 0
@@ -349,6 +350,8 @@ class MainActivity : ComponentActivity() {
         button("Favorite titles") { favorites() }
         button("Automation shortcuts") { automationShortcuts() }
         button("Cancel all episode reminders") { prefs.edit().putBoolean("episode_reminders",false).apply(); EpisodeReminders.cancelAll(this); Toast.makeText(this,"Reminders cancelled",Toast.LENGTH_SHORT).show() }
+        button("Privacy mode • stop tracking now") { privacyMode() }
+        root.addView(Switch(this).apply { text="Protect app screen from screenshots and recent-app previews"; isChecked=prefs.getBoolean("secure_screen",false); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("secure_screen",checked).apply(); applyScreenProtection() } })
         button("Guided tracking setup") { setupGuide() }
         root.addView(Switch(this).apply { text="Daily encrypted on-device history backup"; isChecked=prefs.getBoolean("daily_backup",false); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("daily_backup",checked).apply(); LocalBackupVault.schedule(this@MainActivity,checked) } })
         button("Restore daily device backup") { restoreDailyBackup() }
@@ -488,6 +491,17 @@ class MainActivity : ComponentActivity() {
                 }.show()
             }
         }
+    }
+    private fun applyScreenProtection() {
+        if(prefs.getBoolean("secure_screen",false)) window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        else window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+    }
+    private fun privacyMode() {
+        android.app.AlertDialog.Builder(this).setTitle("Pause all playback tracking?").setMessage("Sampling, title hints and optional usage reminders stop. Existing history and already approved uploads are retained. Restart tracking manually in Settings.").setNegativeButton("Cancel",null).setPositiveButton("Pause tracking") { _,_->
+            val edit=prefs.edit().putBoolean("enabled",false).putBoolean("title_optin",false).remove("usage_since").remove("sessions").remove("last_nonempty_sessions")
+            prefs.all.keys.filter { it.startsWith("ocr_") || it.startsWith("title_hint:") || it.startsWith("title_detail:") || it.startsWith("title_time:") }.forEach { edit.remove(it) }
+            edit.apply(); stopService(Intent(this,TrackingService::class.java)); recreate()
+        }.show()
     }
     private fun configureGoal() {
         val field=EditText(this).apply { hint="Monthly sampled hours (0 disables goal)"; inputType=android.text.InputType.TYPE_CLASS_NUMBER; setText(prefs.getInt("monthly_goal",0).toString()) }
