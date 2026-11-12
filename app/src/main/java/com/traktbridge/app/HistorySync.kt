@@ -52,11 +52,12 @@ object HistorySync {
         return ids.optString("uuid").takeIf { it.isNotBlank() } ?: ids.optString("slug").takeIf { it.isNotBlank() } ?: error("No stable Trakt account identifier")
     }
     fun accountForApproval(context: Context): String = TraktAuth(context).authorized { account(it) }
-    private enum class Reconciliation { ABSENT, EXACT, CONFLICT }
+    private enum class Reconciliation { ABSENT, EXACT, NEARBY, CONFLICT }
     private fun exists(token: String,r: WatchRecord): Reconciliation {
         val target=utc(r.ended)
         val plural=if(r.matchType=="movie") "movies" else "episodes"
-        val start=encode(target.minusSeconds(2).toString()); val end=encode(target.plusSeconds(2).toString())
+        val start=encode(target.minusSeconds(CrossDeviceUploadPolicy.WINDOW_SECONDS).toString()); val end=encode(target.plusSeconds(CrossDeviceUploadPolicy.WINDOW_SECONDS).toString())
+        var nearby=false
         for(page in 1..100) {
             val response=call(token,"/sync/history/"+plural+"/"+r.traktId+"?start_at="+start+"&end_at="+end+"&page="+page+"&limit=100")
             val rows=JSONArray(response.text)
@@ -66,10 +67,11 @@ object HistorySync {
                 val id=o.optJSONObject(r.matchType)?.optJSONObject("ids")?.optLong("trakt") ?: 0
                 val watched=runCatching { Instant.parse(o.getString("watched_at")).truncatedTo(ChronoUnit.SECONDS) }.getOrNull()
                 if(id==r.traktId && watched==target) return Reconciliation.EXACT
+                if(watched!=null && CrossDeviceUploadPolicy.nearby(id,r.traktId,java.time.Duration.between(target,watched).seconds)) nearby=true
                 if(id<=0 || watched==null) malformed=true
             }
             if(malformed) return Reconciliation.CONFLICT
-            if(rows.length()==0 || (response.pages!=null && page>=response.pages)) return Reconciliation.ABSENT
+            if(rows.length()==0 || (response.pages!=null && page>=response.pages)) return if(nearby) Reconciliation.NEARBY else Reconciliation.ABSENT
         }
         error("History reconciliation exceeded page limit")
     }
@@ -89,6 +91,7 @@ object HistorySync {
                 }
                 when(exists(token,r)) {
                     Reconciliation.EXACT -> { state("synced","Already present in Trakt history"); return@authorized true }
+                    Reconciliation.NEARBY -> { state(if(expected=="uncertain") "uncertain" else "blocked","Possible duplicate watch within two minutes on Trakt. Review remote history; no upload sent."); return@authorized true }
                     Reconciliation.CONFLICT -> { state(expected,"Remote history response could not be verified; no upload sent"); return@authorized false }
                     Reconciliation.ABSENT -> Unit
                 }
