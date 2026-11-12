@@ -597,6 +597,7 @@ class MainActivity : Activity() {
                 val scoped=ViewingAnalytics.filter(records,HistoryFilter(period=analyticsPeriod))
                 val scopedGroups=ViewingGroups.build(scoped)
                 metricGrid(dashboard,listOf("Sampled watch time" to durationText(scoped.sumOf { it.watched }),"Movies synced" to scopedGroups.count { it.confirmed && it.representative.matchType=="movie" }.toString(),"Episodes synced" to scopedGroups.count { it.confirmed && it.representative.matchType=="episode" }.toString(),"Platforms" to scoped.filter { it.watched>0 }.map { it.source }.distinct().size.toString(),"Paused" to durationText(scoped.sumOf { it.pausedMs }),"Buffering" to durationText(scoped.sumOf { it.bufferingMs }),"Seeks" to scoped.sumOf { it.seeks }.toString(),"Uncertain" to durationText(scoped.sumOf { it.uncertainMs })))
+                dashboard.addView(actionButton("Streaming service dashboard") { serviceDashboard() })
                 section(dashboard,"Watch time by platform")
                 val totals=scoped.groupBy { it.source }.mapValues { it.value.sumOf { r -> r.watched } }.toList().sortedByDescending { it.second }
                 val max=totals.maxOfOrNull { it.second }?.coerceAtLeast(1) ?: 1
@@ -653,6 +654,24 @@ class MainActivity : Activity() {
                     }
                 }
             }.show()
+        }
+    }
+    private fun serviceDashboard() {
+        val rows=history.records(0)
+        val selected=prefs.getStringSet("allowed",emptySet()) ?: emptySet()
+        val sources=(rows.map { it.source }+selected).distinct().sortedBy { appLabel(it) }
+        choose("My streaming services",sources.map { pkg -> appLabel(pkg)+" • "+durationText(ViewingAnalytics.filter(rows,HistoryFilter(source=pkg,period=30)).sumOf { it.watched }) }) { index ->
+            val pkg=sources[index]
+            val local=rows.filter { it.source==pkg }
+            val month=ViewingAnalytics.filter(local,HistoryFilter(period=30))
+            val groups=ViewingGroups.build(local)
+            val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
+            metricGrid(body,listOf("Last 30 days" to durationText(month.sumOf { it.watched }),"Sessions" to month.size.toString(),"Synced titles" to groups.count { it.confirmed }.toString(),"Selected for tracking" to if(pkg in selected) "Yes" else "No"))
+            body.addView(actionButton("Open player") { openPlaybackApp(listOf(pkg)) })
+            body.addView(actionButton("Filter all history") { historyFilter=HistoryFilter(source=pkg); historyLimit=100; showTab(1) })
+            section(body,"Continue watching")
+            SeriesLibrary.continueWatching(groups).take(8).forEach { titleCard(body,it,false) }
+            android.app.AlertDialog.Builder(this).setTitle(appLabel(pkg)).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
         }
     }
     private fun universalSearch() {
