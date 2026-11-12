@@ -72,3 +72,6 @@ Group exact Trakt episode identities into parent shows and seasons while retaini
 
 ## Trakt account library (0.12.0)
 Browse paginated authenticated history, watchlist, ratings and saved playback progress. Download history pages into a separate account-scoped cache keyed by remote history event ID; local sampled playback and completion queues are unchanged. Display matching local sessions and account-level show progress. Explicitly confirm watchlist and rating mutations, and verify the connected account before sending. Existing approved history upload worker remains unchanged. Clear remote cache on disconnect; cached view requires current account verification. No automatic full-history refresh or remote-history deletion.
+
+## Dashboard and analytics (0.13.0)
+Adaptive sidebar navigation and two-column content cards on wide screens, compact navigation on phones. Home metrics, searchable history with provider/type/status/date filters and sorting, selectable analytics periods, playback-state metrics and interactive monthly activity calendar. Calendar and date filters attribute aggregate session time to the session end date; remote account history is excluded from measured time. Filter and calendar state survive activity recreation.

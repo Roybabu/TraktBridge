@@ -21,6 +21,10 @@ class MainActivity : Activity() {
     private lateinit var nav: LinearLayout
     private lateinit var dashboard: LinearLayout
     private var tab=0
+    private var historyFilter=HistoryFilter()
+    private var analyticsPeriod=30
+    private var calendarMonth=java.time.YearMonth.now()
+    private val wide:Boolean get()=resources.configuration.screenWidthDp>=720
     private val ink=0xfff1f0f6.toInt()
     private val muted=0xffa9a8ba.toInt()
     private val violet=0xffb6a0ff.toInt()
@@ -219,19 +223,25 @@ class MainActivity : Activity() {
         DebugTrace.init(this)
         DebugTrace.event("activity","main opened")
         tab=savedInstanceState?.getInt("tab") ?: 0
+        historyFilter=HistoryFilter(savedInstanceState?.getString("filter_q").orEmpty(),savedInstanceState?.getString("filter_source").orEmpty(),savedInstanceState?.getInt("filter_period") ?: 0,savedInstanceState?.getString("filter_type").orEmpty(),savedInstanceState?.getString("filter_status").orEmpty(),savedInstanceState?.getString("filter_sort") ?: "recent")
+        analyticsPeriod=savedInstanceState?.getInt("analytics_period") ?: 30
+        calendarMonth=runCatching { java.time.YearMonth.parse(savedInstanceState?.getString("calendar_month").orEmpty()) }.getOrDefault(java.time.YearMonth.now())
         shell=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(bg) }
         shell.setOnApplyWindowInsetsListener { v,insets -> v.setPadding(insets.systemWindowInsetLeft,insets.systemWindowInsetTop,insets.systemWindowInsetRight,insets.systemWindowInsetBottom); insets }
         setContentView(shell)
         val header=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(24),dp(16),dp(24),dp(12)); addView(txt("TRAKTBRIDGE",12,violet)); addView(txt("Your viewing companion",24,ink,true)) }
         shell.addView(header)
         val frame=android.widget.FrameLayout(this)
-        shell.addView(frame,LinearLayout.LayoutParams(-1,0,1f))
+        val workspace=LinearLayout(this).apply { orientation=if(wide) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL }
+        shell.addView(workspace,LinearLayout.LayoutParams(-1,0,1f))
         val root=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(20),dp(8),dp(20),dp(24)) }
         settingsPage=ScrollView(this).apply { addView(root) }; frame.addView(settingsPage)
         dashboard=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(20),dp(8),dp(20),dp(24)) }
         contentPage=ScrollView(this).apply { addView(dashboard) }; frame.addView(contentPage)
-        nav=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; setPadding(dp(4),dp(6),dp(4),dp(6)); setBackgroundColor(surface) }; shell.addView(nav)
-        listOf("Home","History","Review","Stats","Settings").forEachIndexed { i,name -> nav.addView(TextView(this).apply { text=name; textSize=12f; gravity=android.view.Gravity.CENTER; minHeight=dp(48); setOnClickListener { showTab(i) } },LinearLayout.LayoutParams(0,-2,1f)) }
+        nav=LinearLayout(this).apply { orientation=if(wide) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL; setPadding(dp(8),dp(8),dp(8),dp(8)); setBackgroundColor(surface) }
+        if(wide) { workspace.addView(nav,LinearLayout.LayoutParams(dp(156),-1)); workspace.addView(frame,LinearLayout.LayoutParams(0,-1,1f)) }
+        else { workspace.addView(frame,LinearLayout.LayoutParams(-1,0,1f)); workspace.addView(nav,LinearLayout.LayoutParams(-1,-2)) }
+        listOf("Home","History","Review","Stats","Settings").forEachIndexed { i,name -> nav.addView(TextView(this).apply { text=name; textSize=if(wide) 15f else 12f; gravity=android.view.Gravity.CENTER; minHeight=dp(52); setOnClickListener { showTab(i) } },if(wide) LinearLayout.LayoutParams(-1,dp(58)).apply { bottomMargin=dp(6) } else LinearLayout.LayoutParams(0,-2,1f)) }
         fun label(s: String) { root.addView(txt(s,15,muted)) }
         fun button(s: String, action: () -> Unit) { root.addView(actionButton(s,action)) }
         label("SETTINGS • Account and tracking")
@@ -322,7 +332,7 @@ class MainActivity : Activity() {
     }
     override fun onResume() { super.onResume(); if (::output.isInitialized) refresh(); if (::historyList.isInitialized) refreshHistory() }
     override fun onDestroy() { if (::history.isInitialized) history.close(); super.onDestroy() }
-    override fun onSaveInstanceState(outState: Bundle) { outState.putInt("tab",tab); super.onSaveInstanceState(outState) }
+    override fun onSaveInstanceState(outState: Bundle) { outState.putInt("tab",tab); outState.putString("filter_q",historyFilter.query); outState.putString("filter_source",historyFilter.source); outState.putInt("filter_period",historyFilter.period); outState.putString("filter_type",historyFilter.type); outState.putString("filter_status",historyFilter.status); outState.putString("filter_sort",historyFilter.sort); outState.putInt("analytics_period",analyticsPeriod); outState.putString("calendar_month",calendarMonth.toString()); super.onSaveInstanceState(outState) }
     private fun dp(n:Int)= (n*resources.displayMetrics.density+0.5f).toInt()
     private fun rounded(color:Int,radius:Int=16)=android.graphics.drawable.GradientDrawable().apply { setColor(color); cornerRadius=dp(radius).toFloat() }
     private fun txt(value:String,size:Int=15,color:Int=ink,bold:Boolean=false)=TextView(this).apply {
@@ -358,54 +368,147 @@ class MainActivity : Activity() {
                 status.addView(txt(if(live) "Ready to track selected apps" else "Start playback tracking",22,ink,true))
                 status.addView(txt("Only confirmed completed watches sync to Trakt.",14,muted))
                 status.addView(actionButton(if(live) "Tracking settings" else "Start tracking") { if(live) showTab(4) else { prefs.edit().putBoolean("enabled",true).apply(); startTracking(); showTab(4) } })
+                val weekly=ViewingAnalytics.filter(records,HistoryFilter(period=7))
+                metricGrid(dashboard,listOf("This week" to durationText(weekly.sumOf { it.watched }),"Movies synced" to groups.count { it.confirmed && it.representative.matchType=="movie" }.toString(),"Episodes synced" to groups.count { it.confirmed && it.representative.matchType=="episode" }.toString(),"Needs review" to pending.toString()))
                 section(dashboard,"Now watching")
                 val active=groups.filter { it.active }
-                if(active.isEmpty()) panel(dashboard).addView(txt("No verified active playback. Play a video in a selected app.",15,muted)) else active.take(2).forEach { titleCard(dashboard,it,false) }
+                if(active.isEmpty()) panel(dashboard).addView(txt("No verified active playback. Play a video in a selected app.",15,muted)) else cards(dashboard,active.take(2)) { parent,g -> titleCard(parent,g,false) }
                 section(dashboard,"Continue watching")
                 val continuing=SeriesLibrary.continueWatching(groups)
-                if(continuing.isEmpty()) panel(dashboard).addView(txt("No unfinished sampled viewing yet.",15,muted)) else continuing.take(5).forEach { titleCard(dashboard,it,false) }
+                if(continuing.isEmpty()) panel(dashboard).addView(txt("No unfinished sampled viewing yet.",15,muted)) else cards(dashboard,continuing.take(6)) { parent,g -> titleCard(parent,g,false) }
                 section(dashboard,"Review queue")
                 val q=panel(dashboard); q.addView(txt("$pending awaiting action",22,ink,true)); q.addView(actionButton("Open review queue") { showTab(2) }); q.addView(actionButton("Review app activity") { reviewUsage() })
                 dashboard.addView(actionButton("Open Trakt account library") { openTraktLibrary() })
                 section(dashboard,"Recently watched")
                 val recent=groups.filter { !it.active }.take(5)
-                if(recent.isEmpty()) panel(dashboard).addView(txt("Your viewing history will appear here.",15,muted)) else recent.forEach { titleCard(dashboard,it,false) }
+                if(recent.isEmpty()) panel(dashboard).addView(txt("Your viewing history will appear here.",15,muted)) else cards(dashboard,recent) { parent,g -> titleCard(parent,g,false) }
             }
             1,2 -> {
                 section(dashboard,if(tab==1) "Viewing history" else "Needs your review")
                 dashboard.addView(actionButton("Refresh") { refreshHistory() })
                 if(tab==2) { dashboard.addView(actionButton("Review recent app activity") { reviewUsage() }); dashboard.addView(actionButton("Retry approved sync queue") { HistorySync.schedule(this); refreshHistory() }) }
-                val items=if(tab==1) groups else groups.filter { it.queued || (it.pending && !it.confirmed) }
+                if(tab==1) {
+                    dashboard.addView(actionButton("Search and filter history") { editHistoryFilter(records) })
+                    dashboard.addView(txt("Filters: "+listOfNotNull(historyFilter.query.takeIf { it.isNotBlank() }?.let { "Search: "+it },historyFilter.source.takeIf { it.isNotBlank() }?.let { appLabel(it) },historyFilter.period.takeIf { it>0 }?.let { "Last "+it+" days" },historyFilter.type.takeIf { it.isNotBlank() },historyFilter.status.takeIf { it.isNotBlank() } ).joinToString(" • ").ifBlank { "All viewing" },13,muted))
+                    if(historyFilter!=HistoryFilter()) dashboard.addView(actionButton("Reset filters") { historyFilter=HistoryFilter(); refreshHistory() })
+                }
+                val items=if(tab==1) ViewingAnalytics.sort(ViewingGroups.build(ViewingAnalytics.filter(records,historyFilter)),historyFilter.sort) else groups.filter { it.queued || (it.pending && !it.confirmed) }
                 if(items.isEmpty()) panel(dashboard).addView(txt(if(tab==1) "No viewing records yet." else "You're all caught up.",16,muted))
                 if(tab==1) {
                     val series=SeriesLibrary.build(items)
-                    if(series.isNotEmpty()) { section(dashboard,"Series and anime"); series.forEach { seriesCard(dashboard,it) } }
+                    if(series.isNotEmpty()) { section(dashboard,"Series and anime"); cards(dashboard,series) { parent,item -> seriesCard(parent,item) } }
                     val movies=items.filter { it.representative.matchType=="movie" }
-                    if(movies.isNotEmpty()) { section(dashboard,"Movies"); movies.forEach { titleCard(dashboard,it,true) } }
+                    if(movies.isNotEmpty()) { section(dashboard,"Movies"); cards(dashboard,movies) { parent,item -> titleCard(parent,item,true) } }
                     val other=items.filter { it.representative.matchType!="movie" && !(it.representative.matchType=="episode" && it.representative.showId>0 && it.representative.season>=0 && it.representative.episode>0) }
-                    if(other.isNotEmpty()) { section(dashboard,"Unidentified viewing"); other.forEach { titleCard(dashboard,it,true) } }
-                } else items.forEach { titleCard(dashboard,it,true) }
+                    if(other.isNotEmpty()) { section(dashboard,"Unidentified viewing"); cards(dashboard,other) { parent,item -> titleCard(parent,item,true) } }
+                } else cards(dashboard,items) { parent,item -> titleCard(parent,item,true) }
             }
             3 -> {
                 section(dashboard,"Viewing activity")
-                val stats=panel(dashboard)
-                val seconds=records.sumOf { it.watched }/1000
-                stats.addView(txt(String.format(java.util.Locale.US,"%.1f hours",seconds/3600.0),32,violet,true))
-                stats.addView(txt("Sampled watch time • all local sessions",14,muted))
-                stats.addView(txt(groups.count { it.confirmed && it.representative.matchType=="movie" }.toString()+" movies synced  •  "+groups.count { it.confirmed && it.representative.matchType=="episode" }+" episodes synced",16))
-                stats.addView(txt("$pending awaiting action",15,muted))
+                dashboard.addView(actionButton(if(analyticsPeriod==0) "Period: All time" else "Period: Last "+analyticsPeriod+" days") {
+                    val periods=listOf(7,30,90,0); choose("Analytics period",listOf("Last 7 days","Last 30 days","Last 90 days","All time")) { analyticsPeriod=periods[it]; refreshHistory() }
+                })
+                val scoped=ViewingAnalytics.filter(records,HistoryFilter(period=analyticsPeriod))
+                val scopedGroups=ViewingGroups.build(scoped)
+                metricGrid(dashboard,listOf("Sampled watch time" to durationText(scoped.sumOf { it.watched }),"Movies synced" to scopedGroups.count { it.confirmed && it.representative.matchType=="movie" }.toString(),"Episodes synced" to scopedGroups.count { it.confirmed && it.representative.matchType=="episode" }.toString(),"Platforms" to scoped.filter { it.watched>0 }.map { it.source }.distinct().size.toString(),"Paused" to durationText(scoped.sumOf { it.pausedMs }),"Buffering" to durationText(scoped.sumOf { it.bufferingMs }),"Seeks" to scoped.sumOf { it.seeks }.toString(),"Uncertain" to durationText(scoped.sumOf { it.uncertainMs })))
                 section(dashboard,"Watch time by platform")
-                val totals=records.groupBy { it.source }.mapValues { it.value.sumOf { r -> r.watched } }.toList().sortedByDescending { it.second }
+                val totals=scoped.groupBy { it.source }.mapValues { it.value.sumOf { r -> r.watched } }.toList().sortedByDescending { it.second }
                 val max=totals.maxOfOrNull { it.second }?.coerceAtLeast(1) ?: 1
                 val chart=panel(dashboard)
                 if(totals.isEmpty()) chart.addView(txt("No sampled activity yet.",15,muted))
                 totals.forEach { (pkg,time) ->
-                    chart.addView(txt(appLabel(pkg)+"  •  "+(time/60000)+" min",14))
+                    chart.addView(txt(appLabel(pkg)+" • "+durationText(time),14))
                     chart.addView(ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal).apply { progress=(time.toDouble()/max*100).toInt(); progressTintList=android.content.res.ColorStateList.valueOf(violet) },LinearLayout.LayoutParams(-1,dp(12)).apply { bottomMargin=dp(14) })
                 }
-                chart.addView(txt("App-activity estimates are excluded from watch time.",13,muted))
+                chart.addView(txt("App-activity and remote history are excluded from sampled time. Date filters use session end date.",13,muted))
+                section(dashboard,"Viewing calendar")
+                calendarView(dashboard,records)
+
             }
         }
+    }
+    private fun <T> cards(parent:LinearLayout,items:List<T>,render:(LinearLayout,T)->Unit) {
+        if(!wide) { items.forEach { render(parent,it) }; return }
+        items.chunked(2).forEach { pair ->
+            val row=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=android.view.Gravity.TOP }
+            parent.addView(row)
+            pair.forEach { item ->
+                val column=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
+                row.addView(column,LinearLayout.LayoutParams(0,-2,1f).apply { marginEnd=dp(8) })
+                render(column,item)
+            }
+            if(pair.size==1) row.addView(android.view.View(this),LinearLayout.LayoutParams(0,1,1f))
+        }
+    }
+    private fun metricGrid(parent:LinearLayout,metrics:List<Pair<String,String>>) {
+        metrics.chunked(if(wide) 4 else 2).forEach { pair ->
+            val row=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL }
+            parent.addView(row)
+            for((label,value) in pair) {
+                val tile=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; background=rounded(surface,14); setPadding(dp(12),dp(14),dp(12),dp(14)); addView(txt(label,12,muted)); addView(txt(value,21,violet,true)) }
+                row.addView(tile,LinearLayout.LayoutParams(0,-2,1f).apply { marginEnd=dp(8); bottomMargin=dp(8) })
+            }
+        }
+    }
+    private fun editHistoryFilter(records:List<WatchRecord>) {
+        val box=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(8),dp(16),dp(8)) }
+        val q=EditText(this).apply { hint="Search movie, show or episode"; setSingleLine(true); setText(historyFilter.query) }
+        box.addView(q)
+        fun spinner(label:String,values:List<String>,selected:Int):Spinner {
+            box.addView(txt(label,13,muted))
+            return Spinner(this).apply { adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,values); setSelection(selected.coerceAtLeast(0)); box.addView(this,LinearLayout.LayoutParams(-1,dp(48))) }
+        }
+        val sources=listOf("")+records.map { it.source }.distinct().sortedBy { appLabel(it) }
+        val source=spinner("Platform",sources.map { if(it.isBlank()) "All platforms" else appLabel(it) },sources.indexOf(historyFilter.source))
+        val periods=listOf(0,7,30,90)
+        val period=spinner("Date range",listOf("All time","Last 7 days","Last 30 days","Last 90 days"),periods.indexOf(historyFilter.period))
+        val types=listOf("","movie","episode","unknown")
+        val type=spinner("Content",listOf("All content","Movies","Series / anime episodes","Unidentified"),types.indexOf(historyFilter.type))
+        val statuses=listOf("","completed","unfinished","queued")
+        val status=spinner("Status",listOf("All statuses","Synced","Unfinished","Approved / queued"),statuses.indexOf(historyFilter.status))
+        val sorts=listOf("recent","title","watchtime")
+        val sort=spinner("Sort",listOf("Most recent","Title A–Z","Most sampled watch time"),sorts.indexOf(historyFilter.sort))
+        android.app.AlertDialog.Builder(this).setTitle("History filters").setView(ScrollView(this).apply { addView(box) }).setNegativeButton("Cancel",null).setPositiveButton("Apply") { _,_->
+            historyFilter=HistoryFilter(q.text.toString(),sources[source.selectedItemPosition],periods[period.selectedItemPosition],types[type.selectedItemPosition],statuses[status.selectedItemPosition],sorts[sort.selectedItemPosition]); refreshHistory()
+        }.show()
+    }
+    private fun calendarView(parent:LinearLayout,records:List<WatchRecord>) {
+        val card=panel(parent)
+        val month=calendarMonth
+        val header=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=android.view.Gravity.CENTER_VERTICAL }
+        card.addView(header)
+        header.addView(Button(this).apply { text="‹"; contentDescription="Previous month"; setOnClickListener { calendarMonth=month.minusMonths(1); refreshHistory() } },LinearLayout.LayoutParams(dp(48),dp(48)))
+        header.addView(txt(month.format(java.time.format.DateTimeFormatter.ofPattern("MMMM uuuu")),18,ink,true).apply { gravity=android.view.Gravity.CENTER },LinearLayout.LayoutParams(0,-2,1f))
+        header.addView(Button(this).apply { text="›"; contentDescription="Next month"; setOnClickListener { calendarMonth=month.plusMonths(1); refreshHistory() } },LinearLayout.LayoutParams(dp(48),dp(48)))
+        val days=ViewingAnalytics.calendar(records,month)
+        val week=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL }
+        card.addView(week)
+        listOf("M","T","W","T","F","S","S").forEach { week.addView(txt(it,12,muted).apply { gravity=android.view.Gravity.CENTER },LinearLayout.LayoutParams(0,dp(28),1f)) }
+        val blanks=month.atDay(1).dayOfWeek.value-1
+        val cells=List<ActivityDay?>(blanks) { null }+days
+        cells.chunked(7).forEach { line ->
+            val row=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL }; card.addView(row)
+            for(index in 0..6) {
+                val d=line.getOrNull(index)
+                val cell=TextView(this).apply {
+                    gravity=android.view.Gravity.CENTER; textSize=14f; setTextColor(ink); minHeight=dp(44)
+                    if(d!=null) {
+                        text=d.date.dayOfMonth.toString()+if(d.sessions>0) "\n•" else ""
+                        background=rounded(if(d.sampledMs>0) 0xff40336a.toInt() else if(d.sessions>0) 0xff292c40.toInt() else surface,8)
+                        contentDescription=d.date.toString()+", "+durationText(d.sampledMs)+" sampled, "+d.sessions+" sessions"
+                        setOnClickListener { showCalendarDay(d,records) }
+                    }
+                }
+                row.addView(cell,LinearLayout.LayoutParams(0,dp(48),1f).apply { setMargins(dp(2),dp(2),dp(2),dp(2)) })
+            }
+        }
+        card.addView(txt("Dots indicate local records; purple indicates sampled playback. Sessions spanning midnight are attributed to their end date.",12,muted))
+    }
+    private fun showCalendarDay(day:ActivityDay,records:List<WatchRecord>) {
+        val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
+        body.addView(txt(durationText(day.sampledMs)+" sampled • "+day.sessions+" sessions",16,ink,true))
+        ViewingGroups.build(records.filter { ViewingAnalytics.day(it.ended)==day.date }).forEach { titleCard(body,it,true) }
+        android.app.AlertDialog.Builder(this).setTitle(day.date.toString()).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
     }
     private fun seriesCard(parent:LinearLayout,series:SeriesGroup) {
         val card=panel(parent)
