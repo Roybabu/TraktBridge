@@ -453,7 +453,7 @@ class MainActivity : ComponentActivity() {
         else { workspace.addView(frame,LinearLayout.LayoutParams(-1,0,1f)); workspace.addView(nav,LinearLayout.LayoutParams(-1,-2)) }
         val navLabels=listOf(getString(R.string.nav_home),getString(R.string.nav_library),getString(R.string.nav_review),getString(R.string.nav_activity),getString(R.string.nav_settings))
         if(tvMode) {
-            navLabels.forEachIndexed { i,name -> nav.addView(TextView(this).apply { text=name; textSize=if(wide) 15f else 12f; gravity=android.view.Gravity.CENTER; minHeight=dp(52); isFocusable=true; setOnFocusChangeListener { view,focused -> view.alpha=if(focused) 1f else 0.82f; if(tvMode) view.scaleX=if(focused) 1.05f else 1f; if(tvMode) view.scaleY=if(focused) 1.05f else 1f }; setOnClickListener { showTab(i) } },if(wide) LinearLayout.LayoutParams(-1,dp(58)).apply { bottomMargin=dp(6) } else LinearLayout.LayoutParams(0,-2,1f)) }
+            navLabels.forEachIndexed { i,name -> nav.addView(TextView(this).apply { text=name; textSize=if(tvMode) 18f else 15f; gravity=android.view.Gravity.CENTER; minHeight=dp(64); id=android.view.View.generateViewId(); isFocusable=true; setOnFocusChangeListener { view,focused -> view.alpha=if(focused) 1f else 0.82f; if(tvMode) view.scaleX=if(focused) 1.05f else 1f; if(tvMode) view.scaleY=if(focused) 1.05f else 1f }; setOnClickListener { showTab(i) } },if(wide) LinearLayout.LayoutParams(-1,dp(68)).apply { bottomMargin=dp(6) } else LinearLayout.LayoutParams(0,-2,1f)) }
         } else {
             composeNav=ComposeView(this).apply {
                 setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
@@ -939,7 +939,7 @@ class MainActivity : ComponentActivity() {
         text=value; textSize=size.toFloat()*when(prefs.getInt("reading_size",0)) { 1->1.15f; 2->1.3f; else->1f }; setTextColor(color); if(bold) setTypeface(null,android.graphics.Typeface.BOLD)
     }
     private fun actionButton(label:String,action:()->Unit)=Button(this).apply {
-        text=label; contentDescription=label; isAllCaps=false; isFocusable=true; if(tvMode) { minWidth=dp(120); setOnFocusChangeListener { view,focused -> view.alpha=if(focused) 1f else 0.85f; view.scaleX=if(focused) 1.03f else 1f; view.scaleY=if(focused) 1.03f else 1f } }; setTextColor(ink); textSize=14f*when(prefs.getInt("reading_size",0)) { 1->1.15f; 2->1.3f; else->1f }; background=rounded(0xff302a48.toInt(),12); minHeight=dp(layoutMode.touch)
+        text=label; contentDescription=label; isAllCaps=false; isFocusable=true; if(tvMode) { minWidth=dp(120); setOnFocusChangeListener { view,focused -> view.alpha=if(focused) 1f else 0.85f; view.scaleX=if(focused) 1.03f else 1f; view.scaleY=if(focused) 1.03f else 1f } }; setTextColor(ink); textSize=14f*when(prefs.getInt("reading_size",0)) { 1->1.15f; 2->1.3f; else->1f }; background=if(tvMode) TvFocus.background(this@MainActivity,0xff302a48.toInt(),violet) else rounded(0xff302a48.toInt(),12); minHeight=dp(layoutMode.touch)
         layoutParams=LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(6) }; setOnClickListener { action() }
     }
     private fun panel(parent:LinearLayout):LinearLayout=LinearLayout(this).apply {
@@ -948,6 +948,10 @@ class MainActivity : ComponentActivity() {
     }
     private fun section(parent:LinearLayout,title:String) { parent.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeSection(violet,title) } },LinearLayout.LayoutParams(-1,-2)) }
     override fun onKeyDown(keyCode:Int,event:android.view.KeyEvent):Boolean {
+        if(tvMode && ::nav.isInitialized && keyCode==android.view.KeyEvent.KEYCODE_DPAD_RIGHT && nav.hasFocus()) {
+            val page=if(tab==4) settingsPage else contentPage
+            if(TvFocus.firstContent(page)) return true
+        }
         if(tvMode && keyCode==android.view.KeyEvent.KEYCODE_MENU && ::nav.isInitialized) {
             nav.getChildAt(tab)?.requestFocus()
             return true
@@ -958,8 +962,9 @@ class MainActivity : ComponentActivity() {
         if(index !in 0..4) return
         tab=index; selectedNav=index; settingsPage.visibility=if(index==4) android.view.View.VISIBLE else android.view.View.GONE
         contentPage.visibility=if(index==4) android.view.View.GONE else android.view.View.VISIBLE
-        if(tvMode) for(i in 0 until nav.childCount) (nav.getChildAt(i) as TextView).apply { setTextColor(if(i==index) violet else muted); background=rounded(if(i==index) 0xff302a48.toInt() else surface,12) }
+        if(tvMode) for(i in 0 until nav.childCount) (nav.getChildAt(i) as TextView).apply { setTextColor(if(i==index) violet else muted); background=TvFocus.background(this@MainActivity,if(i==index) 0xff302a48.toInt() else surface,violet,i==index); isSelected=i==index }
         refreshHistory(); contentPage.scrollTo(0,0)
+        if(tvMode && index==4 && !nav.hasFocus()) TvFocus.firstContent(settingsPage)
     }
     private fun emptyState(parent:LinearLayout,title:String,detail:String,label:String,action:()->Unit) {
         parent.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeEmptyState(violet,title,detail,label,action) } })
