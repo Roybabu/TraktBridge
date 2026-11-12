@@ -15,7 +15,7 @@ fun BridgeDevices(accent:Int,name:String,devices:List<PairedUiDevice>,sharing:Bo
         Column(Modifier.fillMaxWidth().padding(16.dp),verticalArrangement=Arrangement.spacedBy(10.dp)) {
             Text(name,style=MaterialTheme.typography.headlineSmall)
             Text("Playback: "+if(sharing) "enabled" else "disabled")
-            Text("History: "+(if(history) "enabled" else "disabled")+" • Remote controls: "+if(controls) "enabled" else "disabled")
+            Text("History: "+(if(history) "enabled" else "disabled")+" • Remote controls: "+(if(controls) "enabled" else "disabled"))
             Text("On both devices, exchange an invitation and compare the 8-digit verification PIN. Approval is required on each device.")
             Button(onClick=onShowQr,modifier=Modifier.fillMaxWidth()) { Text("1. Show my QR and PIN") }
             OutlinedButton(onClick=onEnter,modifier=Modifier.fillMaxWidth()) { Text("2. Verify other device") }

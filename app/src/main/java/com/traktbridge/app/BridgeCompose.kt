@@ -21,7 +21,10 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.text.font.FontWeight
+
+private val BridgeScaled=staticCompositionLocalOf { false }
 
 @Composable
 fun BridgeTheme(accent:Int,content:@Composable ()->Unit) {
@@ -35,8 +38,8 @@ fun BridgeTheme(accent:Int,content:@Composable ()->Unit) {
     }
     val density=LocalDensity.current
     val tv=context.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_TYPE_MASK == android.content.res.Configuration.UI_MODE_TYPE_TELEVISION
-    val scale=UiAccessibility.readingScale(prefs.getInt("reading_size",0),tv)
-    CompositionLocalProvider(LocalDensity provides Density(density.density,density.fontScale*scale)) {
+    val scale=if(BridgeScaled.current) 1f else UiAccessibility.readingScale(prefs.getInt("reading_size",0),tv)
+    CompositionLocalProvider(LocalDensity provides Density(density.density,density.fontScale*scale),BridgeScaled provides true) {
         MaterialTheme(colorScheme=if(prefs.getBoolean("high_contrast",false)) scheme.copy(onSurface=Color.White,onSurfaceVariant=Color.White) else scheme,content=content)
     }
 }

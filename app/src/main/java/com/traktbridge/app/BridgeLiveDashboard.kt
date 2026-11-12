@@ -30,7 +30,7 @@ fun BridgeLiveDashboard(accent:Int,rows:List<LiveUiSession>,status:String,onCont
                             Text(row.title,style=MaterialTheme.typography.titleLarge)
                             if(row.detail.isNotBlank()) Text(row.detail)
                             Text(row.provider+" • "+row.state,style=MaterialTheme.typography.bodyMedium)
-                            row.progress?.let { LinearProgressIndicator(progress={it/100f},modifier=Modifier.fillMaxWidth()) }
+                            row.progress?.let { LinearProgressIndicator(progress={it.coerceIn(0,100)/100f},modifier=Modifier.fillMaxWidth()) }
                             if(row.timing.isNotBlank()) Text(row.timing,style=MaterialTheme.typography.bodySmall)
                             if(row.evidence.isNotBlank()) Text(row.evidence,style=MaterialTheme.typography.bodySmall)
                         }

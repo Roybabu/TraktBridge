@@ -38,8 +38,8 @@ class MainActivity : ComponentActivity() {
     private var historyTask:java.util.concurrent.Future<*>?=null
     private var calendarMonth=java.time.YearMonth.now()
     private val tvMode:Boolean get()=(getSystemService(android.app.UiModeManager::class.java).currentModeType==android.content.res.Configuration.UI_MODE_TYPE_TELEVISION)
-    private val layoutMode get()=resources.configuration.let { AdaptiveUi.layout(it.screenWidthDp,it.screenHeightDp,it.fontScale,tvMode) }
-    private val wide:Boolean get()=layoutMode.sidebar
+    private val adaptiveLayout get()=resources.configuration.let { AdaptiveUi.layout(it.screenWidthDp,it.screenHeightDp,it.fontScale,tvMode) }
+    private val wide:Boolean get()=adaptiveLayout.sidebar
     private val ink:Int get()=if(prefs.getBoolean("high_contrast",false)) 0xffffffff.toInt() else 0xfff1f0f6.toInt()
     private val muted:Int get()=if(prefs.getBoolean("high_contrast",false)) 0xffe3e3ef.toInt() else 0xffa9a8ba.toInt()
     private val violet:Int get()=when(prefs.getString("accent","violet")) { "blue"->0xff80bfff.toInt(); "green"->0xff6ee7b7.toInt(); else->0xffb6a0ff.toInt() }
@@ -444,12 +444,12 @@ class MainActivity : ComponentActivity() {
         val frame=android.widget.FrameLayout(this)
         val workspace=LinearLayout(this).apply { orientation=if(wide) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL }
         shell.addView(workspace,LinearLayout.LayoutParams(-1,0,1f))
-        val root=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(layoutMode.padding),dp(8),dp(layoutMode.padding),dp(24)) }
+        val root=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(adaptiveLayout.padding),dp(8),dp(adaptiveLayout.padding),dp(24)) }
         settingsPage=ScrollView(this).apply { isFillViewport=true; addView(root) }; frame.addView(settingsPage)
-        dashboard=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(layoutMode.padding),dp(8),dp(layoutMode.padding),dp(24)) }
+        dashboard=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(adaptiveLayout.padding),dp(8),dp(adaptiveLayout.padding),dp(24)) }
         contentPage=ScrollView(this).apply { isFillViewport=true; addView(dashboard) }; frame.addView(contentPage)
         nav=LinearLayout(this).apply { orientation=if(wide) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL; setPadding(dp(8),dp(8),dp(8),dp(8)); setBackgroundColor(surface) }
-        if(wide) { workspace.addView(nav,LinearLayout.LayoutParams(dp(layoutMode.rail),-1)); workspace.addView(frame,LinearLayout.LayoutParams(0,-1,1f)) }
+        if(wide) { workspace.addView(nav,LinearLayout.LayoutParams(dp(adaptiveLayout.rail),-1)); workspace.addView(frame,LinearLayout.LayoutParams(0,-1,1f)) }
         else { workspace.addView(frame,LinearLayout.LayoutParams(-1,0,1f)); workspace.addView(nav,LinearLayout.LayoutParams(-1,-2)) }
         val navLabels=listOf(getString(R.string.nav_home),getString(R.string.nav_library),getString(R.string.nav_review),getString(R.string.nav_activity),getString(R.string.nav_settings))
         if(tvMode) {
@@ -941,7 +941,7 @@ class MainActivity : ComponentActivity() {
         text=value; textSize=size.toFloat()*UiAccessibility.readingScale(prefs.getInt("reading_size",0),tvMode); setTextColor(color); if(bold) setTypeface(null,android.graphics.Typeface.BOLD)
     }
     private fun actionButton(label:String,action:()->Unit)=Button(this).apply {
-        text=label; contentDescription=label; isAllCaps=false; isFocusable=true; if(tvMode) { minWidth=dp(120); setOnFocusChangeListener { view,focused -> view.alpha=if(focused) 1f else 0.85f; view.scaleX=if(focused && !prefs.getBoolean("reduce_motion",false)) 1.03f else 1f; view.scaleY=if(focused && !prefs.getBoolean("reduce_motion",false)) 1.03f else 1f } }; setTextColor(ink); textSize=14f*UiAccessibility.readingScale(prefs.getInt("reading_size",0),tvMode); background=if(tvMode) TvFocus.background(this@MainActivity,0xff302a48.toInt(),violet) else rounded(0xff302a48.toInt(),12); minHeight=dp(layoutMode.touch)
+        text=label; contentDescription=label; isAllCaps=false; isFocusable=true; if(tvMode) { minWidth=dp(120); setOnFocusChangeListener { view,focused -> view.alpha=if(focused) 1f else 0.85f; view.scaleX=if(focused && !prefs.getBoolean("reduce_motion",false)) 1.03f else 1f; view.scaleY=if(focused && !prefs.getBoolean("reduce_motion",false)) 1.03f else 1f } }; setTextColor(ink); textSize=14f*UiAccessibility.readingScale(prefs.getInt("reading_size",0),tvMode); background=if(tvMode) TvFocus.background(this@MainActivity,0xff302a48.toInt(),violet) else rounded(0xff302a48.toInt(),12); minHeight=dp(adaptiveLayout.touch)
         layoutParams=LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(6) }; setOnClickListener { action() }
     }
     private fun panel(parent:LinearLayout):LinearLayout=LinearLayout(this).apply {
@@ -980,7 +980,7 @@ class MainActivity : ComponentActivity() {
         dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeLoading(violet) } })
         val app=applicationContext
         historyTask=historyExecutor.submit {
-            val result=runCatching { WatchHistory(app).use { db -> val rows=db.records(0); rows to ViewingGroups.build(rows) } }
+            val result=runCatching { val db=WatchHistory(app); try { val rows=db.records(0); rows to ViewingGroups.build(rows) } finally { db.close() } }
             if(!Thread.currentThread().isInterrupted) runOnUiThread {
                 if(isDestroyed || isFinishing || request!=historyRequest || tab!=selectedTab) return@runOnUiThread
                 result.fold({ (records,groups) -> renderHistory(records,groups) }, {
@@ -1026,7 +1026,7 @@ class MainActivity : ComponentActivity() {
                 val age=System.currentTimeMillis()-prefs.getLong("last_sample",0)
                 val live=prefs.getBoolean("enabled",false) && prefs.getBoolean("listener_connected",false) && age in 0..20000
                 val weekly=ViewingAnalytics.filter(records,HistoryFilter(period=7))
-                dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { if(tvMode) BridgeTvHome(violet,live,pending,durationText(weekly.sumOf { it.watched }),{ nowPlaying() },{ showTab(2) },{ discover() },{ showTab(4) },{ viewingPlanner() }) else if(layoutMode.mode==AdaptiveUi.Mode.EXPANDED) BridgeExpandedHome(violet,live,pending,durationText(weekly.sumOf { it.watched }),{ showTab(4) },{ showTab(2) },{ discover() },{ viewingPlanner() },{ nowPlaying() }) else BridgeHomeSummary(violet,live,pending,durationText(weekly.sumOf { it.watched }),{ showTab(4) },{ showTab(2) },{ discover() },{ viewingPlanner() }) } })
+                dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { if(tvMode) BridgeTvHome(violet,live,pending,durationText(weekly.sumOf { it.watched }),{ nowPlaying() },{ showTab(2) },{ discover() },{ showTab(4) },{ viewingPlanner() }) else if(adaptiveLayout.mode==AdaptiveUi.Mode.EXPANDED) BridgeExpandedHome(violet,live,pending,durationText(weekly.sumOf { it.watched }),{ showTab(4) },{ showTab(2) },{ discover() },{ viewingPlanner() },{ nowPlaying() }) else BridgeHomeSummary(violet,live,pending,durationText(weekly.sumOf { it.watched }),{ showTab(4) },{ showTab(2) },{ discover() },{ viewingPlanner() }) } })
                 val hidden=DashboardPreferences.visible(prefs.getString("dashboard_hidden","").orEmpty())
                 for(key in DashboardPreferences.order(prefs.getString("dashboard_order","").orEmpty())) {
                     if(key in hidden) continue
@@ -1482,7 +1482,7 @@ class MainActivity : ComponentActivity() {
         val peers=DevicePairing.peers(this).sortedBy { it.label }
         val live=RemotePlayback.visible(this).map { it.device.id }.toSet()
         val view=ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow) }
-        val dialog=android.app.AlertDialog.Builder(this).setTitle("Connected devices").setView(ScrollView(this).apply { addView(view) }).setPositiveButton("Close",null).create()
+        val dialog=android.app.AlertDialog.Builder(this).setTitle("Connected devices").setView(view).setPositiveButton("Close",null).create()
         view.setContent {
             BridgeDevices(violet,identity?.label ?: "This device",peers.map { PairedUiDevice(it.id,it.label,it.id in live) },prefs.getBoolean("device_sharing",false),prefs.getBoolean("device_history",false),prefs.getBoolean("device_controls",false),
                 { dialog.dismiss(); showPairingInvitation() },
@@ -1828,7 +1828,7 @@ class MainActivity : ComponentActivity() {
         card.addView(actionButton("View title and sessions") { showSessions(g) })
     }
     private fun <T> cards(parent:LinearLayout,items:List<T>,render:(LinearLayout,T)->Unit) {
-        val columns=layoutMode.columns
+        val columns=adaptiveLayout.columns
         if(columns==1) { items.forEach { render(parent,it) }; return }
         items.chunked(columns).forEach { pair ->
             val row=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=android.view.Gravity.TOP }
