@@ -49,10 +49,10 @@ object HistoryImport {
         val rows=csv(input.removePrefix("\uFEFF"))
         require(rows.isNotEmpty()) { "Empty CSV" }
         val header=rows.first().map(::normalized)
-        val titleIndex=header.indexOf("title")
-        val dateIndex=header.indexOf("date")
+        val titleIndex=if(source=="letterboxd") header.indexOf("name") else header.indexOf("title")
+        val dateIndex=if(source=="letterboxd") header.indexOf("watched date") else header.indexOf("date")
         val timeIndex=header.indexOf("start time")
-        require(titleIndex>=0 && (dateIndex>=0 || timeIndex>=0)) { "CSV must contain Title and Date, or Title and Start Time" }
+        require(titleIndex>=0 && (dateIndex>=0 || timeIndex>=0)) { if(source=="letterboxd") "Letterboxd diary must contain Name and Watched Date" else "CSV must contain Title and Date, or Title and Start Time" }
         var skipped=0
         val occurrences=mutableMapOf<String,Int>()
         val result=mutableListOf<ImportedViewing>()

@@ -350,6 +350,7 @@ class MainActivity : Activity() {
         button("Export viewing history (CSV)") { pickBackup(61) }
         button("Restore viewing history (JSON)") { pickBackup(62) }
         button("Check history database integrity") { checkHistoryIntegrity() }
+        button("Import Letterboxd diary (CSV)") { importSource="letterboxd"; startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*"),58) }
         button("Import streaming viewing history (CSV)") { chooseImportProvider() }
         button("Identify local video file") { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("video/*"),57) }
         button("Identify shared movie link") { val field=EditText(this).apply { hint="Paste shared title or link" }; android.app.AlertDialog.Builder(this).setTitle("Identify shared content").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Continue") { _,_-> presentShared(SharedContent.fromText(field.text.toString())) }.show() }
