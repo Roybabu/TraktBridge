@@ -30,4 +30,16 @@ class RecognitionEngineTest {
   assertEquals(right,RecognitionEngine.exactEpisode(8,number,listOf(right.copy(showId=7),right.copy(season=1),right)))
   assertNull(RecognitionEngine.exactEpisode(8,number,listOf(right,right.copy(id=10))))
  }
+ @Test fun sameSourceConflictingTitlesAreNotTrusted() {
+  val result=RecognitionEngine.fuse(listOf(Evidence("Interstellar","","media",85),Evidence("Inception","","media",85)))!!
+  assertTrue(result.conflict); assertTrue(result.score<65)
+ }
+ @Test fun remakeYearsConflict() {
+  val result=RecognitionEngine.fuse(listOf(Evidence("Dune (1984)","","media",85),Evidence("Dune (2021)","","notification",70)))!!
+  assertTrue(result.conflict); assertTrue(result.score<65)
+ }
+ @Test fun repeatedSourceCannotIncreaseConfidence() {
+  val evidence=Evidence("Interstellar","","media",85)
+  assertEquals(85,RecognitionEngine.fuse(List(5) { evidence })!!.score)
+ }
 }
