@@ -1581,70 +1581,42 @@ class MainActivity : ComponentActivity() {
         }
     }
     private fun nowPlaying() {
-        val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(12),dp(16),dp(12)) }
-        val status=txt("",16,ink,true); body.addView(status)
-        body.addView(actionButton("Remote playback controls") { remotePlaybackControls() })
-        body.addView(actionButton("Continue watching on this device") { continueOnThisDevice() })
-        val content=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }; body.addView(content)
-        val dialog=android.app.AlertDialog.Builder(this).setTitle("Now Playing • All devices").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).create()
+        var rows by androidx.compose.runtime.mutableStateOf<List<LiveUiSession>>(emptyList())
+        var status by androidx.compose.runtime.mutableStateOf("Checking playback…")
+        val body=ComposeView(this).apply {
+            setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
+            setContent { BridgeLiveDashboard(violet,rows,status,{ remotePlaybackControls() },{ continueOnThisDevice() },{ showTab(4) }) }
+        }
+        val dialog=android.app.AlertDialog.Builder(this).setTitle("Now Playing • All devices").setView(body).setPositiveButton("Close",null).create()
         val handler=android.os.Handler(android.os.Looper.getMainLooper())
         val tick=object:Runnable {
             override fun run() {
                 if(!dialog.isShowing || isDestroyed || isFinishing) return
                 val age=System.currentTimeMillis()-prefs.getLong("last_sample",0)
                 val live=prefs.getBoolean("enabled",false) && prefs.getBoolean("listener_connected",false) && age in 0..20000
-                status.text=if(live) "Live observations • updated "+(age/1000)+" seconds ago" else "No fresh playback observation"
-                content.removeAllViews()
-                content.addView(txt("THIS DEVICE",15,muted,true))
-                val sessions=if(live) runCatching { JSONArray(prefs.getString("sessions","[]")) }.getOrDefault(JSONArray()) else JSONArray()
-                if(sessions.length()==0) content.addView(txt("No selected player session is visible to Android.",14,muted))
-                for(i in 0 until sessions.length()) {
-                    val row=sessions.optJSONObject(i) ?: continue
-                    val card=panel(content)
-                    val title=row.optString("title").ifBlank { "Unidentified video" }
-                    card.addView(txt(title,20,ink,true)); card.addView(txt(appLabel(row.optString("package"))+" • "+row.optString("output","unknown")+" output",14,muted)); card.addView(txt(row.optString("sessionLabel","Session unavailable"),12,muted))
-                    val state=when(row.optInt("state")) { 3->"Playing"; 2->"Paused"; 6,8->"Buffering or connecting"; else->"Playback state unknown or stopped" }
-                    if(row.optString("subtitle").isNotBlank()) card.addView(txt(row.optString("subtitle"),14,muted))
-                    card.addView(txt(state,15,violet,true))
-                    val position=row.optLong("positionMs",-1); val duration=row.optLong("durationMs",0)
-                    if(PlaybackPosition.valid(position,duration)) {
-                        card.addView(txt(durationText(position)+" / "+durationText(duration)+" • "+row.optString("positionSource","unknown"),14,muted))
-                        card.addView(ProgressBar(this@MainActivity,null,android.R.attr.progressBarStyleHorizontal).apply { progress=(position.toDouble()/duration*100).toInt().coerceIn(0,100) })
-                    } else card.addView(txt("Position unavailable",14,muted))
-                    card.addView(txt("Recognition evidence score: "+row.optInt("recognitionScore")+"/100"+if(row.optBoolean("recognitionConflict")) " • conflicting evidence" else "",14,muted))
-                }
-                val remote=RemotePlayback.visible(this@MainActivity)
-                content.addView(txt("PAIRED DEVICES",15,muted,true))
-                if(!PlaybackSharing.enabled(this@MainActivity)) {
-                    content.addView(txt("Enable cross-device playback sharing in Settings and start tracking on each device.",14,muted))
-                } else if(remote.isEmpty()) {
-                    content.addView(txt("No paired device has a fresh encrypted connection.",14,muted))
-                }
-                for(entry in remote) {
-                    val deviceCard=panel(content)
-                    deviceCard.addView(txt(entry.device.label,18,ink,true))
-                    deviceCard.addView(txt("Verified device • "+entry.device.id.take(12)+if(entry.endpoint==null) " • Relay" else " • Local Wi-Fi",12,muted))
-                    if(entry.rows.length()==0) deviceCard.addView(txt("Connected • no visible playback",14,muted))
-                    for(j in 0 until entry.rows.length()) {
-                        val row=entry.rows.optJSONObject(j) ?: continue
-                        val card=panel(deviceCard)
-                        card.addView(txt(row.optString("title"),18,ink,true))
-                        val detail=row.optString("subtitle")
-                        if(detail.isNotBlank()) card.addView(txt(detail,14,muted))
-                        card.addView(txt(appLabel(row.optString("package")),14,muted))
-                        card.addView(txt(DevicePlaybackDisplay.state(row.optInt("state")),15,violet,true))
+                val next=mutableListOf<LiveUiSession>()
+                fun append(device:String,id:String,data:JSONArray,local:Boolean) {
+                    for(i in 0 until data.length()) {
+                        val row=data.optJSONObject(i) ?: continue
                         val position=row.optLong("positionMs",-1); val duration=row.optLong("durationMs",0)
                         val percent=DevicePlaybackDisplay.progress(position,duration)
-                        if(percent!=null) {
-                            card.addView(txt(durationText(position)+" / "+durationText(duration),14,muted))
-                            card.addView(ProgressBar(this@MainActivity,null,android.R.attr.progressBarStyleHorizontal).apply { progress=percent })
-                        } else card.addView(txt("Position unavailable",14,muted))
+                        val timing=if(percent==null) "Position unavailable" else durationText(position)+" / "+durationText(duration)
+                        val evidence=if(local) "Evidence: "+row.optInt("recognitionScore")+"/100"+if(row.optBoolean("recognitionConflict")) " • conflicting evidence" else "" else ""
+                        next.add(LiveUiSession(id+":"+i,device,row.optString("title").ifBlank { "Unidentified video" },row.optString("subtitle"),appLabel(row.optString("package")),DevicePlaybackDisplay.state(row.optInt("state")),percent,timing,evidence))
                     }
                 }
+                if(live) append("This device","local",runCatching { JSONArray(prefs.getString("sessions","[]")) }.getOrDefault(JSONArray()),true)
+                val remote=RemotePlayback.visible(this@MainActivity)
+                for(entry in remote) append(entry.device.label+if(entry.endpoint==null) " • Relay" else " • Wi-Fi",entry.device.id,entry.rows,false)
+                status=(if(live) "Local tracking live" else "No fresh local observation")+" • "+remote.size+" connected device(s)"
+                rows=next
                 handler.postDelayed(this,2500)
             }
         }
-        dialog.setOnDismissListener { handler.removeCallbacks(tick) }; dialog.show(); handler.post(tick)
+        dialog.setOnDismissListener { handler.removeCallbacks(tick) }
+        dialog.show()
+        if(wide) dialog.window?.setLayout((resources.displayMetrics.widthPixels*0.82).toInt(),-2)
+        handler.post(tick)
     }
     private fun liveInspector() {
         val body=TextView(this).apply { setPadding(dp(16),dp(12),dp(16),dp(12)); setTextIsSelectable(true) }
