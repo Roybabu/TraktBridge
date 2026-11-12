@@ -42,4 +42,15 @@ class RecognitionEngineTest {
   val evidence=Evidence("Interstellar","","media",85)
   assertEquals(85,RecognitionEngine.fuse(List(5) { evidence })!!.score)
  }
+ @Test fun alternateEpisodeAndSpecials() {
+  assertEquals(EpisodeNumber(2,12),RecognitionEngine.episodeOf("Example 2x12"))
+  assertEquals(EpisodeNumber(0,1),RecognitionEngine.episodeOf("Example S00E01"))
+  assertEquals("Example",TitleNormalizer.suggestedQuery("Example.2x12.mkv"))
+ }
+ @Test fun multiEpisodeFilesCannotBeMappedAutomatically() {
+  for(value in listOf("S01E02E03","S01E02-E03","S01E02-03","2x03 / 2x04")) {
+   assertNull(RecognitionEngine.episodeOf(value)); assertTrue(RecognitionEngine.ambiguousEpisode(value))
+   assertNull(RecognitionEngine.key("local","Example",value,"episode"))
+  }
+ }
 }
