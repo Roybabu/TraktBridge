@@ -1510,25 +1510,26 @@ class MainActivity : ComponentActivity() {
         choose("Manage paired devices",peers.map { it.label+" • "+it.id.take(12) }+"Revoke all devices") { i -> confirmDeviceRevocation(peers.getOrNull(i)) }
     }
     private fun showDeviceHistory() {
-        val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(12),dp(16),dp(12)) }
-        body.addView(txt("Read-only paired-device viewing history. Overlapping local observations are hidden. These entries never enter your Trakt upload queue.",14,muted))
-        val dialog=android.app.AlertDialog.Builder(this).setTitle("Cross-device history").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).create()
+        var rows by androidx.compose.runtime.mutableStateOf<List<HistoryUiRow>>(emptyList())
+        var loading by androidx.compose.runtime.mutableStateOf(true)
+        var error by androidx.compose.runtime.mutableStateOf(false)
+        val body=ComposeView(this).apply {
+            setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
+            setContent { BridgeDeviceHistory(violet,rows,loading,error) }
+        }
+        val dialog=android.app.AlertDialog.Builder(this).setTitle("Cross-device history").setView(body).setPositiveButton("Close",null).create()
         dialog.show()
+        if(wide) dialog.window?.setLayout((resources.displayMetrics.widthPixels*0.76).toInt(),-2)
         Thread {
-            val rows=runCatching { DeviceHistory.visible(applicationContext) }
+            val result=runCatching { DeviceHistory.visible(applicationContext) }
             val labels=DevicePairing.peers(applicationContext).associate { it.id to it.label }
             runOnUiThread {
                 if(!dialog.isShowing || isDestroyed || isFinishing) return@runOnUiThread
-                rows.fold({ items ->
-                    if(items.isEmpty()) body.addView(txt("No new paired-device records. Enable history sharing on both devices and allow them to connect.",14,muted))
-                    for(item in items) {
-                        val e=item.event; val card=panel(body)
-                        card.addView(txt(e.title,18,ink,true))
-                        if(e.detail.isNotBlank()) card.addView(txt(e.detail,14,muted))
-                        card.addView(txt((labels[item.peer] ?: "Paired device")+" • "+appLabel(e.source),14,muted))
-                        card.addView(txt(java.text.DateFormat.getDateTimeInstance().format(java.util.Date(e.ended))+" • "+durationText(e.watched)+" watched",14,muted))
-                    }
-                },{ body.addView(txt("Unable to read paired-device history",14,muted)) })
+                result.fold({ items -> rows=items.map { item ->
+                    val e=item.event
+                    HistoryUiRow(item.peer+":"+e.id,e.title,e.detail,(labels[item.peer] ?: "Paired device")+" • "+appLabel(e.source),java.text.DateFormat.getDateTimeInstance().format(java.util.Date(e.ended))+" • "+durationText(e.watched)+" watched")
+                } },{ error=true })
+                loading=false
             }
         }.start()
     }
