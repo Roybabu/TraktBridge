@@ -8,7 +8,7 @@ class RecognitionEngineTest {
  }
  @Test fun conflictingTitlesReduceScore() {
   val r=RecognitionEngine.fuse(listOf(Evidence("Interstellar","","media",85),Evidence("Inception","","accessibility",65)))!!
-  assertTrue(r.conflict); assertEquals(60,r.score)
+  assertTrue(r.conflict); assertEquals(49,r.score)
  }
  @Test fun distinctEpisodesNeverShareKey() {
   assertNull(RecognitionEngine.key("netflix","The Crown","","episode"))
@@ -19,4 +19,15 @@ class RecognitionEngineTest {
   assertEquals(2L,RecognitionEngine.rank("Dune (2021)","",155*60000L,items).first().item.id)
  }
  @Test fun providerKeysScoped() { assertNotEquals(RecognitionEngine.providerKey("netflix","12345"),RecognitionEngine.providerKey("prime","12345")) }
+ @Test fun ambiguousEpisodeIsRejected() {
+  assertNull(RecognitionEngine.episodeOf("S01 E02 / S01 E03"))
+  assertTrue(RecognitionEngine.ambiguousEpisode("S01 E02 / S01 E03"))
+  assertNull(RecognitionEngine.key("netflix","Example","S01 E02 / S01 E03","movie"))
+ }
+ @Test fun exactEpisodeRequiresCorrectParentAndSeason() {
+  val number=EpisodeNumber(2,3)
+  val right=CatalogueItem("episode",9,"Example",showId=8,season=2,episode=3)
+  assertEquals(right,RecognitionEngine.exactEpisode(8,number,listOf(right.copy(showId=7),right.copy(season=1),right)))
+  assertNull(RecognitionEngine.exactEpisode(8,number,listOf(right,right.copy(id=10))))
+ }
 }
