@@ -143,3 +143,6 @@ Bounded polling backoff after sampling failures, encrypted backup verification b
 
 ## v0.95.0
 Non-destructive schema 8 migration adds indexes for recent history, pending notifications, source overlap and account matching. Notification selection now uses a bounded SQL query. Weekly dependency inventory workflow produces a resolved dependency graph. Automated vulnerability advisory matching and device database performance measurements remain outstanding.
+
+## v0.96.0
+Privacy dashboard exposes tracking, screen protection, credential lock, backup and remote refresh states, with explicit local data controls. Security boundary unit tests cover untrusted navigation and account separation. A full encryption audit and independent penetration testing remain outstanding; local SQLite remains unencrypted.

@@ -389,6 +389,7 @@ class MainActivity : ComponentActivity() {
         button("Universal playback shortcuts") { playbackShortcut() }
         button("Companion status") { val summary=CompanionStatus.summarize(history.records(0)); android.app.AlertDialog.Builder(this).setTitle("Companion status").setMessage("Active sessions: "+summary.active+"\nAwaiting review: "+summary.pending+"\nSampled time: "+durationText(summary.watchedMs)).setPositiveButton("Close",null).show() }
         button("Cancel all episode reminders") { prefs.edit().putBoolean("episode_reminders",false).apply(); EpisodeReminders.cancelAll(this); Toast.makeText(this,"Reminders cancelled",Toast.LENGTH_SHORT).show() }
+        button("Privacy dashboard and data controls") { privacyDashboard() }
         button("Privacy mode • stop tracking now") { privacyMode() }
         root.addView(Switch(this).apply { text="Require biometric or device credential on app resume"; isChecked=prefs.getBoolean("privacy_lock",false); setOnCheckedChangeListener { _,checked -> if(checked && !getSystemService(android.app.KeyguardManager::class.java).isDeviceSecure) { isChecked=false; Toast.makeText(this@MainActivity,"Set a device screen lock first",Toast.LENGTH_LONG).show() } else { prefs.edit().putBoolean("privacy_lock",checked).apply(); if(checked) { unlocked=false; requirePrivacyUnlock() } } } })
         root.addView(Switch(this).apply { text="Protect app screen from screenshots and recent-app previews"; isChecked=prefs.getBoolean("secure_screen",false); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("secure_screen",checked).apply(); applyScreenProtection() } })
@@ -538,6 +539,25 @@ class MainActivity : ComponentActivity() {
     private fun applyScreenProtection() {
         if(prefs.getBoolean("secure_screen",false)) window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
         else window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+    }
+    private fun privacyDashboard() {
+        val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(12),dp(16),dp(12)) }
+        fun status(label:String,enabled:Boolean) { body.addView(txt(label+": "+if(enabled) "On" else "Off",15,ink)) }
+        status("Playback tracking",prefs.getBoolean("enabled",false))
+        status("Title suggestions",prefs.getBoolean("title_optin",false))
+        status("Usage fallback",prefs.contains("usage_since") && UsageFallback.allowed(this))
+        status("Device credential lock",prefs.getBoolean("privacy_lock",false))
+        status("Screenshot protection",prefs.getBoolean("secure_screen",false))
+        status("Daily encrypted backup",prefs.getBoolean("daily_backup",false))
+        status("Automatic remote refresh",prefs.getString("auto_refresh_account","").orEmpty().isNotBlank())
+        body.addView(txt("Local viewing SQLite is not encrypted. Remote history cache, OAuth credentials and optional encrypted backups use device-backed or password-based encryption.",14,muted))
+        body.addView(actionButton("Pause tracking") { privacyMode() })
+        body.addView(actionButton("Disable automatic remote refresh") { RemoteRefreshSchedule.disable(this); Toast.makeText(this,"Remote refresh disabled",Toast.LENGTH_SHORT).show() })
+        body.addView(actionButton("Delete downloaded remote history") {
+            android.app.AlertDialog.Builder(this).setTitle("Clear cached history?").setMessage("Local viewing records and your Trakt account are unchanged.").setNegativeButton("Cancel",null).setPositiveButton("Clear") { _,_->TraktLibrary.clearCache(this) }.show()
+        })
+        body.addView(actionButton("Export encrypted history") { startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/octet-stream").putExtra(Intent.EXTRA_TITLE,"traktbridge-history.tbenc"),63) })
+        android.app.AlertDialog.Builder(this).setTitle("Privacy dashboard").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
     }
     private fun privacyMode() {
         android.app.AlertDialog.Builder(this).setTitle("Pause all playback tracking?").setMessage("Sampling, title hints and optional usage reminders stop. Existing history and already approved uploads are retained. Restart tracking manually in Settings.").setNegativeButton("Cancel",null).setPositiveButton("Pause tracking") { _,_->
