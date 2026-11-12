@@ -60,6 +60,14 @@ object TraktCatalogue {
             if (n <= 0 || eid <= 0) null else CatalogueItem("episode",eid,show.title + " — " + o.optString("title","Episode " + n),show.year,show.id,season,n,o.optInt("runtime"))
         }.distinctBy { it.id }.sortedBy { it.episode }
     }
+    fun discover(type:String,mode:String,done:(Result<List<CatalogueItem>>)->Unit)=request(done) {
+        require(type in setOf("movie","show") && mode in setOf("trending","popular"))
+        objects(get("/"+RemoteRules.plural(type)+"/"+mode+"?limit=30&extended=full")).mapNotNull { row ->
+            val o=if(mode=="trending") row.optJSONObject(type) ?: return@mapNotNull null else row
+            val id=id(o); val title=o.optString("title")
+            if(id<=0 || title.isBlank()) null else CatalogueItem(type,id,title,o.optInt("year"),runtimeMinutes=o.optInt("runtime"))
+        }.distinctBy { it.id }
+    }
     fun details(type:String,id:Long,done:(Result<TitleDetails>)->Unit)=request(done) {
         require(id>0 && type in setOf("movie","show"))
         val c=URL("https://api.trakt.tv/"+RemoteRules.plural(type)+"/"+id+"?extended=full").openConnection() as HttpsURLConnection

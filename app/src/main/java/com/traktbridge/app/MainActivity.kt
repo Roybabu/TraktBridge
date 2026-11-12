@@ -425,6 +425,7 @@ class MainActivity : Activity() {
                 if(continuing.isEmpty()) panel(dashboard).addView(txt("No unfinished sampled viewing yet.",15,muted)) else cards(dashboard,continuing.drop(1).take(6)) { parent,g -> titleCard(parent,g,false) }
                 section(dashboard,"Review queue")
                 val q=panel(dashboard); q.addView(txt("$pending awaiting action",22,ink,true)); q.addView(actionButton("Open review queue") { showTab(2) }); q.addView(actionButton("Review app activity") { reviewUsage() })
+                dashboard.addView(actionButton("Discover movies and shows") { discover() })
                 dashboard.addView(actionButton("Open Trakt account library") { openTraktLibrary() })
                 section(dashboard,"Recently watched")
                 val recent=groups.filter { !it.active }.take(5)
@@ -471,6 +472,20 @@ class MainActivity : Activity() {
                 section(dashboard,"Viewing calendar")
                 calendarView(dashboard,records)
 
+            }
+        }
+    }
+    private fun discover() {
+        choose("Discover",listOf("Trending movies","Trending shows","Popular movies","Popular shows")) { index ->
+            val type=if(index%2==0) "movie" else "show"; val mode=if(index<2) "trending" else "popular"
+            lookup("Loading "+mode,{ done -> TraktCatalogue.discover(type,mode,done) }) { rows:List<CatalogueItem> ->
+                val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
+                cards(body,rows) { parent,item ->
+                    val card=panel(parent); val image=ImageView(this).apply { scaleType=ImageView.ScaleType.FIT_CENTER; contentDescription="Poster" }
+                    card.addView(image,LinearLayout.LayoutParams(-1,dp(180))); Artwork.load(this,type,item.id,image)
+                    card.addView(txt(item.label(),16,ink,true)); card.addView(actionButton("Details") { titleDetails(type,item.id,item.title) })
+                }
+                android.app.AlertDialog.Builder(this).setTitle(mode.replaceFirstChar { it.uppercase() }).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
             }
         }
     }
