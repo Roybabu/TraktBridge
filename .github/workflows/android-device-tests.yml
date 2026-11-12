@@ -44,7 +44,7 @@ jobs:
           disable-animations: true
           script: |
             if [ '${{ matrix.profile }}' = tablet ]; then adb shell wm size 1600x2560; adb shell wm density 240; fi
-            gradle --no-daemon :app:connectedDebugAndroidTest
+            gradle --no-daemon :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.deviceProfile=${{ matrix.profile }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:
