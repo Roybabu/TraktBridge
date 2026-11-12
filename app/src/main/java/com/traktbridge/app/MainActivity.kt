@@ -57,6 +57,11 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); handleCallback(intent); handleReview(intent); handleShared(intent); handleTrackingShortcut(intent); handleAutomation(intent) }
     override fun onActivityResult(requestCode:Int,resultCode:Int,data:Intent?) {
         super.onActivityResult(requestCode,resultCode,data)
+        if(requestCode==98 && resultCode==RESULT_OK) {
+            @Suppress("DEPRECATION") val bitmap=data?.extras?.get("data") as? android.graphics.Bitmap
+            if(bitmap==null) { Toast.makeText(this,"No camera image returned. Import a QR image instead.",Toast.LENGTH_LONG).show(); return }
+            Thread { val result=runCatching { PairingQr.decode(bitmap) }; runOnUiThread { if(!isDestroyed && !isFinishing) result.fold({ approvePairingInvitation(it) },{ Toast.makeText(this,"QR unreadable. Try closer or import a full-resolution image.",Toast.LENGTH_LONG).show() }) } }.start(); return
+        }
         if(requestCode==97 && resultCode==RESULT_OK) { data?.data?.let { readPairingQr(it) }; return }
         if(requestCode==96) { privacyPrompt=false; unlocked=resultCode==RESULT_OK; if(unlocked) shell.visibility=android.view.View.VISIBLE else finish(); return }
         if(requestCode==57 && resultCode==RESULT_OK) data?.data?.let { inspectVideo(it) }
@@ -64,6 +69,10 @@ class MainActivity : ComponentActivity() {
         if(resultCode==RESULT_OK && requestCode in 65..66) data?.data?.let { settingsTransfer(requestCode,it) }
         if(resultCode==RESULT_OK && requestCode in 63..64) data?.data?.let { encryptedTransfer(requestCode,it) }
         if(resultCode==RESULT_OK && requestCode in 60..62) data?.data?.let { historyTransfer(requestCode,it) }
+    }
+    private fun capturePairingQr() {
+        if(!packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_CAMERA_ANY)) { Toast.makeText(this,"No camera. Import a QR image or enter the signed invitation.",Toast.LENGTH_LONG).show(); return }
+        runCatching { startActivityForResult(Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE),98) }.onFailure { Toast.makeText(this,"Camera unavailable. Use QR image import.",Toast.LENGTH_LONG).show() }
     }
     private fun showPairingInvitation() {
         runCatching {
@@ -74,7 +83,7 @@ class MainActivity : ComponentActivity() {
             val content=LinearLayout(this).apply {
                 orientation=LinearLayout.VERTICAL
                 addView(ImageView(this@MainActivity).apply { setImageBitmap(bitmap); adjustViewBounds=true },LinearLayout.LayoutParams(-1,dp(250)))
-                addView(txt("Verification PIN: "+DevicePairing.verificationCode(token)+"\nExpires in 2 minutes. Exchange invitations on both devices.",16))
+                addView(txt("Verification PIN: "+DevicePairing.verificationCode(token)+"\nExpires in 2 minutes. Scan this QR on your phone or tablet, compare the PIN, then approve an invitation from the other device.",16))
                 addView(EditText(this@MainActivity).apply { setText(token); keyListener=null; setTextIsSelectable(true); maxLines=3 })
             }
             val dialog=android.app.AlertDialog.Builder(this).setTitle("Pair this device").setView(content).setPositiveButton("Close",null).create()
@@ -104,10 +113,7 @@ class MainActivity : ComponentActivity() {
                 options.inSampleSize=maxOf(1,maxOf(options.outWidth,options.outHeight)/1200)
                 val bitmap=contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it,null,options) } ?: error("Missing image")
                 try {
-                    val pixels=IntArray(bitmap.width*bitmap.height)
-                    bitmap.getPixels(pixels,0,bitmap.width,0,0,bitmap.width,bitmap.height)
-                    val source=com.google.zxing.RGBLuminanceSource(bitmap.width,bitmap.height,pixels)
-                    com.google.zxing.qrcode.QRCodeReader().decode(com.google.zxing.BinaryBitmap(com.google.zxing.common.HybridBinarizer(source))).text
+                    PairingQr.decode(bitmap)
                 } finally { bitmap.recycle() }
             }
             runOnUiThread { if(!isDestroyed && !isFinishing) result.fold({ approvePairingInvitation(it) },{ Toast.makeText(this,"QR image could not be read",Toast.LENGTH_LONG).show() }) }
@@ -502,6 +508,7 @@ class MainActivity : ComponentActivity() {
         }
         button("Show device pairing QR") { showPairingInvitation() }
         button("Enter pairing invitation and PIN") { approvePairingInvitation() }
+        if(!tvMode) button("Capture pairing QR with camera") { capturePairingQr() }
         button("Read pairing QR from image") { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("image/*"),97) }
         button("Discover nearby devices") {
             val status=TextView(this).apply { text="Searching local network…"; setPadding(dp(20),dp(12),dp(20),dp(12)) }
