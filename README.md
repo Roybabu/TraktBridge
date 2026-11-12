@@ -128,3 +128,6 @@ Read-only catalogue GET retries are bounded, including short Retry-After values.
 
 ## v0.90.0
 Remote history cache keys use isolated hashed account namespaces. Legacy cache entries are not reused; refresh from the verified Trakt account to repopulate. Trakt-backed history remains the cross-device source; independent device-to-device transport and shared collection editing are not implemented.
+
+## v0.91.0
+New remote history downloads use Android Keystore AES-GCM encryption with account/event key binding. Legacy downloads are not migrated automatically; refresh the cache and use Clear cache to remove old copies. Local viewing SQLite remains unencrypted; full offline-first storage and safe SQLite encryption migration are outstanding.

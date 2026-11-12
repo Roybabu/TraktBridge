@@ -139,22 +139,22 @@ object TraktLibrary {
     // Download a bounded page into an account-scoped local cache. Never convert
     // remote watches into sampled playback or approved upload records.
     fun cacheHistory(context:Context,page:RemotePage):Int {
-        val prefs=context.getSharedPreferences("trakt_remote_history",Context.MODE_PRIVATE)
+        val prefs=context.getSharedPreferences("trakt_remote_history_encrypted",Context.MODE_PRIVATE)
         val edit=prefs.edit()
         var count=0
         for(item in page.items) {
             if(item.eventId<=0 || item.watchedAt.isBlank() || runCatching { Instant.parse(item.watchedAt) }.isFailure) continue
             val key=AccountScope.cacheKey(page.account,item.eventId)
-            edit.putString(key,JSONObject().put("type",item.type).put("id",item.id).put("title",item.title).put("show",item.showId).put("season",item.season).put("episode",item.episode).put("watched",item.watchedAt).put("event",item.eventId).toString()); count++
+            edit.putString(key,PrivateHistoryCache.seal(JSONObject().put("type",item.type).put("id",item.id).put("title",item.title).put("show",item.showId).put("season",item.season).put("episode",item.episode).put("watched",item.watchedAt).put("event",item.eventId).toString(),key)); count++
         }
         check(edit.commit())
         return count
     }
     fun cachedHistory(context:Context,account:String):List<RemoteItem> {
         val prefix=AccountScope.key(account)+":"
-        return context.getSharedPreferences("trakt_remote_history",Context.MODE_PRIVATE).all.filterKeys { it.startsWith(prefix) }.values.mapNotNull { value ->
-            runCatching { val o=JSONObject(value as String); RemoteItem(o.getString("type"),o.getLong("id"),o.getString("title"),o.getLong("show"),o.getInt("season"),o.getInt("episode"),o.getString("watched"),o.getLong("event")) }.getOrNull()
+        return context.getSharedPreferences("trakt_remote_history_encrypted",Context.MODE_PRIVATE).all.filterKeys { it.startsWith(prefix) }.entries.mapNotNull { (key,value) ->
+            runCatching { val o=JSONObject(PrivateHistoryCache.open(value as String,key)); RemoteItem(o.getString("type"),o.getLong("id"),o.getString("title"),o.getLong("show"),o.getInt("season"),o.getInt("episode"),o.getString("watched"),o.getLong("event")) }.getOrNull()
         }.sortedByDescending { it.watchedAt }
     }
-    fun clearCache(context:Context) { context.getSharedPreferences("trakt_remote_history",Context.MODE_PRIVATE).edit().clear().apply() }
+    fun clearCache(context:Context) { context.getSharedPreferences("trakt_remote_history_encrypted",Context.MODE_PRIVATE).edit().clear().apply(); context.getSharedPreferences("trakt_remote_history",Context.MODE_PRIVATE).edit().clear().apply() }
 }
