@@ -597,6 +597,7 @@ class MainActivity : Activity() {
                 val scoped=ViewingAnalytics.filter(records,HistoryFilter(period=analyticsPeriod))
                 val scopedGroups=ViewingGroups.build(scoped)
                 metricGrid(dashboard,listOf("Sampled watch time" to durationText(scoped.sumOf { it.watched }),"Movies synced" to scopedGroups.count { it.confirmed && it.representative.matchType=="movie" }.toString(),"Episodes synced" to scopedGroups.count { it.confirmed && it.representative.matchType=="episode" }.toString(),"Platforms" to scoped.filter { it.watched>0 }.map { it.source }.distinct().size.toString(),"Paused" to durationText(scoped.sumOf { it.pausedMs }),"Buffering" to durationText(scoped.sumOf { it.bufferingMs }),"Seeks" to scoped.sumOf { it.seeks }.toString(),"Uncertain" to durationText(scoped.sumOf { it.uncertainMs })))
+                dashboard.addView(actionButton("Subscription costs") { subscriptions() })
                 dashboard.addView(actionButton("Streaming service dashboard") { serviceDashboard() })
                 section(dashboard,"Watch time by platform")
                 val totals=scoped.groupBy { it.source }.mapValues { it.value.sumOf { r -> r.watched } }.toList().sortedByDescending { it.second }
@@ -655,6 +656,39 @@ class MainActivity : Activity() {
                 }
             }.show()
         }
+    }
+    private fun subscriptions() {
+        val store=getSharedPreferences("subscriptions",MODE_PRIVATE)
+        val sources=((prefs.getStringSet("allowed",emptySet()) ?: emptySet())+history.records(0).map { it.source }+store.all.keys).distinct().sortedBy { appLabel(it) }
+        val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
+        val month=java.time.YearMonth.now()
+        val rows=history.records(0).filter { java.time.YearMonth.from(ViewingAnalytics.day(it.ended))==month }
+        var total=0.0
+        for(pkg in sources) {
+            val data=runCatching { org.json.JSONObject(store.getString(pkg,"{}")) }.getOrDefault(org.json.JSONObject())
+            val cost=data.optDouble("cost",0.0)
+            val hours=rows.filter { it.source==pkg }.sumOf { it.watched }/3600000.0
+            total+=cost
+            val card=panel(body); card.addView(txt(appLabel(pkg),18,ink,true))
+            card.addView(txt("Monthly INR: "+String.format(java.util.Locale.US,"%.2f",cost)+" • "+durationText((hours*3600000).toLong()),14,muted))
+            if(hours>0 && cost>0) card.addView(txt("Cost per sampled hour: ₹"+String.format(java.util.Locale.US,"%.2f",cost/hours),14,violet))
+            if(data.optString("renewal").isNotBlank()) card.addView(txt("Renewal: "+data.optString("renewal"),14,muted))
+            card.addView(actionButton("Edit monthly cost and renewal") {
+                val fields=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(8),dp(16),dp(8)) }
+                val price=EditText(this).apply { hint="Monthly cost in INR"; inputType=android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL; setText(cost.toString()) }
+                val renewal=EditText(this).apply { hint="Renewal date YYYY-MM-DD (optional)"; setText(data.optString("renewal")) }
+                fields.addView(price); fields.addView(renewal)
+                android.app.AlertDialog.Builder(this).setTitle(appLabel(pkg)).setView(fields).setNegativeButton("Cancel",null).setPositiveButton("Save") { _,_->
+                    val amount=price.text.toString().toDoubleOrNull()
+                    val date=renewal.text.toString().trim()
+                    if(amount==null || !amount.isFinite() || amount !in 0.0..1000000.0 || (date.isNotBlank() && runCatching { java.time.LocalDate.parse(date) }.isFailure)) Toast.makeText(this,"Invalid amount or date",Toast.LENGTH_LONG).show()
+                    else { store.edit().putString(pkg,org.json.JSONObject().put("cost",amount).put("renewal",date).toString()).apply(); Toast.makeText(this,"Saved. Reopen dashboard to refresh.",Toast.LENGTH_SHORT).show() }
+                }.show()
+            })
+        }
+        body.addView(txt("Total monthly cost: ₹"+String.format(java.util.Locale.US,"%.2f",total),20,ink,true))
+        body.addView(txt("Amounts are entered manually. Sampled hours can be incomplete; renewal dates are not billing confirmations.",13,muted))
+        android.app.AlertDialog.Builder(this).setTitle("Subscription manager").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
     }
     private fun serviceDashboard() {
         val rows=history.records(0)
