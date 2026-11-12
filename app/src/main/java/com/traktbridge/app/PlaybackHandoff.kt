@@ -4,18 +4,8 @@ import java.net.URI
 
 /** Only public, provider-specific content identifiers cross devices; never media stream URLs. */
 object PlaybackHandoff {
-    fun canonical(source:String):String=when(source) {
-        "com.netflix.ninja" -> "com.netflix.mediaclient"
-        "com.google.android.youtube.tv" -> "com.google.android.youtube"
-        "com.amazon.amazonvideo.livingroom" -> "com.amazon.avod.thirdpartyclient"
-        else -> source
-    }
-    fun packages(source:String):List<String> = when(canonical(source)) {
-        "com.netflix.mediaclient" -> listOf("com.netflix.ninja","com.netflix.mediaclient")
-        "com.google.android.youtube" -> listOf("com.google.android.youtube.tv","com.google.android.youtube")
-        "com.amazon.avod.thirdpartyclient" -> listOf("com.amazon.amazonvideo.livingroom","com.amazon.avod.thirdpartyclient")
-        else -> listOf(source).filter { it in PlayerRules.apps.values }
-    }
+    fun canonical(source:String):String=ProviderPackages.canonical(source)
+    fun packages(source:String):List<String> = ProviderPackages.variants(source).filter { it in PlayerRules.apps.values }
     fun validId(source:String,id:String):String = when(canonical(source)) {
         "com.netflix.mediaclient" -> id.takeIf { it.matches(Regex("[0-9]{5,12}")) }.orEmpty()
         "com.google.android.youtube" -> id.takeIf { it.matches(Regex("[A-Za-z0-9_-]{11}")) }.orEmpty()

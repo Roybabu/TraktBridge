@@ -15,6 +15,6 @@ object DetectionProfiles {
         "com.plexapp.android" to DetectionProfile("Plex",90,70,65,20000,true),
         "org.jellyfin.mobile" to DetectionProfile("Jellyfin",90,70,65,20000,true)
     )
-    fun forPackage(pkg:String)=profiles[pkg] ?: fallback
+    fun forPackage(pkg:String)=profiles[ProviderPackages.canonical(pkg)] ?: fallback
     fun validMetadata(value:String):Boolean=PlayerRules.validTitle(value) && value.trim().lowercase(java.util.Locale.ROOT) !in setOf("advertisement","ad","commercial break","sponsored","video player","netflix","prime video","youtube","crunchyroll","jiohotstar","unknown","now playing")
 }
