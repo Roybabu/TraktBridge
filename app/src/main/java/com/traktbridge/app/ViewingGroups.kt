@@ -14,6 +14,7 @@ data class ViewingTitle(val key:String,val sessions:List<WatchRecord>) {
     val uncertainMs=sessions.sumOf { it.uncertainMs }
     val seeks=sessions.sumOf { it.seeks }
     val rewinds=sessions.sumOf { it.rewinds }
+    val possibleRewatchIds=sessions.sortedBy { it.started }.zipWithNext().filter { (a,b) -> SessionContinuity.possibleRewatch(a,b) }.map { it.second.id }.toSet()
     val confirmed=sessions.any { it.status=="synced" }
     val active=sessions.any { it.status=="active" }
     val queued=sessions.any { it.status in setOf("queued","uncertain","blocked") }
@@ -36,5 +37,5 @@ object ViewingGroups {
         return "session:"+r.id
     }
     fun build(records:List<WatchRecord>):List<ViewingTitle> =
-        records.groupBy(::key).map { (key,rows)->ViewingTitle(key,rows.sortedByDescending { it.ended }) }.sortedByDescending { it.latest.ended }
+        records.distinctBy { it.id }.groupBy(::key).map { (key,rows)->ViewingTitle(key,rows.sortedByDescending { it.ended }) }.sortedByDescending { it.latest.ended }
 }
