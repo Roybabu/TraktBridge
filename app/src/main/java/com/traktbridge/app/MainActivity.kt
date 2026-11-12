@@ -872,7 +872,7 @@ class MainActivity : Activity() {
             local.take(20).forEach { titleCard(body,it,true) }
             if(local.isEmpty()) body.addView(txt("No matching viewing history.",14,muted))
             if(favorites.isNotEmpty()) { section(body,"Favorites"); favorites.take(20).forEach { body.addView(txt(it,14)) } }
-            if(collections.isNotEmpty()) { section(body,"Matching collections"); collections.forEach { body.addView(txt(it,14)) }; body.addView(actionButton("Open collections") { collections() }) }
+            if(collections.isNotEmpty()) { section(body,"Matching collections"); collections.forEach { body.addView(txt(it,14)) }; body.addView(actionButton("Open collections") { this@MainActivity.collections() }) }
             for(type in listOf("movie","show")) body.addView(actionButton("Search Trakt "+type+"s") {
                 lookup("Searching Trakt",{ done -> TraktCatalogue.search(q,type,done) }) { rows:List<CatalogueItem> ->
                     choose("Trakt "+type+"s",rows.map { it.label() }) { index -> titleDetails(type,rows[index].id,rows[index].title) }
@@ -1388,7 +1388,7 @@ class MainActivity : Activity() {
                 if (q.isBlank()) { field.error = "Enter a title"; return }
                 dialog.dismiss()
                 lookup("Searching Trakt", { done -> TraktCatalogue.search(q,type,done) }) { results: List<CatalogueItem> ->
-                    val ranked=RecognitionEngine.rank(q,r.subtitle,r.duration,results)
+                    val ranked=RecognitionEngine.rank(if(q==RecognitionEngine.query(r.title)) r.title else q,r.subtitle,r.duration,results)
                     choose("Select title • evidence score",ranked.map { it.item.label()+" • "+it.score+"/100\n"+it.reason }) { index ->
                         val item = ranked[index].item
                         if (item.type == "movie") confirmMatch(r,item) else selectSuggestedEpisode(r,item)

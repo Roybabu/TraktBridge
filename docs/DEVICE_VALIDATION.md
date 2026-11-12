@@ -24,3 +24,13 @@ Known gaps: no provider availability feed, exact streaming deep links, release r
 - Test offline title details after caching, account refresh and switching accounts.
 - Inspect remote media session output and picture-in-picture continuity; unsupported casting is not tracked.
 - Test large text, contrast, screen reader and tablet rotation.
+
+## Milestones 40–57
+- Search locally, then explicitly search external catalogues and people.
+- Compare IMDb/TMDB ID results against known titles and episodes.
+- Verify subscription totals, notes, collection import collision behavior, trash restoration and spoiler settings.
+- Import Letterboxd diary twice and confirm watched dates and no inferred playback time.
+- Verify daily local backup and account-bound refresh under network restrictions, account switching and disconnect.
+- Exercise shortcut URIs from Android, TV launcher and D-pad navigation on a physical TV or emulator.
+- Confirm no remote write without user approval. Verify source version, CI artifact and permanent signing.
+- Device tests not yet executed; do not represent this checklist as passed.

@@ -46,7 +46,7 @@ object AnimeCatalogue {
                     c.setRequestProperty("Content-Type","application/json"); c.setRequestProperty("Accept","application/json")
                     c.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
                     require(c.responseCode in 200..299) { "AniList request failed" }
-                    val o=JSONObject(c.inputStream.bufferedReader().use { it.readText() })
+                    val o=JSONObject(c.inputStream.bufferedReader().use { reader -> val out=StringBuilder(); val buf=CharArray(8192); while(true) { val n=reader.read(buf); if(n<0) break; require(out.length+n<=8_000_000); out.append(buf,0,n) }; out.toString() })
                     val a=o.getJSONObject("data").getJSONObject("Page").getJSONArray("media")
                     (0 until a.length()).mapNotNull { i ->
                         val row=a.optJSONObject(i) ?: return@mapNotNull null
