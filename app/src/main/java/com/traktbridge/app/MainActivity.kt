@@ -1210,7 +1210,8 @@ class MainActivity : ComponentActivity() {
         }.show()
     }
     private fun discover() {
-        choose("Discover",listOf("Trending movies","Trending shows","Popular movies","Popular shows")) { index ->
+        choose("Discover",listOf("Trending movies","Trending shows","Popular movies","Popular shows","Mood-based discovery")) { index ->
+            if(index==4) { moodDiscovery(); return@choose }
             val type=if(index%2==0) "movie" else "show"; val mode=if(index<2) "trending" else "popular"
             lookup("Loading "+mode,{ done -> TraktCatalogue.discover(type,mode,done) }) { rows:List<CatalogueItem> ->
                 val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
@@ -1220,6 +1221,26 @@ class MainActivity : ComponentActivity() {
                     card.addView(txt(item.label(),16,ink,true)); card.addView(actionButton("Details") { titleDetails(type,item.id,item.title) })
                 }
                 android.app.AlertDialog.Builder(this).setTitle(mode.replaceFirstChar { it.uppercase() }).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
+            }
+        }
+    }
+    private fun moodDiscovery() {
+        choose("Choose your mood",DiscoveryEngine.moods.map { it.label }) { moodIndex ->
+            val mood=DiscoveryEngine.moods[moodIndex]
+            choose("Content type",listOf("Movies","TV shows")) { typeIndex ->
+                val type=if(typeIndex==0) "movie" else "show"
+                val times=listOf(0,30,60,90,120)
+                choose("Maximum runtime (per episode for shows)",listOf("Any runtime","30 minutes","60 minutes","90 minutes","120 minutes")) { timeIndex ->
+                    choose("Minimum Trakt rating",listOf("Any rating","7 / 10","8 / 10")) { ratingIndex ->
+                        val excluded=RecommendationEngine.seen(history.records(0))+personalStore("recommendation_hidden").all.keys
+                        lookup("Finding "+mood.label.lowercase()+" titles",{ done -> TraktCatalogue.moodDiscovery(type,mood,done) }) { candidates:List<DiscoveryItem> ->
+                            val rows=DiscoveryEngine.filter(candidates,mood,times[timeIndex],listOf(0.0,7.0,8.0)[ratingIndex],excluded)
+                            choose(mood.label+" • new to you",rows.map { row -> row.item.label()+" • "+(if(row.item.runtimeMinutes>0) row.item.runtimeMinutes.toString()+" min" else "Runtime unknown") }) { i ->
+                                val item=rows[i].item; titleDetails(item.type,item.id,item.title)
+                            }
+                        }
+                    }
+                }
             }
         }
     }

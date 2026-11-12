@@ -107,3 +107,6 @@ Unified local library search groups Trakt movies and TV series with separately i
 
 ## v0.83.0 development scope
 Personalized recommendations combine up to five confirmed-history seeds using measured viewing time and recency, merge related catalogue results, exclude previously watched and hidden titles, and display recommendation reasons. Explicit consent precedes sending title IDs; feedback stays local. Partial network results remain usable and catalogue UI exceptions are handled. This is heuristic ranking, not a trained ML model. Live API and device validation remain pending.
+
+## v0.84.0 development scope
+Mood discovery offers six mood presets, movie/show selection, runtime and rating constraints, and excludes known watched or hidden titles. Genre associations are heuristic; runtime for TV is per episode when provided. Poster decoding validates dimensions and downsamples cached and downloaded images; background artwork work retains application context rather than activity context and skips detached targets. Physical-device memory profiling and live catalogue validation remain outstanding.

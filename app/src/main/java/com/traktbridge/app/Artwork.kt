@@ -15,10 +15,17 @@ object Artwork {
     private val worker=java.util.concurrent.ThreadPoolExecutor(2,2,30,java.util.concurrent.TimeUnit.SECONDS,java.util.concurrent.ArrayBlockingQueue<Runnable>(64),java.util.concurrent.ThreadPoolExecutor.DiscardOldestPolicy())
     private val main=Handler(Looper.getMainLooper())
     private val attempted=mutableMapOf<String,Long>()
+    private fun decode(file:File):android.graphics.Bitmap? {
+        val bounds=BitmapFactory.Options().apply { inJustDecodeBounds=true }
+        BitmapFactory.decodeFile(file.path,bounds)
+        val sample=ArtworkSizing.sample(bounds.outWidth,bounds.outHeight)
+        return BitmapFactory.decodeFile(file.path,BitmapFactory.Options().apply { inSampleSize=sample })
+    }
     fun load(context:Context,type:String,id:Long,view:ImageView) {
         if(id<=0 || type !in setOf("movie","show")) return
         val key=type+"-"+id
-        val dir=File(context.applicationContext.cacheDir,"artwork")
+        val app=context.applicationContext
+        val dir=File(app.cacheDir,"artwork")
         val file=File(dir,key+".webp")
         val target=java.lang.ref.WeakReference(view)
         worker.execute {
@@ -29,8 +36,8 @@ object Artwork {
                         val now=System.currentTimeMillis()
                         if(now-(attempted[key] ?: 0)<60000) false else { if(attempted.size>=500) attempted.entries.removeAll { now-it.value>60000 }; if(attempted.size>=500) attempted.clear(); attempted[key]=now; true }
                     }
-                    val cm=context.applicationContext.getSystemService(android.net.ConnectivityManager::class.java)
-                    val wifiOnly=context.applicationContext.getSharedPreferences("tracker",Context.MODE_PRIVATE).getBoolean("artwork_unmetered",false)
+                    val cm=app.getSystemService(android.net.ConnectivityManager::class.java)
+                    val wifiOnly=app.getSharedPreferences("tracker",Context.MODE_PRIVATE).getBoolean("artwork_unmetered",false)
                     if(fetch && (!wifiOnly || !cm.isActiveNetworkMetered)) {
                         val endpoint=if(type=="movie") "movies" else "shows"
                         val connection=URL("https://api.trakt.tv/"+endpoint+"/"+id+"?extended=full").openConnection() as HttpsURLConnection
@@ -60,9 +67,12 @@ object Artwork {
                         } finally { image.disconnect(); temp.delete() }
                     }
                 }
-                BitmapFactory.decodeFile(file.path)
-            }.getOrNull() ?: BitmapFactory.decodeFile(file.path)
-            if(bitmap!=null) main.post { target.get()?.setImageBitmap(bitmap) }
+                decode(file)
+            }.getOrNull() ?: runCatching { decode(file) }.getOrNull()
+            if(bitmap!=null) main.post {
+                val image=target.get()
+                if(image!=null && image.isAttachedToWindow) image.setImageBitmap(bitmap)
+            }
         }
     }
 }

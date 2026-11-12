@@ -111,6 +111,18 @@ object TraktCatalogue {
             if(id<=0 || title.isBlank()) null else CatalogueItem(type,id,title,o.optInt("year"),runtimeMinutes=o.optInt("runtime"))
         }.distinctBy { it.id }
     }
+    fun moodDiscovery(type:String,mood:DiscoveryMood,done:(Result<List<DiscoveryItem>>)->Unit)=request(done) {
+        require(type in setOf("movie","show") && mood in DiscoveryEngine.moods)
+        val suffix=if(mood.genres.isEmpty()) "" else "&genres="+URLEncoder.encode(mood.genres.sorted().joinToString(","),"UTF-8")
+        val rows=objects(get("/"+RemoteRules.plural(type)+"/popular?limit=50&extended=full"+suffix))
+        rows.mapNotNull { o ->
+            val key=id(o); val title=o.optString("title")
+            if(key<=0 || title.isBlank()) null else {
+                val genres=o.optJSONArray("genres")
+                DiscoveryItem(CatalogueItem(type,key,title,o.optInt("year"),runtimeMinutes=o.optInt("runtime")), (0 until (genres?.length() ?: 0)).map { genres?.optString(it).orEmpty() }.toSet(),o.optDouble("rating",0.0))
+            }
+        }
+    }
     fun credits(type:String,id:Long,done:(Result<List<String>>)->Unit)=request(done) {
         require(type in setOf("movie","show") && id>0)
         val c=URL("https://api.trakt.tv/"+RemoteRules.plural(type)+"/"+id+"/people").openConnection() as HttpsURLConnection
