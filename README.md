@@ -66,3 +66,6 @@ Fuse media-session, notification and accessibility title observations with heuri
 
 ## Playback accuracy (0.10.0)
 Classify playing, paused, buffering, stopped and unknown observations. Exclude detected seeks, rewinds, stagnant media positions and sampling gaps from sampled viewing time; preserve last valid position with source. Enrich unidentified active sessions without splitting on missing labels, while distinct explicit episodes split. Display pause, buffering, uncertain intervals and seek counts. Near-end position is a suggestion, not completion approval. No ad identification or inference of exact remaining time from sampled watch time.
+
+## Series library (0.11.0)
+Group exact Trakt episode identities into parent shows and seasons while retaining original sessions. History separates shows, movies and unidentified viewing. Home includes unfinished sampled viewing; series cards show locally identified and synced episode counts. Explicit catalogue season lookup shows full episode lists, local completion and next unconfirmed regular episode. Specials remain separate. No assumptions about unaired episodes or remote history. Anime uses Trakt season/episode identity; absolute numbering conversion is not included.

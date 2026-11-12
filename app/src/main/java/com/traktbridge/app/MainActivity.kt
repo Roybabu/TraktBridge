@@ -359,6 +359,9 @@ class MainActivity : Activity() {
                 section(dashboard,"Now watching")
                 val active=groups.filter { it.active }
                 if(active.isEmpty()) panel(dashboard).addView(txt("No verified active playback. Play a video in a selected app.",15,muted)) else active.take(2).forEach { titleCard(dashboard,it,false) }
+                section(dashboard,"Continue watching")
+                val continuing=SeriesLibrary.continueWatching(groups)
+                if(continuing.isEmpty()) panel(dashboard).addView(txt("No unfinished sampled viewing yet.",15,muted)) else continuing.take(5).forEach { titleCard(dashboard,it,false) }
                 section(dashboard,"Review queue")
                 val q=panel(dashboard); q.addView(txt("$pending awaiting action",22,ink,true)); q.addView(actionButton("Open review queue") { showTab(2) }); q.addView(actionButton("Review app activity") { reviewUsage() })
                 section(dashboard,"Recently watched")
@@ -371,7 +374,14 @@ class MainActivity : Activity() {
                 if(tab==2) { dashboard.addView(actionButton("Review recent app activity") { reviewUsage() }); dashboard.addView(actionButton("Retry approved sync queue") { HistorySync.schedule(this); refreshHistory() }) }
                 val items=if(tab==1) groups else groups.filter { it.queued || (it.pending && !it.confirmed) }
                 if(items.isEmpty()) panel(dashboard).addView(txt(if(tab==1) "No viewing records yet." else "You're all caught up.",16,muted))
-                items.forEach { titleCard(dashboard,it,true) }
+                if(tab==1) {
+                    val series=SeriesLibrary.build(items)
+                    if(series.isNotEmpty()) { section(dashboard,"Series and anime"); series.forEach { seriesCard(dashboard,it) } }
+                    val movies=items.filter { it.representative.matchType=="movie" }
+                    if(movies.isNotEmpty()) { section(dashboard,"Movies"); movies.forEach { titleCard(dashboard,it,true) } }
+                    val other=items.filter { it.representative.matchType!="movie" && !(it.representative.matchType=="episode" && it.representative.showId>0 && it.representative.season>=0 && it.representative.episode>0) }
+                    if(other.isNotEmpty()) { section(dashboard,"Unidentified viewing"); other.forEach { titleCard(dashboard,it,true) } }
+                } else items.forEach { titleCard(dashboard,it,true) }
             }
             3 -> {
                 section(dashboard,"Viewing activity")
@@ -392,6 +402,63 @@ class MainActivity : Activity() {
                 }
                 chart.addView(txt("App-activity estimates are excluded from watch time.",13,muted))
             }
+        }
+    }
+    private fun seriesCard(parent:LinearLayout,series:SeriesGroup) {
+        val card=panel(parent)
+        val row=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL }; card.addView(row)
+        val poster=ImageView(this).apply { scaleType=ImageView.ScaleType.CENTER_CROP; setImageResource(android.R.drawable.ic_media_play); contentDescription="Series poster" }
+        row.addView(poster,LinearLayout.LayoutParams(dp(94),dp(141)).apply { rightMargin=dp(14) })
+        Artwork.load(this,"show",series.id,poster)
+        val details=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }; row.addView(details,LinearLayout.LayoutParams(0,-2,1f))
+        details.addView(txt(series.title,20,ink,true))
+        details.addView(txt(series.completed.toString()+" synced • "+series.approved+" awaiting sync • "+series.episodes.size+" identified episodes",13,muted))
+        details.addView(txt(series.platforms.joinToString(" • ") { appLabel(it) },13,muted))
+        details.addView(txt("Sampled: "+durationText(series.sampledMs),13,muted))
+        series.resume?.let { details.addView(txt("Continue: S"+it.representative.season+" E"+it.representative.episode,14,violet,true)) }
+        card.addView(actionButton("Browse seasons and episodes") { showSeries(series.id) })
+    }
+    private fun showSeries(id:Long) {
+        val series=SeriesLibrary.build(ViewingGroups.build(history.records(0))).firstOrNull { it.id==id } ?: return
+        val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
+        body.addView(txt(series.completed.toString()+" episodes synced to Trakt. Local counts include only identified episodes, not the full catalogue.",14,muted))
+        var dialog:android.app.AlertDialog?=null
+        val show=CatalogueItem("show",series.id,series.title)
+        body.addView(actionButton("Load all catalogue seasons") {
+            dialog?.dismiss()
+            lookup("Loading catalogue seasons",{ done -> TraktCatalogue.seasons(show,done) }) { seasons:List<CatalogueSeason> ->
+                choose(series.title,seasons.map { if(it.number==0) "Specials" else "Season "+it.number }) { index -> showCatalogueSeason(series.id,seasons[index].number) }
+            }
+        })
+        for(season in series.seasons) {
+            val label=if(season.number==0) "Specials" else "Season "+season.number
+            section(body,label)
+            body.addView(txt(season.completed.toString()+" synced / "+season.episodes.size+" locally identified",13,muted))
+            body.addView(actionButton("View full "+label.lowercase()) { dialog?.dismiss(); showCatalogueSeason(series.id,season.number) })
+            for(episode in season.episodes) titleCard(body,episode,true)
+        }
+        dialog=android.app.AlertDialog.Builder(this).setTitle(series.title).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close") { _,_->refreshHistory() }.create()
+        dialog.show()
+    }
+    private fun showCatalogueSeason(id:Long,season:Int) {
+        val series=SeriesLibrary.build(ViewingGroups.build(history.records(0))).firstOrNull { it.id==id } ?: return
+        val show=CatalogueItem("show",series.id,series.title)
+        lookup("Loading episodes",{ done -> TraktCatalogue.episodes(show,season,done) }) { catalogue:List<CatalogueItem> ->
+            val rows=SeriesLibrary.seasonRows(series,season,catalogue)
+            val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
+            val completed=rows.count { it.local?.confirmed==true }
+            body.addView(txt(completed.toString()+" of "+rows.size+" catalogue episodes synced to Trakt",17,ink,true))
+            if(rows.isNotEmpty()) body.addView(ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal).apply { progress=completed*100/rows.size; progressTintList=android.content.res.ColorStateList.valueOf(violet) })
+            SeriesLibrary.nextEpisode(rows)?.let { body.addView(txt("Next unconfirmed: S"+it.item.season+" E"+it.item.episode,14,violet,true)) }
+            body.addView(txt("Catalogue may include unaired episodes. Missing local history is not proof you have never watched an episode.",12,muted))
+            for(row in rows) {
+                if(row.local!=null) titleCard(body,row.local,true) else {
+                    val card=panel(body)
+                    card.addView(txt("E"+row.item.episode+" • "+row.item.title.substringAfter(" — "),16,ink,true))
+                    card.addView(txt("No local viewing record",13,muted))
+                }
+            }
+            android.app.AlertDialog.Builder(this).setTitle(series.title+" • "+if(season==0) "Specials" else "Season "+season).setView(ScrollView(this).apply { addView(body) }).setNegativeButton("Back") { _,_->showSeries(id) }.setPositiveButton("Close") { _,_->refreshHistory() }.show()
         }
     }
     private fun durationText(ms:Long):String {
