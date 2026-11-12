@@ -350,6 +350,7 @@ class MainActivity : Activity() {
         showAuth()
         button("Connect Trakt") { try { startActivity(Intent(Intent.ACTION_VIEW, auth.begin())); showAuth("Complete sign-in in your browser") } catch (_: Exception) { showAuth("Unable to open sign-in") } }
         button("Check Trakt connection") { showAuth("Checking…"); auth.check { showAuth(it) } }
+        button("Refresh downloaded Trakt history") { lookup("Refreshing up to 2,000 remote watches",{ done -> TraktLibrary.refreshHistory(this,20,done) }) { n:Int -> Toast.makeText(this,n.toString()+" entries downloaded or updated",Toast.LENGTH_LONG).show() } }
         button("Trakt account library") { openTraktLibrary() }
         button("Clear downloaded Trakt history") { android.app.AlertDialog.Builder(this).setTitle("Clear remote history cache?").setMessage("Local viewing records and Trakt account history are unchanged.").setNegativeButton("Cancel",null).setPositiveButton("Clear") { _,_->TraktLibrary.clearCache(this) }.show() }
         button("Disconnect Trakt locally") { auth.disconnect { TraktLibrary.clearCache(this); showAuth(it) } }

@@ -114,6 +114,18 @@ object TraktLibrary {
             if(runCatching { Instant.parse(airs) }.isFailure) null else UpcomingEpisode(show.optString("title"),ep.optString("title"),ep.optInt("season"),ep.optInt("number"),airs)
         }.sortedBy { it.airs }
     }
+    fun refreshHistory(context:Context,maxPages:Int,done:(Result<Int>)->Unit)=task(context,done) { token,account ->
+        require(maxPages in 1..20)
+        var saved=0
+        for(page in 1..maxPages) {
+            val response=request(token,"/sync/history?page="+page+"&limit=100")
+            val a=JSONArray(response.text)
+            val rows=(0 until a.length()).mapNotNull { parse(a.getJSONObject(it)) }
+            saved+=cacheHistory(context,RemotePage(rows,page,response.pages,account))
+            if(a.length()<100 || (response.pages!=null && page>=response.pages)) break
+        }
+        saved
+    }
     fun accountId(context:Context,done:(Result<String>)->Unit)=task(context,done) { _,account -> account }
     // Download a bounded page into an account-scoped local cache. Never convert
     // remote watches into sampled playback or approved upload records.
