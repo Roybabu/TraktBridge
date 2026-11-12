@@ -40,7 +40,11 @@ object HistorySync {
             val status=c.responseCode
             DebugTrace.event("sync","HTTP "+status+" method="+c.requestMethod)
             if(status !in 200..299) throw ApiError(status)
-            return Response(c.inputStream.bufferedReader().use { it.readText() },c.getHeaderField("X-Pagination-Page-Count")?.toIntOrNull())
+            return Response(c.inputStream.bufferedReader().use { reader ->
+                val out=StringBuilder(); val buffer=CharArray(8192)
+                while(true) { val n=reader.read(buffer); if(n<0) break; require(out.length+n<=8_000_000) { "Trakt response too large" }; out.append(buffer,0,n) }
+                out.toString()
+            },c.getHeaderField("X-Pagination-Page-Count")?.toIntOrNull())
         } finally { c.disconnect() }
     }
     private fun account(token: String): String {
@@ -67,45 +71,52 @@ object HistorySync {
     }
     // All network operations serialize with OAuth refresh and account changes.
     internal fun process(context: Context,db: WatchHistory,r: WatchRecord): Boolean {
+        val approved=db.approvedAccount(r.id)
+        val fresh=db.record(r.id) ?: return true
+        if(approved.isBlank() || fresh.status!=r.status || fresh.matchType!=r.matchType || fresh.traktId!=r.traktId || fresh.ended!=r.ended) return true
+        var expected=r.status
+        fun state(status: String,message: String) = db.updateApprovedState(r,approved,expected,status,message)
         return try {
             TraktAuth(context).authorized { token ->
-                if(account(token)!=db.approvedAccount(r.id)) {
-                    db.syncState(r.id,"blocked","Different Trakt account. Reconnect original account and retry."); return@authorized true
-                }
-                if(exists(token,r)) { db.syncState(r.id,"synced","Already present in Trakt history"); return@authorized true }
-                if(r.status=="uncertain") {
-                    db.syncState(r.id,"uncertain","Previous upload outcome unknown. No duplicate POST sent. Check Trakt and reconcile again.")
+                if(account(token)!=approved) {
+                    // Never downgrade an ambiguous POST to a resendable state.
+                    state(if(expected=="uncertain") "uncertain" else "blocked","Different Trakt account. Reconnect original account.")
                     return@authorized true
                 }
-                // Persist the uncertain state BEFORE making a non-idempotent POST.
-                if(!db.beginUpload(r.id)) return@authorized true
+                if(exists(token,r)) { state("synced","Already present in Trakt history"); return@authorized true }
+                if(expected=="uncertain") {
+                    state("uncertain","Previous upload outcome unknown. No duplicate POST sent. Check Trakt and reconcile again.")
+                    return@authorized true
+                }
+                if(!db.beginApprovedUpload(r,approved)) return@authorized true
+                expected="uncertain"
                 val plural=if(r.matchType=="movie") "movies" else "episodes"
                 val item=JSONObject().put("ids",JSONObject().put("trakt",r.traktId)).put("watched_at",utc(r.ended).toString())
                 try {
                     val result=JSONObject(call(token,"/sync/history",JSONObject().put(plural,JSONArray().put(item))).text)
-                    if(result.optJSONObject("added")?.optInt(plural,0)==1) db.syncState(r.id,"synced","Added to Trakt history")
-                    else db.syncState(r.id,"uncertain","Upload response not confirmed; reconcile with Trakt.")
+                    if(result.optJSONObject("added")?.optInt(plural,0)==1) state("synced","Added to Trakt history")
+                    else state("uncertain","Upload response not confirmed; reconcile with Trakt.")
                 } catch(e: ApiError) {
                     if(e.status in listOf(400,401,403,404,422,429)) {
-                        db.syncState(r.id,if(e.status==429) "queued" else "blocked",e.message ?: "Request rejected")
+                        state(if(e.status==429) "queued" else "blocked",e.message ?: "Request rejected")
                         return@authorized e.status!=429
                     }
-                    db.syncState(r.id,"uncertain","Upload outcome unknown; checking history on retry.")
+                    state("uncertain","Upload outcome unknown; checking history on retry.")
                     return@authorized false
                 } catch(_: Exception) {
-                    db.syncState(r.id,"uncertain","Upload outcome unknown; checking history on retry.")
+                    state("uncertain","Upload outcome unknown; checking history on retry.")
                     return@authorized false
                 }
                 true
             }
         } catch(e: ApiError) {
             if(e.status==401 || e.status==403) {
-                if(r.status=="queued") db.syncState(r.id,"blocked","Trakt authorization required")
-                else db.syncState(r.id,"uncertain","Reconnect Trakt to reconcile uncertain upload")
+                state(if(expected=="queued") "blocked" else "uncertain","Reconnect Trakt to continue synchronization")
                 true
             } else false
         } catch(_: Exception) {
-            db.syncState(r.id,r.status,"Network or authorization unavailable; retry pending")
+            // Never restore the pre-POST queued snapshot after a possible write.
+            state(expected,"Network or authorization unavailable; retry pending")
             false
         }
     }
