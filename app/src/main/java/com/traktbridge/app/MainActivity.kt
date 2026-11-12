@@ -594,6 +594,7 @@ class MainActivity : ComponentActivity() {
                 dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeHomeSummary(violet,live,pending,durationText(weekly.sumOf { it.watched }),{ showTab(4) },{ showTab(2) },{ discover() },{ viewingPlanner() }) } })
                 metricGrid(dashboard,listOf("This week" to durationText(weekly.sumOf { it.watched }),"Movies synced" to groups.count { it.confirmed && it.representative.matchType=="movie" }.toString(),"Episodes synced" to groups.count { it.confirmed && it.representative.matchType=="episode" }.toString(),"Needs review" to pending.toString()))
                 section(dashboard,"Now watching")
+                dashboard.addView(actionButton("Open live Now Playing") { nowPlaying() })
                 val active=groups.filter { it.active }
                 if(active.isEmpty()) panel(dashboard).addView(txt("No verified active playback. Play a video in a selected app.",15,muted)) else cards(dashboard,active.take(2)) { parent,g -> titleCard(parent,g,false) }
                 section(dashboard,"Continue watching")
@@ -916,6 +917,40 @@ class MainActivity : ComponentActivity() {
             }
             android.app.AlertDialog.Builder(this).setTitle("Viewing journal").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
         }
+    }
+    private fun nowPlaying() {
+        val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(12),dp(16),dp(12)) }
+        val status=txt("",16,ink,true); body.addView(status)
+        val content=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }; body.addView(content)
+        val dialog=android.app.AlertDialog.Builder(this).setTitle("Now Playing").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).create()
+        val handler=android.os.Handler(android.os.Looper.getMainLooper())
+        val tick=object:Runnable {
+            override fun run() {
+                if(!dialog.isShowing || isDestroyed || isFinishing) return
+                val age=System.currentTimeMillis()-prefs.getLong("last_sample",0)
+                val live=prefs.getBoolean("enabled",false) && prefs.getBoolean("listener_connected",false) && age in 0..20000
+                status.text=if(live) "Live observations • updated "+(age/1000)+" seconds ago" else "No fresh playback observation"
+                content.removeAllViews()
+                val sessions=if(live) runCatching { JSONArray(prefs.getString("sessions","[]")) }.getOrDefault(JSONArray()) else JSONArray()
+                if(sessions.length()==0) content.addView(txt("No selected player session is visible to Android.",14,muted))
+                for(i in 0 until sessions.length()) {
+                    val row=sessions.optJSONObject(i) ?: continue
+                    val card=panel(content)
+                    val title=row.optString("title").ifBlank { "Unidentified video" }
+                    card.addView(txt(title,20,ink,true)); card.addView(txt(appLabel(row.optString("package"))+" • "+row.optString("output","unknown")+" output",14,muted))
+                    val state=when(row.optInt("state")) { 3->"Playing"; 2->"Paused"; 6,8->"Buffering or connecting"; else->"Playback state unknown or stopped" }
+                    card.addView(txt(state,15,violet,true))
+                    val position=row.optLong("positionMs",-1); val duration=row.optLong("durationMs",0)
+                    if(PlaybackPosition.valid(position,duration)) {
+                        card.addView(txt(durationText(position)+" / "+durationText(duration)+" • "+row.optString("positionSource","unknown"),14,muted))
+                        card.addView(ProgressBar(this@MainActivity,null,android.R.attr.progressBarStyleHorizontal).apply { progress=(position.toDouble()/duration*100).toInt().coerceIn(0,100) })
+                    } else card.addView(txt("Position unavailable",14,muted))
+                    card.addView(txt("Recognition evidence score: "+row.optInt("recognitionScore")+"/100"+if(row.optBoolean("recognitionConflict")) " • conflicting evidence" else "",14,muted))
+                }
+                handler.postDelayed(this,2500)
+            }
+        }
+        dialog.setOnDismissListener { handler.removeCallbacks(tick) }; dialog.show(); handler.post(tick)
     }
     private fun liveInspector() {
         val body=TextView(this).apply { setPadding(dp(16),dp(12),dp(16),dp(12)); setTextIsSelectable(true) }
