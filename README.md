@@ -152,3 +152,6 @@ Automated deterministic playback soak simulation covers 24 hours of five-second 
 
 ## v0.98.0
 User-initiated beta feedback sharing includes app version and Android API level only by default, plus user-entered text. A physical-device acceptance checklist is provided. No beta testing has been certified.
+
+## v0.99.0
+Release candidate security guard validates version metadata, exported components, required binding permissions, disabled Android backup and cleartext policy. Existing build, lint, unit test and signing gates are retained. See docs/RELEASE_CANDIDATE.md for blockers and validation requirements. Not a stable 1.0 release.

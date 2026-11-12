@@ -26,6 +26,8 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
+      - name: Validate release candidate security boundaries
+        run: python3 scripts/validate_rc.py
       - run: gradle --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
       - name: Build and verify stable debug APK
         id: stable_debug
