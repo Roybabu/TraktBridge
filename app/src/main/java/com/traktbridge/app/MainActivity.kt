@@ -290,6 +290,7 @@ class MainActivity : Activity() {
         label("SETTINGS • Account and tracking")
         button("Check for app updates") { checkUpdates() }
         button("Appearance accent") { choose("Accent color",listOf("Violet","Blue","Green")) { prefs.edit().putString("accent",listOf("violet","blue","green")[it]).apply(); recreate() } }
+        button("Personal collections") { collections() }
         button("Favorite titles") { favorites() }
         button("Guided tracking setup") { setupGuide() }
         button("Back up viewing history (JSON)") { pickBackup(60) }
@@ -392,6 +393,38 @@ class MainActivity : Activity() {
             val edit=getSharedPreferences("library_status",MODE_PRIVATE).edit()
             if(index==statuses.lastIndex) edit.remove(type+":"+id) else edit.putString(type+":"+id,statuses[index])
             edit.apply(); refreshHistory()
+        }
+    }
+    private fun collections() {
+        val store=getSharedPreferences("collections",MODE_PRIVATE)
+        val names=store.all.keys.sorted()
+        choose("Collections",names+"Create collection") { i ->
+            if(i==names.size) {
+                val field=EditText(this).apply { hint="Collection name" }
+                android.app.AlertDialog.Builder(this).setTitle("New collection").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Create") { _,_->
+                    val name=field.text.toString().trim().take(80)
+                    if(name.isNotBlank() && !store.contains(name)) store.edit().putString(name,"[]").apply()
+                }.show()
+            } else {
+                val name=names[i]; val a=JSONArray(store.getString(name,"[]"))
+                val rows=(0 until a.length()).map { a.getJSONObject(it) }
+                choose(name,rows.map { it.optString("label") }) { j ->
+                    android.app.AlertDialog.Builder(this).setTitle(rows[j].optString("label")).setNegativeButton("Close",null).setPositiveButton("Remove from collection") { _,_->
+                        val next=JSONArray(); rows.filterIndexed { k,_->k!=j }.forEach { next.put(it) }; store.edit().putString(name,next.toString()).apply()
+                    }.show()
+                }
+            }
+        }
+    }
+    private fun addCollection(type:String,id:Long,label:String) {
+        val store=getSharedPreferences("collections",MODE_PRIVATE); val names=store.all.keys.sorted()
+        if(names.isEmpty()) { collections(); return }
+        choose("Add to collection",names) { i ->
+            val name=names[i]; val a=JSONArray(store.getString(name,"[]"))
+            if((0 until a.length()).none { a.optJSONObject(it)?.optString("key")==type+":"+id }) {
+                a.put(org.json.JSONObject().put("key",type+":"+id).put("label",label)); store.edit().putString(name,a.toString()).apply()
+            }
+            Toast.makeText(this,"Collection updated",Toast.LENGTH_SHORT).show()
         }
     }
     private fun isFavorite(type:String,id:Long)=getSharedPreferences("favorites",MODE_PRIVATE).contains(type+":"+id)
@@ -906,6 +939,7 @@ class MainActivity : Activity() {
         if(!g.confirmed) card.addView(actionButton("Open playback app") { openPlaybackApp(g.platforms) })
         if(r.traktId>0) card.addView(actionButton("Personal status: "+libraryStatus(r.matchType,r.traktId).ifBlank { "Not set" }) { setLibraryStatus(r.matchType,r.traktId,r.matchLabel) })
         if(r.traktId>0) card.addView(actionButton(if(isFavorite(r.matchType,r.traktId)) "Remove favorite" else "Add favorite") { toggleFavorite(r.matchType,r.traktId,r.matchLabel); refreshHistory() })
+        if(r.traktId>0) card.addView(actionButton("Add to collection") { addCollection(r.matchType,r.traktId,r.matchLabel) })
         if(expanded || g.pending || g.queued) card.addView(actionButton(if(g.confirmed) "View sessions" else "Review / view sessions") { showSessions(g) })
         else card.addView(actionButton("View sessions") { showSessions(g) })
     }
