@@ -370,6 +370,7 @@ class MainActivity : Activity() {
         button("Connect Trakt") { try { startActivity(Intent(Intent.ACTION_VIEW, auth.begin())); showAuth("Complete sign-in in your browser") } catch (_: Exception) { showAuth("Unable to open sign-in") } }
         button("Check Trakt connection") { showAuth("Checking…"); auth.check { showAuth(it) } }
         button("Refresh downloaded Trakt history") { lookup("Refreshing up to 2,000 remote watches",{ done -> TraktLibrary.refreshHistory(this,20,done) }) { n:Int -> Toast.makeText(this,n.toString()+" entries downloaded or updated",Toast.LENGTH_LONG).show() } }
+        button("Browse public AniList account") { publicAnimeList() }
         button("Trakt account library") { openTraktLibrary() }
         button("Clear downloaded Trakt history") { android.app.AlertDialog.Builder(this).setTitle("Clear remote history cache?").setMessage("Local viewing records and Trakt account history are unchanged.").setNegativeButton("Cancel",null).setPositiveButton("Clear") { _,_->TraktLibrary.clearCache(this) }.show() }
         button("Disconnect Trakt locally") { auth.disconnect { TraktLibrary.clearCache(this); showAuth(it) } }
@@ -882,6 +883,15 @@ class MainActivity : Activity() {
         }
         dialog.setOnDismissListener { handler.removeCallbacks(tick) }
         dialog.show(); handler.post(tick)
+    }
+    private fun publicAnimeList() {
+        val field=EditText(this).apply { hint="AniList username"; setSingleLine(true) }
+        android.app.AlertDialog.Builder(this).setTitle("Public AniList library").setMessage("Read-only public list. Private accounts require authentication; no viewing history is uploaded.").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Load") { _,_->
+            val name=field.text.toString().trim()
+            lookup("Loading public anime list",{ done -> AnimeCatalogue.publicList(name,done) }) { rows:List<AnimeListEntry> ->
+                choose("AniList • "+name,rows.take(500).map { it.title+" • "+it.progress+"/"+(if(it.episodes>0) it.episodes.toString() else "?")+" • "+it.status }) { i -> startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://anilist.co/anime/"+rows[i].id))) }
+            }
+        }.show()
     }
     private fun animeSearch() {
         val field=EditText(this).apply { hint="English, Japanese or romaji title"; setSingleLine(true) }
