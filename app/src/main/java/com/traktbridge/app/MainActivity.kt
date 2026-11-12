@@ -476,6 +476,13 @@ class MainActivity : Activity() {
             }
         }
     }
+    private fun openPlaybackApp(sources:List<String>) {
+        val installed=sources.distinct().mapNotNull { pkg -> packageManager.getLaunchIntentForPackage(pkg)?.let { pkg to it } }
+        if(installed.isEmpty()) { Toast.makeText(this,"No recorded playback app is installed or launchable",Toast.LENGTH_LONG).show(); return }
+        choose("Open recorded playback app",installed.map { appLabel(it.first) }) { i ->
+            runCatching { startActivity(installed[i].second) }.onFailure { Toast.makeText(this,"Unable to open player",Toast.LENGTH_LONG).show() }
+        }
+    }
     private fun upcomingEpisodes() {
         lookup("Loading upcoming episodes",{ done -> TraktLibrary.upcoming(this,30,done) }) { rows:List<UpcomingEpisode> ->
             val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
@@ -531,6 +538,7 @@ class MainActivity : Activity() {
             card.addView(txt(durationText(g.remainingMs)+" remaining",14,muted))
         }
         if(r.traktId>0) card.addView(actionButton("Title details") { titleDetails(if(r.matchType=="episode") "show" else "movie",if(r.matchType=="episode") r.showId else r.traktId,r.matchLabel) })
+        card.addView(actionButton("Open playback app") { openPlaybackApp(g.platforms) })
         card.addView(actionButton("View title and sessions") { showSessions(g) })
     }
     private fun <T> cards(parent:LinearLayout,items:List<T>,render:(LinearLayout,T)->Unit) {
@@ -766,6 +774,7 @@ class MainActivity : Activity() {
         if(g.bufferingMs>0 || g.pausedMs>0 || g.seeks>0 || g.uncertainMs>0) details.addView(txt("Paused: "+durationText(g.pausedMs)+" • Buffering: "+durationText(g.bufferingMs)+" • Seeks: "+g.seeks+" • Uncertain: "+durationText(g.uncertainMs),12,muted))
         if(r.traktId<=0) details.addView(txt("Identify exact title to combine sessions.",12,muted))
         if(r.traktId>0) card.addView(actionButton("Title details") { titleDetails(if(r.matchType=="episode") "show" else "movie",if(r.matchType=="episode") r.showId else r.traktId,r.matchLabel) })
+        if(!g.confirmed) card.addView(actionButton("Open playback app") { openPlaybackApp(g.platforms) })
         if(expanded || g.pending || g.queued) card.addView(actionButton(if(g.confirmed) "View sessions" else "Review / view sessions") { showSessions(g) })
         else card.addView(actionButton("View sessions") { showSessions(g) })
     }
