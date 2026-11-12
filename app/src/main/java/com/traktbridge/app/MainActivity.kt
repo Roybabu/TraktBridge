@@ -27,7 +27,7 @@ class MainActivity : Activity() {
     private val wide:Boolean get()=resources.configuration.screenWidthDp>=720
     private val ink=0xfff1f0f6.toInt()
     private val muted=0xffa9a8ba.toInt()
-    private val violet=0xffb6a0ff.toInt()
+    private val violet:Int get()=when(prefs.getString("accent","violet")) { "blue"->0xff80bfff.toInt(); "green"->0xff6ee7b7.toInt(); else->0xffb6a0ff.toInt() }
     private val surface=0xff1b1e2a.toInt()
     private val bg=0xff0d0f16.toInt()
     private fun showAuth(message: String = auth.status()) { account.text = message }
@@ -287,6 +287,8 @@ class MainActivity : Activity() {
         fun label(s: String) { root.addView(txt(s,15,muted)) }
         fun button(s: String, action: () -> Unit) { root.addView(actionButton(s,action)) }
         label("SETTINGS • Account and tracking")
+        button("Appearance accent") { choose("Accent color",listOf("Violet","Blue","Green")) { prefs.edit().putString("accent",listOf("violet","blue","green")[it]).apply(); recreate() } }
+        button("Favorite titles") { favorites() }
         button("Guided tracking setup") { setupGuide() }
         button("Back up viewing history (JSON)") { pickBackup(60) }
         button("Export viewing history (CSV)") { pickBackup(61) }
@@ -372,6 +374,20 @@ class MainActivity : Activity() {
         handleShared(intent)
         handleTrackingShortcut(intent)
         if(!prefs.getBoolean("setup_seen",false)) { prefs.edit().putBoolean("setup_seen",true).apply(); setupGuide() }
+    }
+    private fun isFavorite(type:String,id:Long)=getSharedPreferences("favorites",MODE_PRIVATE).contains(type+":"+id)
+    private fun toggleFavorite(type:String,id:Long,label:String) {
+        val store=getSharedPreferences("favorites",MODE_PRIVATE)
+        val key=type+":"+id
+        if(store.contains(key)) store.edit().remove(key).apply() else store.edit().putString(key,label).apply()
+    }
+    private fun favorites() {
+        val store=getSharedPreferences("favorites",MODE_PRIVATE)
+        val items=store.all.entries.sortedBy { it.value.toString() }
+        choose("Favorite titles",items.map { it.value.toString() }) { i ->
+            val entry=items[i]; val type=entry.key.substringBefore(":"); val id=entry.key.substringAfter(":").toLongOrNull() ?: return@choose
+            android.app.AlertDialog.Builder(this).setTitle(entry.value.toString()).setNegativeButton("Close",null).setNeutralButton("Remove") { _,_->store.edit().remove(entry.key).apply(); favorites() }.setPositiveButton("Local history") { _,_->historyFilter=HistoryFilter(query=entry.value.toString().substringBefore(" • ")); showTab(1) }.show()
+        }
     }
     private fun setupGuide() {
         val box=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(8),dp(16),dp(8)) }
@@ -660,6 +676,7 @@ class MainActivity : Activity() {
         details.addView(txt("Sampled: "+durationText(series.sampledMs),13,muted))
         series.resume?.let { details.addView(txt("Continue: S"+it.representative.season+" E"+it.representative.episode,14,violet,true)) }
         card.addView(actionButton("Series details") { titleDetails("show",series.id,series.title) })
+        card.addView(actionButton(if(isFavorite("show",series.id)) "Remove favorite" else "Add favorite") { toggleFavorite("show",series.id,series.title); refreshHistory() })
         card.addView(actionButton("Browse seasons and episodes") { showSeries(series.id) })
     }
     private fun showSeries(id:Long) {
@@ -798,6 +815,7 @@ class MainActivity : Activity() {
         if(r.traktId<=0) details.addView(txt("Identify exact title to combine sessions.",12,muted))
         if(r.traktId>0) card.addView(actionButton("Title details") { titleDetails(if(r.matchType=="episode") "show" else "movie",if(r.matchType=="episode") r.showId else r.traktId,r.matchLabel) })
         if(!g.confirmed) card.addView(actionButton("Open playback app") { openPlaybackApp(g.platforms) })
+        if(r.traktId>0) card.addView(actionButton(if(isFavorite(r.matchType,r.traktId)) "Remove favorite" else "Add favorite") { toggleFavorite(r.matchType,r.traktId,r.matchLabel); refreshHistory() })
         if(expanded || g.pending || g.queued) card.addView(actionButton(if(g.confirmed) "View sessions" else "Review / view sessions") { showSessions(g) })
         else card.addView(actionButton("View sessions") { showSessions(g) })
     }
