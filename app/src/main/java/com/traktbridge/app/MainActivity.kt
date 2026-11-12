@@ -2044,39 +2044,28 @@ class MainActivity : ComponentActivity() {
     }
     private fun titleCard(parent:LinearLayout,g:ViewingTitle,expanded:Boolean) {
         val r=g.representative
-        val card=panel(parent)
-        val row=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL }
-        card.addView(row)
-        val poster=ImageView(this).apply { scaleType=ImageView.ScaleType.CENTER_CROP; setImageResource(android.R.drawable.ic_media_play); setBackgroundColor(0xff343448.toInt()); contentDescription="Poster for "+r.matchLabel.ifBlank { r.title } }
-        row.addView(poster,LinearLayout.LayoutParams(dp(94),dp(141)).apply { rightMargin=dp(14) })
-        if(r.traktId>0) Artwork.load(this,if(r.matchType=="episode") "show" else "movie",if(r.matchType=="episode") r.showId else r.traktId,poster)
-        val details=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
-        row.addView(details,LinearLayout.LayoutParams(0,-2,1f))
-        details.addView(txt(r.matchLabel.ifBlank { r.title.ifBlank { "Unidentified video" } },18,ink,true))
-        details.addView(txt(g.platforms.joinToString(" • ") { appLabel(it) },13,muted))
-        details.addView(txt(g.sessions.size.toString()+" viewing session(s) • "+java.text.DateFormat.getDateInstance().format(java.util.Date(g.latest.ended)),13,muted))
         val assessment=g.positionSession?.let { completionAssessment(it) }
         val completion=when { g.sessions.all { it.status=="restored_audit" } -> "Restored history • prior upload not repeated"; g.confirmed -> "Finished • synced to Trakt"; g.queued -> "Completion approved • sync pending"; g.active -> "Currently watching"; assessment?.suggested==true -> "Completion suggested • confirm manually"; g.positionMs>=0 -> "In progress"; else -> "Completion unknown" }
-        details.addView(txt(completion,14,if(g.confirmed) 0xff6ee7b7.toInt() else 0xfffbbf24.toInt(),true))
-        details.addView(txt("Total sampled watch time: "+if(g.sampledMs>0) durationText(g.sampledMs) else "Unknown",13,muted))
-        if(g.durationMs>0 && g.positionMs>=0) {
-            details.addView(txt(durationText(g.positionMs)+" / "+durationText(g.durationMs)+" • "+durationText(g.remainingMs)+" left",13,ink))
-            details.addView(txt("Last observed position • "+when(g.positionSource) { "screen"->"visible player timer estimate"; "server"->"server reported"; "media"->"media session reported"; else->"source unverified" },12,muted))
-            details.addView(ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal).apply { progress=(g.positionMs.toDouble()/g.durationMs*100).toInt().coerceIn(0,100); progressTintList=android.content.res.ColorStateList.valueOf(violet) })
-        } else { if(g.catalogueRuntimeMs>0) details.addView(txt("Catalogue runtime: "+durationText(g.catalogueRuntimeMs),13,muted)); details.addView(txt("Remaining time unavailable • player position unknown",13,muted)) }
-        if(g.bufferingMs>0 || g.pausedMs>0 || g.seeks>0 || g.uncertainMs>0) details.addView(txt("Paused: "+durationText(g.pausedMs)+" • Buffering: "+durationText(g.bufferingMs)+" • Seeks: "+g.seeks+" • Uncertain: "+durationText(g.uncertainMs),12,muted))
-        if(r.traktId<=0) details.addView(txt("Identify exact title to combine sessions.",12,muted))
-        if(r.traktId>0) card.addView(actionButton("Title details") { titleDetails(if(r.matchType=="episode") "show" else "movie",if(r.matchType=="episode") r.showId else r.traktId,r.matchLabel) })
-        if(!g.confirmed) card.addView(actionButton("Open playback app") { openPlaybackApp(g.platforms) })
-        if(r.traktId>0) card.addView(actionButton("Review possible duplicate titles") { duplicateTitles(r) })
-        if(r.traktId>0) card.addView(actionButton("More title actions") {
+        val progress=if(g.durationMs>0 && g.positionMs>=0) (g.positionMs.toDouble()/g.durationMs*100).toInt().coerceIn(0,100) else null
+        val position=if(progress!=null) durationText(g.positionMs)+" / "+durationText(g.durationMs)+" • "+durationText(g.remainingMs)+" left • "+g.positionSource else (if(g.catalogueRuntimeMs>0) "Catalogue runtime: "+durationText(g.catalogueRuntimeMs)+" • " else "")+"Remaining time unavailable"
+        val diagnostics=buildString {
+            if(g.bufferingMs>0 || g.pausedMs>0 || g.seeks>0 || g.uncertainMs>0) append("Paused: "+durationText(g.pausedMs)+" • Buffering: "+durationText(g.bufferingMs)+" • Seeks: "+g.seeks+" • Uncertain: "+durationText(g.uncertainMs))
+            if(r.traktId<=0) append(" Identify exact title to combine sessions.")
+        }
+        val row=TitleUi(r.matchLabel.ifBlank { r.title.ifBlank { "Unidentified video" } },g.platforms.joinToString(" • ") { appLabel(it) },g.sessions.size.toString()+" viewing session(s) • "+java.text.DateFormat.getDateInstance().format(java.util.Date(g.latest.ended)),completion,"Total sampled watch time: "+if(g.sampledMs>0) durationText(g.sampledMs) else "Unknown",progress,position,diagnostics,if(r.matchType=="episode") "show" else "movie",if(r.matchType=="episode") r.showId else r.traktId)
+        val actions=mutableListOf<UiAction>()
+        if(r.traktId>0) actions.add(UiAction("Title details") { titleDetails(if(r.matchType=="episode") "show" else "movie",if(r.matchType=="episode") r.showId else r.traktId,r.matchLabel) })
+        if(!g.confirmed) actions.add(UiAction("Open playback app") { openPlaybackApp(g.platforms) })
+        if(r.traktId>0) actions.add(UiAction("Review possible duplicate titles") { duplicateTitles(r) })
+        if(r.traktId>0) actions.add(UiAction("More title actions") {
             choose("Manage title",listOf("Personal status: "+libraryStatus(r.matchType,r.traktId).ifBlank { "Not set" },if(isFavorite(r.matchType,r.traktId)) "Remove favorite" else "Add favorite","Notes and tags","Add to collection")) { action ->
                 when(action) { 0->setLibraryStatus(r.matchType,r.traktId,r.matchLabel); 1->{ toggleFavorite(r.matchType,r.traktId,r.matchLabel); refreshHistory() }; 2->editTitleNotes(r.matchType,r.traktId,r.matchLabel); 3->addCollection(r.matchType,r.traktId,r.matchLabel) }
             }
         })
-        if(expanded || g.pending || g.queued) card.addView(actionButton(if(g.confirmed) "View sessions" else "Review / view sessions") { showSessions(g) })
-        else card.addView(actionButton("View sessions") { showSessions(g) })
+        actions.add(UiAction(if((expanded || g.pending || g.queued) && !g.confirmed) "Review / view sessions" else "View sessions") { showSessions(g) })
+        parent.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeTitleCard(violet,row,actions) } })
     }
+
     private fun duplicateTitles(target:WatchRecord) {
         val rows=LibraryDuplicates.candidates(history.records(0),target)
         choose("Possible duplicate titles",rows.map { it.title+" • "+appLabel(it.source)+" • "+java.text.DateFormat.getDateTimeInstance().format(java.util.Date(it.started)) }) { i ->
