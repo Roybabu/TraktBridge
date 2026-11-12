@@ -463,6 +463,16 @@ class MainActivity : ComponentActivity() {
         fun label(s: String) { root.addView(txt(s,15,muted)) }
         fun button(s: String, action: () -> Unit) { root.addView(actionButton(s,action)) }
         label("SETTINGS • Account and tracking")
+        button("Cross-device history sharing") {
+            val enabled=prefs.getBoolean("device_history",false)
+            android.app.AlertDialog.Builder(this).setTitle(if(enabled) "Disable history sharing?" else "Share viewing history with paired devices?")
+                .setMessage("Separate opt-in: exchange up to 100 recent sampled sessions from the last 90 days. Remote history stays read-only and never inherits Trakt approval. Disabling hides received history; clear it separately if desired.")
+                .setNegativeButton("Cancel",null).setPositiveButton(if(enabled) "Disable" else "Enable") { _,_-> prefs.edit().putBoolean("device_history",!enabled).apply() }.show()
+        }
+        button("View cross-device history") { showDeviceHistory() }
+        button("Clear received device history") {
+            android.app.AlertDialog.Builder(this).setTitle("Clear received history?").setMessage("Local viewing history and Trakt approvals are unchanged. If sharing remains enabled, paired devices may send history again.").setNegativeButton("Cancel",null).setPositiveButton("Clear") { _,_-> Thread { runCatching { DeviceHistory.clear(applicationContext) } }.start() }.show()
+        }
         button("Configure optional cloud relay") { configureDeviceRelay() }
         button("Allow remote playback controls") {
             val enabled=prefs.getBoolean("device_controls",false)
@@ -1457,6 +1467,29 @@ class MainActivity : ComponentActivity() {
             }
             android.app.AlertDialog.Builder(this).setTitle("Viewing journal").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
         }
+    }
+    private fun showDeviceHistory() {
+        val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(12),dp(16),dp(12)) }
+        body.addView(txt("Read-only paired-device viewing history. Overlapping local observations are hidden. These entries never enter your Trakt upload queue.",14,muted))
+        val dialog=android.app.AlertDialog.Builder(this).setTitle("Cross-device history").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).create()
+        dialog.show()
+        Thread {
+            val rows=runCatching { DeviceHistory.visible(applicationContext) }
+            val labels=DevicePairing.peers(applicationContext).associate { it.id to it.label }
+            runOnUiThread {
+                if(!dialog.isShowing || isDestroyed || isFinishing) return@runOnUiThread
+                rows.fold({ items ->
+                    if(items.isEmpty()) body.addView(txt("No new paired-device records. Enable history sharing on both devices and allow them to connect.",14,muted))
+                    for(item in items) {
+                        val e=item.event; val card=panel(body)
+                        card.addView(txt(e.title,18,ink,true))
+                        if(e.detail.isNotBlank()) card.addView(txt(e.detail,14,muted))
+                        card.addView(txt((labels[item.peer] ?: "Paired device")+" • "+appLabel(e.source),14,muted))
+                        card.addView(txt(java.text.DateFormat.getDateTimeInstance().format(java.util.Date(e.ended))+" • "+durationText(e.watched)+" watched",14,muted))
+                    }
+                },{ body.addView(txt("Unable to read paired-device history",14,muted)) })
+            }
+        }.start()
     }
     private fun configureDeviceRelay() {
         val current=RelaySettings.load(this)

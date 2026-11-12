@@ -71,6 +71,16 @@ class RelayPlaybackSync(context:Context,val config:RelaySettings.Config):java.io
                         val incoming=PlaybackSharing.read(DataInputStream(secure.inputStream))
                         for(i in 0 until incoming.length()) incoming.optJSONObject(i)?.put("controlMask",0)
                         if(allowed() && DevicePairing.peers(app).any { it.id==peer.id }) RemotePlayback.put(peer,incoming,null)
+                        if(allowed()) runCatching {
+                            val output=DataOutputStream(secure.outputStream); val input=DataInputStream(secure.inputStream)
+                            // Exchange consent first; either side may decline history independently.
+                            output.writeBoolean(DeviceHistory.enabled(app)); output.flush()
+                            val remoteConsent=input.readBoolean()
+                            if(remoteConsent && DeviceHistory.enabled(app) && allowed()) {
+                                if(role==0) { DeviceHistory.write(output,DeviceHistory.snapshot(app)); DeviceHistory.merge(app,peer.id,DeviceHistory.read(input)) }
+                                else { val records=DeviceHistory.read(input); if(allowed()) DeviceHistory.merge(app,peer.id,records); DeviceHistory.write(output,DeviceHistory.snapshot(app)) }
+                            }
+                        }
                     }
                 }
             } finally { sockets.remove(raw) }

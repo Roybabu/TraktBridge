@@ -128,6 +128,11 @@ class LocalPlaybackSync(context: Context): java.io.Closeable {
                                 if(allowed()) {
                                     val rows=PlaybackSharing.read(DataInputStream(socket.inputStream))
                                     if(allowed() && DevicePairing.peers(app).any { it.id==peer.id }) RemotePlayback.put(peer,rows,target)
+                                    if(allowed() && DeviceHistory.enabled(app)) runCatching {
+                                        val output=DataOutputStream(socket.outputStream); output.writeByte(2); output.flush()
+                                        val history=DeviceHistory.read(DataInputStream(socket.inputStream))
+                                        if(allowed()) DeviceHistory.merge(app,peer.id,history)
+                                    }
                                 }
                             }
                         }
@@ -154,9 +159,12 @@ class LocalPlaybackSync(context: Context): java.io.Closeable {
                                 val output=DataOutputStream(it.outputStream)
                                 PlaybackSharing.write(output,PlaybackSharing.snapshot(app))
                                 val input=DataInputStream(it.inputStream)
-                                if(input.readUnsignedByte()==1) {
+                                when(input.readUnsignedByte()) {
+                                2 -> if(allowed() && DevicePairing.peers(app).any { p -> p.id==peer.id }) DeviceHistory.write(output,DeviceHistory.snapshot(app))
+                                1 -> {
                                     val session=input.readUTF(); val action=input.readUTF()
                                     output.writeBoolean(DeviceControl.execute(app,peer.id,session,action)); output.flush()
+                                }
                                 }
                             }
                         }
