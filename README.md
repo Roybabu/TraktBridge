@@ -86,3 +86,18 @@ Local viewing statuses, history-seeded related recommendations, external Trakt l
 Unified local and opt-in remote search; IMDb/TMDB identity lookup via Trakt; service analytics; manually entered INR subscription costs; four curated franchise guides; local notes and tags; time-budget planner and random first-page watchlist movie; actor/director movie credits; recoverable local deletion; health center; optional daily device-encrypted backup; public AniList lists; Letterboxd diary CSV; confirmation-safe Android shortcut URIs; Android TV launcher and focus support; text collection exchange; account-bound scheduled remote history refresh; bounded AniList response and safer restoration and match ranking. Physical-device and live account tests are still required.
 
 Not implemented: licensed streaming availability, exact provider deep links, authenticated AniList/MAL writes, SIMKL sync, real-time collaborative lists, independent profiles, biometric lock, automatic franchise graphs, full TV companion or Home Assistant backend, release notification scheduler, rewatch uploads, general duplicate-record merge and multilingual UI. These milestones do not constitute v1.0 readiness.
+
+## v0.58–0.77 validation and scope
+- Hybrid Compose header and Home/Library summaries; existing screens retain Android Views. Full Compose migration is not complete.
+- Now Playing shows reported sessions only; no player control or inferred title certainty.
+- Local assistant uses rule matching; rewatch uploads require explicit approval and event/account validation.
+- Collection profiles separate organization only, not playback history or Trakt account. No new external account integrations or cloud backend.
+- Episode reminders are approximate WorkManager tasks. Privacy mode stops monitoring; screenshot protection is optional, not biometric authentication.
+- Settings export includes selected default-profile preferences. No credentials, permissions, approvals, learned mappings, or all-profile export.
+- Test upgrade from 0.57 with existing history, Trakt authorization, title mappings and signed APK.
+- Verify Compose header and home/library layout with rotation, large text, TalkBack and Android TV navigation.
+- Test rewatch approval twice, same timestamp duplicates, uncertain uploads, stale match edits and account switching; no automatic upload.
+- Test reminder permission denial, cancel, time change, delayed delivery and disconnect.
+- Test privacy pause during one-shot OCR, rearm/clear during processing, process death during active session, backward wall clock.
+- Validate password backup authentication, restore synced/uncertain events as non-uploadable audit records, corrupted settings import, manual transfer and unmetered artwork behavior.
+- Physical-device, 24/72-hour soak, startup and memory benchmarks and security audit remain pending; not a stable release candidate until verified.
