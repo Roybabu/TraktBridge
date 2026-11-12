@@ -343,6 +343,7 @@ class MainActivity : ComponentActivity() {
         button("Recently deleted viewing") { recentlyDeleted() }
         button("Share or import collections") { shareCollections() }
         button("Smart collections") { smartCollections() }
+        button("Personal collection profiles") { collectionProfiles() }
         button("Personal collections") { collections() }
         button("Favorite titles") { favorites() }
         button("Automation shortcuts") { automationShortcuts() }
@@ -453,17 +454,17 @@ class MainActivity : ComponentActivity() {
             android.app.AlertDialog.Builder(this).setTitle("App updates").setMessage("Installed: "+current+"\nRepository: "+latest+"\n"+if(newer) "Newer source version available. Download only a successful permanently signed build." else "No newer repository version detected.").setNegativeButton("Close",null).setPositiveButton("GitHub builds") { _,_->startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://github.com/Roybabu/TraktBridge/actions"))) }.show()
         }
     }
-    private fun libraryStatus(type:String,id:Long):String=getSharedPreferences("library_status",MODE_PRIVATE).getString(type+":"+id,"").orEmpty()
+    private fun libraryStatus(type:String,id:Long):String=personalStore("library_status").getString(type+":"+id,"").orEmpty()
     private fun setLibraryStatus(type:String,id:Long,label:String) {
         val statuses=listOf("Watching","Completed locally","Plan to watch","On hold","Dropped","Rewatching","Clear status")
         choose("Personal status • "+label,statuses) { index ->
-            val edit=getSharedPreferences("library_status",MODE_PRIVATE).edit()
+            val edit=personalStore("library_status").edit()
             if(index==statuses.lastIndex) edit.remove(type+":"+id) else edit.putString(type+":"+id,statuses[index])
             edit.apply(); refreshHistory()
         }
     }
     private fun shareCollections() {
-        val store=getSharedPreferences("collections",MODE_PRIVATE)
+        val store=personalStore("collections")
         val names=store.all.keys.sorted()
         choose("Collection exchange",listOf("Share a collection","Import collection text")) { action ->
             if(action==0) choose("Select collection",names) { index ->
@@ -504,8 +505,29 @@ class MainActivity : ComponentActivity() {
             android.app.AlertDialog.Builder(this).setTitle(choices[index]).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
         }
     }
+    private fun collectionProfiles() {
+        val store=getSharedPreferences("collection_profiles",MODE_PRIVATE)
+        val names=(store.getStringSet("names",emptySet()) ?: emptySet()).sorted()
+        choose("Collection profiles",listOf("Default")+names+listOf("Create profile")) { index ->
+            if(index==names.size+1) {
+                val field=EditText(this).apply { hint="Profile label" }
+                android.app.AlertDialog.Builder(this).setTitle("New collection profile").setMessage("Only collections and personal notes are separated. Playback history and Trakt account remain shared on this device.").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Create") { _,_->
+                    val name=field.text.toString().trim().take(40)
+                    if(name.isNotBlank() && name!="Default") {
+                        store.edit().putStringSet("names",names.toSet()+name).putString("selected",name).apply()
+                        recreate()
+                    }
+                }.show()
+            } else { store.edit().putString("selected",if(index==0) "" else names[index-1]).apply(); recreate() }
+        }
+    }
+    private fun personalStore(name:String):android.content.SharedPreferences {
+        val profile=getSharedPreferences("collection_profiles",MODE_PRIVATE).getString("selected","").orEmpty()
+        val suffix=if(profile.isBlank()) "" else ":"+java.security.MessageDigest.getInstance("SHA-256").digest(profile.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+        return getSharedPreferences(name+suffix,MODE_PRIVATE)
+    }
     private fun collections() {
-        val store=getSharedPreferences("collections",MODE_PRIVATE)
+        val store=personalStore("collections")
         val names=store.all.keys.sorted()
         choose("Collections",names+"Create collection") { i ->
             if(i==names.size) {
@@ -526,7 +548,7 @@ class MainActivity : ComponentActivity() {
         }
     }
     private fun addCollection(type:String,id:Long,label:String) {
-        val store=getSharedPreferences("collections",MODE_PRIVATE); val names=store.all.keys.sorted()
+        val store=personalStore("collections"); val names=store.all.keys.sorted()
         if(names.isEmpty()) { collections(); return }
         choose("Add to collection",names) { i ->
             val name=names[i]; val a=JSONArray(store.getString(name,"[]"))
@@ -536,14 +558,14 @@ class MainActivity : ComponentActivity() {
             Toast.makeText(this,"Collection updated",Toast.LENGTH_SHORT).show()
         }
     }
-    private fun isFavorite(type:String,id:Long)=getSharedPreferences("favorites",MODE_PRIVATE).contains(type+":"+id)
+    private fun isFavorite(type:String,id:Long)=personalStore("favorites").contains(type+":"+id)
     private fun toggleFavorite(type:String,id:Long,label:String) {
-        val store=getSharedPreferences("favorites",MODE_PRIVATE)
+        val store=personalStore("favorites")
         val key=type+":"+id
         if(store.contains(key)) store.edit().remove(key).apply() else store.edit().putString(key,label).apply()
     }
     private fun favorites() {
-        val store=getSharedPreferences("favorites",MODE_PRIVATE)
+        val store=personalStore("favorites")
         val items=store.all.entries.sortedBy { it.value.toString() }
         choose("Favorite titles",items.map { it.value.toString() }) { i ->
             val entry=items[i]; val type=entry.key.substringBefore(":"); val id=entry.key.substringAfter(":").toLongOrNull() ?: return@choose
@@ -722,7 +744,7 @@ class MainActivity : ComponentActivity() {
         }
     }
     private fun editTitleNotes(type:String,id:Long,label:String) {
-        val store=getSharedPreferences("title_notes",MODE_PRIVATE)
+        val store=personalStore("title_notes")
         val key=type+":"+id
         val current=runCatching { org.json.JSONObject(store.getString(key,"{}")) }.getOrDefault(org.json.JSONObject())
         val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(8),dp(16),dp(8)) }
@@ -900,8 +922,8 @@ class MainActivity : ComponentActivity() {
             val q=field.text.toString().trim().take(200)
             if(q.isBlank()) return@setPositiveButton
             val local=ViewingGroups.build(ViewingAnalytics.filter(history.records(0),HistoryFilter(query=q)))
-            val favorites=getSharedPreferences("favorites",MODE_PRIVATE).all.values.map { it.toString() }.filter { it.contains(q,true) }
-            val collections=getSharedPreferences("collections",MODE_PRIVATE).all.filter { (name,value) -> name.contains(q,true) || value.toString().contains(q,true) }.keys.sorted()
+            val favorites=personalStore("favorites").all.values.map { it.toString() }.filter { it.contains(q,true) }
+            val collections=personalStore("collections").all.filter { (name,value) -> name.contains(q,true) || value.toString().contains(q,true) }.keys.sorted()
             val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
             section(body,"Local library • "+local.size)
             local.take(20).forEach { titleCard(body,it,true) }
