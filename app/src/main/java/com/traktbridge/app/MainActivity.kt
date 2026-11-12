@@ -425,6 +425,7 @@ class MainActivity : Activity() {
                 if(continuing.isEmpty()) panel(dashboard).addView(txt("No unfinished sampled viewing yet.",15,muted)) else cards(dashboard,continuing.drop(1).take(6)) { parent,g -> titleCard(parent,g,false) }
                 section(dashboard,"Review queue")
                 val q=panel(dashboard); q.addView(txt("$pending awaiting action",22,ink,true)); q.addView(actionButton("Open review queue") { showTab(2) }); q.addView(actionButton("Review app activity") { reviewUsage() })
+                dashboard.addView(actionButton("Upcoming episodes") { upcomingEpisodes() })
                 dashboard.addView(actionButton("Discover movies and shows") { discover() })
                 dashboard.addView(actionButton("Open Trakt account library") { openTraktLibrary() })
                 section(dashboard,"Recently watched")
@@ -473,6 +474,19 @@ class MainActivity : Activity() {
                 calendarView(dashboard,records)
 
             }
+        }
+    }
+    private fun upcomingEpisodes() {
+        lookup("Loading upcoming episodes",{ done -> TraktLibrary.upcoming(this,30,done) }) { rows:List<UpcomingEpisode> ->
+            val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
+            body.addView(txt("Next 30 days • Trakt personal calendar. Air dates are not streaming availability.",14,muted))
+            if(rows.isEmpty()) body.addView(txt("No upcoming episodes returned.",15))
+            for(e in rows) {
+                val card=panel(body)
+                val date=java.time.Instant.parse(e.airs).atZone(java.time.ZoneId.systemDefault()).format(java.time.format.DateTimeFormatter.ofPattern("EEE, dd MMM • HH:mm"))
+                card.addView(txt(date,14,violet,true)); card.addView(txt(e.show,18,ink,true)); card.addView(txt("S"+e.season+" E"+e.episode+" • "+e.title,14,muted))
+            }
+            android.app.AlertDialog.Builder(this).setTitle("Upcoming episodes").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
         }
     }
     private fun discover() {

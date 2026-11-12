@@ -19,6 +19,7 @@ object RemoteRules {
     fun rating(value:Int):Int { require(value in 1..10); return value }
     fun historyKey(account:String,eventId:Long):String { require(account.isNotBlank() && eventId>0); return account+":"+eventId }
 }
+data class UpcomingEpisode(val show:String,val title:String,val season:Int,val episode:Int,val airs:String)
 object TraktLibrary {
     private val worker=Executors.newSingleThreadExecutor()
     private val main=Handler(Looper.getMainLooper())
@@ -100,6 +101,18 @@ object TraktLibrary {
         val updated=response.optJSONObject("updated")?.optInt(plural,0) ?: 0
         if(notFound>0) error("Trakt did not find this item")
         if(added+deleted+existing+updated>0) "Trakt change confirmed" else "No change confirmed; refresh to verify"
+    }
+    fun upcoming(context:Context,days:Int,done:(Result<List<UpcomingEpisode>>)->Unit)=task(context,done) { token,_ ->
+        require(days in 1..31)
+        val date=java.time.LocalDate.now(java.time.ZoneOffset.UTC).toString()
+        val a=JSONArray(request(token,"/calendars/my/shows/"+date+"/"+days).text)
+        (0 until a.length()).mapNotNull { i ->
+            val o=a.optJSONObject(i) ?: return@mapNotNull null
+            val ep=o.optJSONObject("episode") ?: return@mapNotNull null
+            val show=o.optJSONObject("show") ?: return@mapNotNull null
+            val airs=o.optString("first_aired")
+            if(runCatching { Instant.parse(airs) }.isFailure) null else UpcomingEpisode(show.optString("title"),ep.optString("title"),ep.optInt("season"),ep.optInt("number"),airs)
+        }.sortedBy { it.airs }
     }
     fun accountId(context:Context,done:(Result<String>)->Unit)=task(context,done) { _,account -> account }
     // Download a bounded page into an account-scoped local cache. Never convert
