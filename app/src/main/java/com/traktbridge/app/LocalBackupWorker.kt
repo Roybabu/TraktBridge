@@ -28,7 +28,8 @@ object LocalBackupVault {
     }
     private fun file(context:Context)=File(context.filesDir,"local-history-backup.enc")
     @Synchronized fun save(context:Context) {
-        val json=WatchHistory(context).use { require(HistoryBackup.integrity(it)) { "Database integrity check failed; existing backup retained" }; HistoryBackup.snapshot(it).toString() }
+        val db=WatchHistory(context)
+        val json=try { require(HistoryBackup.integrity(db)) { "Database integrity check failed; existing backup retained" }; HistoryBackup.snapshot(db).toString() } finally { db.close() }
         require(json.length<=HistoryBackup.MAX_CHARS)
         val cipher=Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE,key()) }
         val data=cipher.iv+cipher.doFinal(json.toByteArray(Charsets.UTF_8))

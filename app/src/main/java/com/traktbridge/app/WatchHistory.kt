@@ -61,6 +61,10 @@ class WatchHistory(context: Context): SQLiteOpenHelper(context.applicationContex
         if (oldVersion < 8) createPerformanceIndexes(db)
         if (oldVersion < 9) createDeviceHistory(db)
     }
+    override fun onConfigure(db:SQLiteDatabase) {
+        super.onConfigure(db)
+        db.execSQL("PRAGMA secure_delete=ON")
+    }
     fun pendingNotifications(): List<WatchRecord> {
         val ids=mutableListOf<String>()
         readableDatabase.rawQuery("SELECT id FROM viewing WHERE status=\u0027pending\u0027 AND notified=0 ORDER BY ended DESC LIMIT 3",null).use { c -> while(c.moveToNext()) ids.add(c.getString(0)) }

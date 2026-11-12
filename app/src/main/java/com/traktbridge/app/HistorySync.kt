@@ -137,7 +137,8 @@ class HistorySyncWorker(context: Context, params: WorkerParameters): Worker(cont
     override fun doWork(): Result = synchronized(lock) {
         DebugTrace.init(applicationContext)
         DebugTrace.event("sync","worker started")
-        WatchHistory(applicationContext).use { db ->
+        val db=WatchHistory(applicationContext)
+        try {
             var retry=false
             val uncertain=db.syncQueue(20,true)
             val queue=(uncertain+db.syncQueue(80)).distinctBy { it.id }
@@ -146,6 +147,6 @@ class HistorySyncWorker(context: Context, params: WorkerParameters): Worker(cont
                 if(!HistorySync.process(applicationContext,db,r)) { retry=true; if(r.status=="queued") break }
             }
             if(retry || db.syncQueue(1).any { it.status=="queued" }) Result.retry() else Result.success()
-        }
+        } finally { db.close() }
     }
 }
