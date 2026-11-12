@@ -231,7 +231,7 @@ class WatchHistory(context: Context): SQLiteOpenHelper(context.applicationContex
     }
     fun approvedAccount(id: String): String = readableDatabase.rawQuery("SELECT sync_account FROM viewing WHERE id=?",arrayOf(id)).use { if(it.moveToFirst()) it.getString(0) else "" }
     fun syncMessage(id: String): String = readableDatabase.rawQuery("SELECT sync_message FROM viewing WHERE id=?",arrayOf(id)).use { if(it.moveToFirst()) it.getString(0) else "" }
-    fun syncQueue(limit:Int=100): List<WatchRecord> {
+    fun syncQueue(limit:Int=100,uncertainOnly:Boolean=false): List<WatchRecord> {
         val ids=mutableListOf<String>()
         readableDatabase.rawQuery("SELECT id FROM viewing WHERE status IN ('queued','uncertain') ORDER BY CASE WHEN status='queued' THEN 0 ELSE 1 END, ended LIMIT ?",arrayOf(limit.coerceIn(1,500).toString())).use { c -> while(c.moveToNext()) ids.add(c.getString(0)) }
         return ids.mapNotNull { record(it) }

@@ -1126,6 +1126,11 @@ class MainActivity : ComponentActivity() {
             android.app.AlertDialog.Builder(this).setTitle(guide.name).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
         }
     }
+    private fun syncRecoveryStatus() {
+        val rows=history.records(0)
+        val counts=listOf("queued","uncertain","blocked").joinToString("\n") { status -> status+": "+rows.count { it.status==status } }
+        android.app.AlertDialog.Builder(this).setTitle("Offline sync recovery").setMessage(counts+"\n\nQueued records retry when online. Uncertain uploads are checked against remote history without resending. Blocked records require account verification or manual retry.").setNegativeButton("Close",null).setPositiveButton("Check approved queue") { _,_->HistorySync.schedule(this); showTab(2) }.show()
+    }
     private fun trackingHealth() {
         val nm=getSystemService(android.app.NotificationManager::class.java)
         val listener=android.content.ComponentName(this,PlaybackListener::class.java)
@@ -1138,6 +1143,7 @@ class MainActivity : ComponentActivity() {
         body.addView(txt("Last sampling error: "+prefs.getString("sample_error","none"),14,muted))
         body.addView(actionButton("Open guided setup") { setupGuide() })
         body.addView(actionButton("Inspect live sessions") { liveInspector() })
+        body.addView(actionButton("Sync recovery status") { syncRecoveryStatus() })
         val groups=ViewingGroups.build(history.records(0)).filter { it.queued || it.pending }
         section(body,"Pending review and sync • "+groups.size)
         groups.take(20).forEach { titleCard(body,it,true) }

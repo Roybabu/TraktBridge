@@ -93,7 +93,7 @@ object HistorySync {
                     Reconciliation.ABSENT -> Unit
                 }
                 if(expected=="uncertain") {
-                    state("uncertain","Previous upload outcome unknown. No duplicate POST sent. Check Trakt and reconcile again.")
+                    state(SyncRecoveryPolicy.afterLookup(expected,false,true),"Previous upload outcome unknown. No duplicate POST sent. Check Trakt and reconcile again.")
                     return@authorized true
                 }
                 if(!db.beginApprovedUpload(r,approved)) return@authorized true
@@ -136,12 +136,13 @@ class HistorySyncWorker(context: Context, params: WorkerParameters): Worker(cont
         DebugTrace.event("sync","worker started")
         WatchHistory(applicationContext).use { db ->
             var retry=false
-            val queue=db.syncQueue()
+            val uncertain=db.syncQueue(20,true)
+            val queue=(uncertain+db.syncQueue(80)).distinctBy { it.id }
             for(r in queue) {
                 if(isStopped) return@synchronized Result.retry()
-                if(!HistorySync.process(applicationContext,db,r)) { retry=true; break }
+                if(!HistorySync.process(applicationContext,db,r)) { retry=true; if(r.status=="queued") break }
             }
-            if(retry || queue.size>=100 && db.syncQueue(1).any { it.status=="queued" }) Result.retry() else Result.success()
+            if(retry || db.syncQueue(1).any { it.status=="queued" }) Result.retry() else Result.success()
         }
     }
 }

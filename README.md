@@ -203,3 +203,6 @@ Classic dark and AMOLED surfaces, Android 12+ dynamic dark colors for Compose co
 
 ## v0.115.0
 Encryption migration readiness checks and encrypted recovery export entry point. Active and outstanding sync records block readiness. Full live SQLite encryption is NOT implemented: migration requires a compatible encrypted database driver, transactional schema/data verification and device upgrade tests. The existing database is not replaced or deleted.
+
+## v0.116.0
+Prioritized reconciliation of uncertain uploads, bounded queue processing, recovery status dialog and explicit retry action. Uncertain writes are never automatically resent. This is local durable queue recovery, not a new cross-device synchronization backend.
