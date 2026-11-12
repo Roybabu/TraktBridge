@@ -348,6 +348,7 @@ class MainActivity : Activity() {
         root.addView(Switch(this).apply { text="Automatically reuse confirmed local title mappings"; isChecked=prefs.getBoolean("learned_auto",false); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("learned_auto",checked).apply() } })
         button("Clear learned title mappings") { android.app.AlertDialog.Builder(this).setTitle("Clear learned mappings?").setMessage("Existing viewing history and Trakt matches stay unchanged.").setNegativeButton("Cancel",null).setPositiveButton("Clear") { _,_->history.clearLearning() }.show() }
         label("Remote playback is recognized when Android exposes a media session. Picture-in-picture can continue tracking through the same session; unsupported casts cannot be observed directly.")
+        button("Tracking health and review center") { trackingHealth() }
         button("Live recognition inspector") { liveInspector() }
         button("Open diagnostic recorder") { startActivity(Intent(this,DebugActivity::class.java)) }
         auth = TraktAuth(applicationContext)
@@ -687,6 +688,23 @@ class MainActivity : Activity() {
             }) }
             android.app.AlertDialog.Builder(this).setTitle(guide.first).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
         }
+    }
+    private fun trackingHealth() {
+        val nm=getSystemService(android.app.NotificationManager::class.java)
+        val listener=android.content.ComponentName(this,PlaybackListener::class.java)
+        val access=if(android.os.Build.VERSION.SDK_INT>=27) nm.isNotificationListenerAccessGranted(listener) else Settings.Secure.getString(contentResolver,"enabled_notification_listeners").orEmpty().split(":").any { android.content.ComponentName.unflattenFromString(it)==listener }
+        val last=prefs.getLong("last_sample",0)
+        val age=System.currentTimeMillis()-last
+        val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
+        val power=getSystemService(android.os.PowerManager::class.java)
+        metricGrid(body,listOf("Sampling enabled" to if(prefs.getBoolean("enabled",false)) "Yes" else "No","Listener access" to if(access) "Granted" else "Missing","Last sample" to if(last>0 && age>=0) (age/1000).toString()+"s ago" else "Unknown","Battery exemption" to if(power.isIgnoringBatteryOptimizations(packageName)) "Yes" else "No","Selected apps" to (prefs.getStringSet("allowed",emptySet())?.size ?: 0).toString(),"Review notifications" to if(ViewingNotifications.enabled(this)) "Enabled" else "Off"))
+        body.addView(txt("Last sampling error: "+prefs.getString("sample_error","none"),14,muted))
+        body.addView(actionButton("Open guided setup") { setupGuide() })
+        body.addView(actionButton("Inspect live sessions") { liveInspector() })
+        val groups=ViewingGroups.build(history.records(0)).filter { it.queued || (it.pending && !it.confirmed) }
+        section(body,"Pending review and sync • "+groups.size)
+        groups.take(20).forEach { titleCard(body,it,true) }
+        android.app.AlertDialog.Builder(this).setTitle("Tracking health").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
     }
     private fun recentlyDeleted() {
         val rows=history.trashed()
