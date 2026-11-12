@@ -483,6 +483,7 @@ class MainActivity : Activity() {
                 section(dashboard,"Review queue")
                 val q=panel(dashboard); q.addView(txt("$pending awaiting action",22,ink,true)); q.addView(actionButton("Open review queue") { showTab(2) }); q.addView(actionButton("Review app activity") { reviewUsage() })
                 dashboard.addView(actionButton("Upcoming episodes") { upcomingEpisodes() })
+                dashboard.addView(actionButton("Recommendations from your history") { recommendFromHistory() })
                 dashboard.addView(actionButton("Discover movies and shows") { discover() })
                 dashboard.addView(actionButton("Open Trakt account library") { openTraktLibrary() })
                 section(dashboard,"Recently watched")
@@ -553,6 +554,18 @@ class MainActivity : Activity() {
                 card.addView(txt(date,14,violet,true)); card.addView(txt(e.show,18,ink,true)); card.addView(txt("S"+e.season+" E"+e.episode+" • "+e.title,14,muted))
             }
             android.app.AlertDialog.Builder(this).setTitle("Upcoming episodes").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
+        }
+    }
+    private fun recommendFromHistory() {
+        val rows=history.records(0).filter { it.status=="synced" && it.traktId>0 }.distinctBy { if(it.matchType=="episode") "show:"+it.showId else "movie:"+it.traktId }.take(30)
+        choose("Find similar content",rows.map { it.matchLabel }) { i ->
+            val r=rows[i]; val type=if(r.matchType=="episode") "show" else "movie"; val id=if(type=="show") r.showId else r.traktId
+            val watched=rows.map { if(type=="show" && it.matchType=="episode") it.showId else if(type=="movie" && it.matchType=="movie") it.traktId else -1L }.toSet()
+            lookup("Finding related titles",{ done -> TraktCatalogue.related(type,id,done) }) { items:List<CatalogueItem> ->
+                val all=history.records(0).filter { it.status=="synced" }.map { if(type=="show" && it.matchType=="episode") it.showId else if(type=="movie" && it.matchType=="movie") it.traktId else -1L }.toSet()
+                val fresh=items.filterNot { it.id in all || it.id in watched || it.id==id }
+                choose("Because you watched "+r.matchLabel,fresh.map { it.label() }) { j -> titleDetails(type,fresh[j].id,fresh[j].title) }
+            }
         }
     }
     private fun discover() {

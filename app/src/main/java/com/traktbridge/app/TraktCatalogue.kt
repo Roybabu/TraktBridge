@@ -60,6 +60,13 @@ object TraktCatalogue {
             if (n <= 0 || eid <= 0) null else CatalogueItem("episode",eid,show.title + " — " + o.optString("title","Episode " + n),show.year,show.id,season,n,o.optInt("runtime"))
         }.distinctBy { it.id }.sortedBy { it.episode }
     }
+    fun related(type:String,id:Long,done:(Result<List<CatalogueItem>>)->Unit)=request(done) {
+        require(type in setOf("movie","show") && id>0)
+        objects(get("/"+RemoteRules.plural(type)+"/"+id+"/related?limit=30&extended=full")).mapNotNull { o ->
+            val key=id(o); val title=o.optString("title")
+            if(key<=0 || title.isBlank()) null else CatalogueItem(type,key,title,o.optInt("year"),runtimeMinutes=o.optInt("runtime"))
+        }.distinctBy { it.id }
+    }
     fun discover(type:String,mode:String,done:(Result<List<CatalogueItem>>)->Unit)=request(done) {
         require(type in setOf("movie","show") && mode in setOf("trending","popular"))
         objects(get("/"+RemoteRules.plural(type)+"/"+mode+"?limit=30&extended=full")).mapNotNull { row ->
