@@ -56,12 +56,61 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); handleCallback(intent); handleReview(intent); handleShared(intent); handleTrackingShortcut(intent); handleAutomation(intent) }
     override fun onActivityResult(requestCode:Int,resultCode:Int,data:Intent?) {
         super.onActivityResult(requestCode,resultCode,data)
+        if(requestCode==97 && resultCode==RESULT_OK) { data?.data?.let { readPairingQr(it) }; return }
         if(requestCode==96) { privacyPrompt=false; unlocked=resultCode==RESULT_OK; if(unlocked) shell.visibility=android.view.View.VISIBLE else finish(); return }
         if(requestCode==57 && resultCode==RESULT_OK) data?.data?.let { inspectVideo(it) }
         if(requestCode==58 && resultCode==RESULT_OK) data?.data?.let { inspectImport(it) }
         if(resultCode==RESULT_OK && requestCode in 65..66) data?.data?.let { settingsTransfer(requestCode,it) }
         if(resultCode==RESULT_OK && requestCode in 63..64) data?.data?.let { encryptedTransfer(requestCode,it) }
         if(resultCode==RESULT_OK && requestCode in 60..62) data?.data?.let { historyTransfer(requestCode,it) }
+    }
+    private fun showPairingInvitation() {
+        runCatching {
+            val token=DevicePairing.invite(this)
+            val matrix=com.google.zxing.qrcode.QRCodeWriter().encode(token,com.google.zxing.BarcodeFormat.QR_CODE,512,512)
+            val pixels=IntArray(512*512) { i -> if(matrix[i%512,i/512]) android.graphics.Color.BLACK else android.graphics.Color.WHITE }
+            val bitmap=android.graphics.Bitmap.createBitmap(pixels,512,512,android.graphics.Bitmap.Config.ARGB_8888)
+            val content=LinearLayout(this).apply {
+                orientation=LinearLayout.VERTICAL
+                addView(ImageView(this@MainActivity).apply { setImageBitmap(bitmap); adjustViewBounds=true },LinearLayout.LayoutParams(-1,dp(250)))
+                addView(txt("Verification PIN: "+DevicePairing.verificationCode(token)+"\nExpires in 2 minutes. Exchange invitations on both devices.",16))
+                addView(EditText(this@MainActivity).apply { setText(token); keyListener=null; setTextIsSelectable(true); maxLines=3 })
+            }
+            val dialog=android.app.AlertDialog.Builder(this).setTitle("Pair this device").setView(content).setPositiveButton("Close",null).create()
+            dialog.show()
+            content.postDelayed({ dialog.dismiss() },120000)
+        }.onFailure { Toast.makeText(this,"Unable to create invitation",Toast.LENGTH_LONG).show() }
+    }
+    private fun approvePairingInvitation(initial: String="") {
+        val token=EditText(this).apply { hint="Signed invitation"; setText(initial); maxLines=4; filters=arrayOf(android.text.InputFilter.LengthFilter(2048)) }
+        val pin=EditText(this).apply { hint="8-digit PIN shown on other device"; inputType=android.text.InputType.TYPE_CLASS_NUMBER; filters=arrayOf(android.text.InputFilter.LengthFilter(8)) }
+        val content=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; addView(token); addView(pin) }
+        android.app.AlertDialog.Builder(this).setTitle("Verify nearby device").setView(content).setNegativeButton("Cancel",null).setPositiveButton("Verify") { _,_->
+            runCatching { DevicePairing.verify(token.text.toString().trim(),pin.text.toString()) }.fold({ peer ->
+                android.app.AlertDialog.Builder(this).setTitle("Authorize device?").setMessage(peer.label+"\n"+peer.id+"\nApprove only a device you recognize. The other device must also approve your invitation.").setNegativeButton("Cancel",null).setPositiveButton("Authorize") { _,_->
+                    runCatching { DevicePairing.approve(this,peer) }.fold({ Toast.makeText(this,"Identity approved",Toast.LENGTH_SHORT).show() },{ Toast.makeText(this,"Authorization failed",Toast.LENGTH_SHORT).show() })
+                }.show()
+            },{ Toast.makeText(this,"Invalid or expired invitation/PIN",Toast.LENGTH_LONG).show() })
+        }.show()
+    }
+    private fun readPairingQr(uri: android.net.Uri) {
+        Thread {
+            val result=runCatching {
+                val options=android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds=true }
+                contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it,null,options) }
+                require(options.outWidth in 1..10000 && options.outHeight in 1..10000)
+                options.inJustDecodeBounds=false
+                options.inSampleSize=maxOf(1,maxOf(options.outWidth,options.outHeight)/1200)
+                val bitmap=contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it,null,options) } ?: error("Missing image")
+                try {
+                    val pixels=IntArray(bitmap.width*bitmap.height)
+                    bitmap.getPixels(pixels,0,bitmap.width,0,0,bitmap.width,bitmap.height)
+                    val source=com.google.zxing.RGBLuminanceSource(bitmap.width,bitmap.height,pixels)
+                    com.google.zxing.qrcode.QRCodeReader().decode(com.google.zxing.BinaryBitmap(com.google.zxing.common.HybridBinarizer(source))).text
+                } finally { bitmap.recycle() }
+            }
+            runOnUiThread { if(!isDestroyed && !isFinishing) result.fold({ approvePairingInvitation(it) },{ Toast.makeText(this,"QR image could not be read",Toast.LENGTH_LONG).show() }) }
+        }.start()
     }
     private fun deviceTransferGuide() {
         android.app.AlertDialog.Builder(this).setTitle("Move your library to another device").setMessage("1. Export a password-encrypted history backup.\n2. Export personal settings separately.\n3. Transfer both files using your preferred private file-sharing method.\n4. Restore them on the other device.\n\nThis is manual transfer, not live synchronization. Account credentials and upload approvals never transfer. Reconnect Trakt separately.").setNegativeButton("Close",null).setNeutralButton("Export settings") { _,_->startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/octet-stream").putExtra(Intent.EXTRA_TITLE,"traktbridge-settings.tbenc"),65) }.setPositiveButton("Export history") { _,_->startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/octet-stream").putExtra(Intent.EXTRA_TITLE,"traktbridge-history.tbenc"),63) }.show()
@@ -414,6 +463,9 @@ class MainActivity : ComponentActivity() {
         fun label(s: String) { root.addView(txt(s,15,muted)) }
         fun button(s: String, action: () -> Unit) { root.addView(actionButton(s,action)) }
         label("SETTINGS • Account and tracking")
+        button("Show device pairing QR") { showPairingInvitation() }
+        button("Enter pairing invitation and PIN") { approvePairingInvitation() }
+        button("Read pairing QR from image") { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("image/*"),97) }
         button("Discover nearby devices") {
             val status=TextView(this).apply { text="Searching local network…"; setPadding(dp(20),dp(12),dp(20),dp(12)) }
             val scanner=DeviceDiscovery(this) { names -> status.text=if(names.isEmpty()) "No nearby devices found. Open discovery on another device." else names.joinToString("\n") }

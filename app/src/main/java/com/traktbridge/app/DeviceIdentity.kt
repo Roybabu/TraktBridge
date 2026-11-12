@@ -28,6 +28,12 @@ object DeviceIdentity {
         val label = prefs.getString("label", null) ?: Build.MODEL.take(80)
         return Registration(fingerprint(key), label, key)
     }
+    @Synchronized fun sign(context: Context, data: ByteArray): ByteArray {
+        register(context)
+        val store=KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        val key=store.getKey(ALIAS,null) as java.security.PrivateKey
+        return java.security.Signature.getInstance("SHA256withECDSA").run { initSign(key); update(data); sign() }
+    }
     @Synchronized fun rename(context: Context, label: String) {
         val clean = label.trim()
         require(clean.isNotEmpty() && clean.length <= 80 && clean.none { it.isISOControl() })

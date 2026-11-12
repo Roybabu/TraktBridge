@@ -47,6 +47,7 @@ dependencies {
  implementation("androidx.activity:activity-compose:1.10.0")
  implementation("androidx.work:work-runtime-ktx:2.9.1")
  implementation("com.google.mlkit:text-recognition:16.0.1")
+ implementation("com.google.zxing:core:3.5.3")
  testImplementation("junit:junit:4.13.2")
  androidTestImplementation("androidx.test:runner:1.6.2")
  androidTestImplementation("androidx.test:core:1.6.1")
