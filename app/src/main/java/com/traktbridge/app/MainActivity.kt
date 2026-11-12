@@ -2116,42 +2116,35 @@ class MainActivity : ComponentActivity() {
         android.app.AlertDialog.Builder(this).setTitle(g.representative.matchLabel.ifBlank { g.representative.title.ifBlank { "Viewing sessions" } }).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close") { _,_->refreshHistory() }.show()
     }
     private fun recordCard(parent:LinearLayout,r:WatchRecord,expanded:Boolean,completionAlreadyRecorded:Boolean=false) {
-        val card=panel(parent)
-        val row=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=android.view.Gravity.TOP }
-        card.addView(row)
-        val poster=ImageView(this).apply { scaleType=ImageView.ScaleType.CENTER_CROP; setImageResource(android.R.drawable.ic_media_play); setBackgroundColor(0xff343448.toInt()); contentDescription="Poster for "+r.matchLabel.ifBlank { r.title } }
-        row.addView(poster,LinearLayout.LayoutParams(dp(94),dp(141)).apply { rightMargin=dp(14) })
-        if(r.traktId>0) Artwork.load(this,if(r.matchType=="episode") "show" else "movie",if(r.matchType=="episode") r.showId else r.traktId,poster)
-        val details=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
-        row.addView(details,LinearLayout.LayoutParams(0,-2,1f))
-        details.addView(txt(r.matchLabel.ifBlank { r.title.ifBlank { "Unidentified video" } },18,ink,true))
-        if(r.subtitle.isNotBlank()) details.addView(txt(r.subtitle,13,muted))
-        details.addView(txt(appLabel(r.source)+" • "+java.text.DateFormat.getDateInstance().format(java.util.Date(r.started)),13,muted))
         val status=when(r.status) { "synced"->"Synced to Trakt"; "active"->"Watching"; "pending"->"Needs review"; "reviewed"->"Ready to confirm"; "restored_audit"->"Restored audit • no upload"; else->r.status.replaceFirstChar { it.uppercase() } }
-        details.addView(txt(status,13,if(r.status=="synced") BridgeDesign.green else BridgeDesign.warning,true))
-        details.addView(txt(if(r.watched<=0) "Watch time unknown" else durationText(r.watched)+" sampled",13,muted))
-        if(r.status in setOf("pending","reviewed")) { val assessment=completionAssessment(r); details.addView(txt("Completion evidence: "+(assessment.percent?.let { it.toString()+"% • " } ?: "")+assessment.reason,12,muted)) }
-        if(r.seeks>0 || r.bufferingMs>0 || r.pausedMs>0 || r.uncertainMs>0) details.addView(txt("Paused: "+durationText(r.pausedMs)+" • Buffering: "+durationText(r.bufferingMs)+" • Seeks: "+r.seeks+" (rewinds "+r.rewinds+") • Uncertain: "+durationText(r.uncertainMs),12,muted))
-        if(r.duration>0 && r.position>=0) details.addView(ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal).apply { progress=(r.position.toDouble()/r.duration*100).toInt().coerceIn(0,100); progressTintList=android.content.res.ColorStateList.valueOf(violet) })
-        if(!expanded) { card.addView(actionButton("View details") { android.app.AlertDialog.Builder(this).setTitle("Viewing details").setMessage(r.matchLabel.ifBlank { r.title.ifBlank { "Unidentified video" } }+"\n"+r.subtitle).setNegativeButton("Close",null).setPositiveButton("Open history") { _,_->showTab(1) }.show() }); return }
-            if (r.traktId > 0) card.addView(TextView(this).apply { text = "Matched: " + r.matchLabel + " • Trakt ID " + r.traktId })
-            if(r.traktId>0) card.addView(actionButton("Trakt watchlist / rating") { lookup("Checking account",{ done -> TraktLibrary.accountId(this,done) }) { account:String -> remoteActions(RemoteItem(r.matchType,r.traktId,r.matchLabel,r.showId,r.season,r.episode),account) } })
-            if(r.id.startsWith("import:") && r.status=="pending") card.addView(actionButton("Reconcile with local history") { reconcileImported(r) })
-            if (r.status in setOf("pending","reviewed")) card.addView(Button(this).apply { text = if (r.traktId > 0) "Change Trakt match" else "Identify on Trakt"; setOnClickListener { identify(r) } })
-            if (r.traktId > 0 && r.status in setOf("pending","reviewed")) card.addView(Button(this).apply { text = "Remove Trakt match"; setOnClickListener { history.clearMatch(r.id); refreshHistory() } })
-            if (r.status == "reviewed" && r.traktId > 0) card.addView(Button(this).apply { text = if(completionAlreadyRecorded) "Confirm separate rewatch" else "Mark watched on Trakt"; setOnClickListener { approveUpload(r,completionAlreadyRecorded) } })
-            if (r.status in setOf("queued","uncertain","blocked","synced")) card.addView(TextView(this).apply { text = "Sync: " + r.status + " — " + history.syncMessage(r.id) })
-            if (r.status == "blocked") card.addView(Button(this).apply { text = "Retry blocked upload"; setOnClickListener { history.retryBlocked(r.id); HistorySync.schedule(this@MainActivity); refreshHistory() } })
-            if (r.status in setOf("queued","blocked")) card.addView(Button(this).apply { text = "Cancel queued upload"; setOnClickListener { history.cancelQueued(r.id); refreshHistory() } })
-            if (r.status == "uncertain") card.addView(Button(this).apply { text = "Reconcile with Trakt (no resend)"; setOnClickListener { HistorySync.schedule(this@MainActivity); refreshHistory() } })
-            if (r.status == "pending") card.addView(Button(this).apply { text = "Review / edit title"; setOnClickListener {
-                val field = EditText(this@MainActivity).apply { setText(r.title); hint = "Movie or episode title" }
-                android.app.AlertDialog.Builder(this@MainActivity).setTitle("Confirm locally (not synced)").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Save") { _,_ ->
-                    val title = field.text.toString().trim(); if (title.isNotEmpty()) { history.review(r.id,title); ViewingNotifications.cancel(this@MainActivity,r.id); refreshHistory() }
+        val progress=if(r.duration>0 && r.position>=0) (r.position.toDouble()/r.duration*100).toInt().coerceIn(0,100) else null
+        val evidence=buildString {
+            if(r.status in setOf("pending","reviewed")) { val a=completionAssessment(r); append("Completion evidence: "+(a.percent?.let { it.toString()+"% • " } ?: "")+a.reason) }
+            if(r.seeks>0 || r.bufferingMs>0 || r.pausedMs>0 || r.uncertainMs>0) append("\nPaused: "+durationText(r.pausedMs)+" • Buffering: "+durationText(r.bufferingMs)+" • Seeks: "+r.seeks+" (rewinds "+r.rewinds+") • Uncertain: "+durationText(r.uncertainMs))
+            if(expanded && r.traktId>0) append("\nMatched: "+r.matchLabel+" • Trakt ID "+r.traktId)
+            if(expanded && r.status in setOf("queued","uncertain","blocked","synced")) append("\nSync: "+r.status+" — "+history.syncMessage(r.id))
+        }
+        val row=TitleUi(r.matchLabel.ifBlank { r.title.ifBlank { "Unidentified video" } },r.subtitle.ifBlank { appLabel(r.source) },appLabel(r.source)+" • "+java.text.DateFormat.getDateInstance().format(java.util.Date(r.started)),status,if(r.watched<=0) "Watch time unknown" else durationText(r.watched)+" sampled",progress,if(progress!=null) durationText(r.position)+" / "+durationText(r.duration) else "",evidence,if(r.matchType=="episode") "show" else "movie",if(r.matchType=="episode") r.showId else r.traktId)
+        val actions=mutableListOf<UiAction>()
+        if(!expanded) actions.add(UiAction("View details") { android.app.AlertDialog.Builder(this).setTitle("Viewing details").setMessage(r.matchLabel.ifBlank { r.title.ifBlank { "Unidentified video" } }+"\n"+r.subtitle).setNegativeButton("Close",null).setPositiveButton("Open history") { _,_->showTab(1) }.show() })
+        else {
+            if(r.traktId>0) actions.add(UiAction("Trakt watchlist / rating") { lookup("Checking account",{ done -> TraktLibrary.accountId(this,done) }) { account:String -> remoteActions(RemoteItem(r.matchType,r.traktId,r.matchLabel,r.showId,r.season,r.episode),account) } })
+            if(r.id.startsWith("import:") && r.status=="pending") actions.add(UiAction("Reconcile with local history") { reconcileImported(r) })
+            if(r.status in setOf("pending","reviewed")) actions.add(UiAction(if(r.traktId>0) "Change Trakt match" else "Identify on Trakt") { identify(r) })
+            if(r.traktId>0 && r.status in setOf("pending","reviewed")) actions.add(UiAction("Remove Trakt match") { history.clearMatch(r.id); refreshHistory() })
+            if(r.status=="reviewed" && r.traktId>0) actions.add(UiAction(if(completionAlreadyRecorded) "Confirm separate rewatch" else "Mark watched on Trakt") { approveUpload(r,completionAlreadyRecorded) })
+            if(r.status=="blocked") actions.add(UiAction("Retry blocked upload") { history.retryBlocked(r.id); HistorySync.schedule(this); refreshHistory() })
+            if(r.status in setOf("queued","blocked")) actions.add(UiAction("Cancel queued upload") { history.cancelQueued(r.id); refreshHistory() })
+            if(r.status=="uncertain") actions.add(UiAction("Reconcile with Trakt (no resend)") { HistorySync.schedule(this); refreshHistory() })
+            if(r.status=="pending") actions.add(UiAction("Review / edit title") {
+                val field=EditText(this).apply { setText(r.title); hint="Movie or episode title" }
+                android.app.AlertDialog.Builder(this).setTitle("Confirm locally (not synced)").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Save") { _,_->
+                    val title=field.text.toString().trim(); if(title.isNotEmpty()) { history.review(r.id,title); ViewingNotifications.cancel(this,r.id); refreshHistory() }
                 }.show()
-            } })
-            if (r.status in setOf("pending","reviewed")) card.addView(Button(this).apply { text = "Delete viewing record"; setOnClickListener { android.app.AlertDialog.Builder(this@MainActivity).setTitle("Delete this local record?").setNegativeButton("Cancel",null).setPositiveButton("Delete") { _,_ -> history.trash(r.id); ViewingNotifications.cancel(this@MainActivity,r.id); refreshHistory() }.show() } })
-
+            })
+            if(r.status in setOf("pending","reviewed")) actions.add(UiAction("Delete viewing record") { android.app.AlertDialog.Builder(this).setTitle("Delete this local record?").setNegativeButton("Cancel",null).setPositiveButton("Delete") { _,_-> history.trash(r.id); ViewingNotifications.cancel(this,r.id); refreshHistory() }.show() })
+        }
+        parent.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeTitleCard(violet,row,actions) } })
     }
     private fun appLabel(pkg: String): String = mapOf("server.plex" to "Plex server","server.jellyfin" to "Jellyfin server","server.emby" to "Emby server","server.kodi" to "Kodi server")[pkg] ?: apps.entries.firstOrNull { it.value == pkg }?.key ?: runCatching {
         packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg,0)).toString()
