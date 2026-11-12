@@ -15,7 +15,7 @@ class TrackingService: Service() {
             val now=System.currentTimeMillis()
             val last=prefs.getLong("last_sample",0)
             val tick=SystemClock.elapsedRealtime()
-            if((last==0L || now-last>20000 || now<last) && tick-lastRebind>=60000L) {
+            if(TrackingHealthPolicy.shouldRebind(now,last,tick,lastRebind)) {
                 lastRebind=tick
                 DebugTrace.event("foreground","listener stale; requesting rebind")
                 runCatching { android.service.notification.NotificationListenerService.requestRebind(ComponentName(this@TrackingService,PlaybackListener::class.java)) }
@@ -35,7 +35,9 @@ class TrackingService: Service() {
         val open=PendingIntent.getActivity(this,0,Intent(this,MainActivity::class.java),PendingIntent.FLAG_IMMUTABLE)
         val stop=PendingIntent.getService(this,1,Intent(this,TrackingService::class.java).setAction("stop"),PendingIntent.FLAG_IMMUTABLE)
         val n=Notification.Builder(this,"tracking").setSmallIcon(android.R.drawable.ic_media_play).setContentTitle("TraktBridge tracking active").setContentText("Selected video apps • tap to open").setContentIntent(open).setOngoing(true).addAction(Notification.Action.Builder(null,"Stop tracking",stop).build()).build()
-        if(Build.VERSION.SDK_INT>=34) startForeground(721,n,ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE) else startForeground(721,n)
+        try { if(Build.VERSION.SDK_INT>=34) startForeground(721,n,ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE) else startForeground(721,n) } catch(e:Exception) {
+            DebugTrace.failure("foreground-start",e); prefs.edit().putBoolean("foreground_running",false).putString("sample_error","Foreground start failed").apply(); handler.removeCallbacks(heartbeat); stopSelf(); return START_NOT_STICKY
+        }
         prefs.edit().putBoolean("foreground_running",true).apply()
         DebugTrace.event("foreground","started")
         handler.removeCallbacks(heartbeat); handler.post(heartbeat)

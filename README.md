@@ -113,3 +113,6 @@ Mood discovery offers six mood presets, movie/show selection, runtime and rating
 
 ## v0.85.0 development scope
 Interactive platform filters, monthly annual recap bars and calendar drill-downs are available. History dashboard queries and grouping run off the UI thread with cancellation and stale-result checks; database failures show a retry and integrity action. Annual totals exclude active sessions and duplicate IDs. Journal rendering is bounded; original history is unchanged. Physical-device startup benchmarks and end-to-end recovery testing remain outstanding. Version 0.85.0 is a release candidate subject to CI and device validation.
+
+## v0.86.0 development scope
+Regional where-to-watch lookup opens exact Trakt IDs or a user-selected country/title search on JustWatch; it does not assert live availability or subscription entitlement. Foreground startup failures and listener lifecycle cleanup are handled without deleting history. Device background-service soak testing and live provider validation remain pending.

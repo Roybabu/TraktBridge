@@ -797,6 +797,19 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+    private fun streamingAvailability(type:String,id:Long,title:String) {
+        val initial=prefs.getString("availability_region",java.util.Locale.getDefault().country).orEmpty()
+        val field=EditText(this).apply { hint="Country code, e.g. IN, AE, US"; setSingleLine(true); setText(initial) }
+        android.app.AlertDialog.Builder(this).setTitle("Where to watch").setMessage("Choose your country. JustWatch searches by title; Trakt opens the exact catalogue ID. Availability, pricing and subscriptions must be verified on the destination site.").setView(field).setNegativeButton("Cancel",null).setNeutralButton("Trakt") { _,_->openTraktWatchPage(type,id) }.setPositiveButton("Search JustWatch") { _,_->
+            val region=StreamingAvailability.region(field.text.toString())
+            val url=region?.let { StreamingAvailability.search(title,it) }
+            if(url==null) Toast.makeText(this,"Enter a valid two-letter country code and title.",Toast.LENGTH_LONG).show()
+            else {
+                prefs.edit().putString("availability_region",region).apply()
+                runCatching { startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse(url))) }.onFailure { Toast.makeText(this,"No browser available",Toast.LENGTH_LONG).show() }
+            }
+        }.show()
+    }
     private fun openTraktWatchPage(type:String,id:Long) {
         if(type !in setOf("movie","show") || id<=0) return
         // Resolve only through the official Trakt ID redirect; availability is not asserted.
@@ -1300,7 +1313,7 @@ class MainActivity : ComponentActivity() {
             if(prefs.getBoolean("hide_spoilers",true)) body.addView(actionButton("Reveal synopsis") { android.app.AlertDialog.Builder(this).setTitle(d.title).setMessage(d.overview.ifBlank { "No overview available" }).setPositiveButton("Close",null).show() }) else body.addView(txt(d.overview.ifBlank { "No overview available" },16))
             if(d.released.isNotBlank()) body.addView(txt("Release: "+d.released,13,muted))
             body.addView(actionButton("Cast and directors") { lookup("Loading credits",{ done -> TraktCatalogue.credits(type,id,done) }) { names:List<String> -> android.app.AlertDialog.Builder(this).setTitle("Cast and crew").setMessage(names.joinToString("\n").ifBlank { "No credits returned" }).setPositiveButton("Close",null).show() } })
-            body.addView(actionButton("Check title on Trakt (availability varies by region)") { openTraktWatchPage(type,id) })
+            body.addView(actionButton("Where to watch • regional availability") { streamingAvailability(type,id,d.title.ifBlank { label }) })
             body.addView(actionButton("Watchlist / rating") { lookup("Checking account",{ done -> TraktLibrary.accountId(this,done) }) { account:String -> remoteActions(RemoteItem(type,id,d.title),account) } })
             if(d.trailer.startsWith("https://")) body.addView(actionButton("Open trailer") { runCatching { startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse(d.trailer))) } })
             android.app.AlertDialog.Builder(this).setTitle("Title details").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
