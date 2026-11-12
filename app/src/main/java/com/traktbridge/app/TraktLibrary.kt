@@ -126,6 +126,15 @@ object TraktLibrary {
         }
         saved
     }
+    fun refreshRecentForAccount(context:Context,expectedAccount:String):Int=TraktAuth(context).authorized { token ->
+        val current=account(token)
+        require(current==expectedAccount) { "Account changed" }
+        val response=request(token,"/sync/history?page=1&limit=100")
+        val a=JSONArray(response.text)
+        val rows=(0 until a.length()).mapNotNull { parse(a.getJSONObject(it)) }
+        if(context.getSharedPreferences("tracker",Context.MODE_PRIVATE).getString("auto_refresh_account","")!=current) 0
+        else cacheHistory(context,RemotePage(rows,1,response.pages,current))
+    }
     fun accountId(context:Context,done:(Result<String>)->Unit)=task(context,done) { _,account -> account }
     // Download a bounded page into an account-scoped local cache. Never convert
     // remote watches into sampled playback or approved upload records.

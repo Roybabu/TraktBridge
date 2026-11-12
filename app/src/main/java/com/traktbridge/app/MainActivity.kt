@@ -373,11 +373,12 @@ class MainActivity : Activity() {
         showAuth()
         button("Connect Trakt") { try { startActivity(Intent(Intent.ACTION_VIEW, auth.begin())); showAuth("Complete sign-in in your browser") } catch (_: Exception) { showAuth("Unable to open sign-in") } }
         button("Check Trakt connection") { showAuth("Checking…"); auth.check { showAuth(it) } }
+        button("Daily account history refresh") { configureAccountRefresh() }
         button("Refresh downloaded Trakt history") { lookup("Refreshing up to 2,000 remote watches",{ done -> TraktLibrary.refreshHistory(this,20,done) }) { n:Int -> Toast.makeText(this,n.toString()+" entries downloaded or updated",Toast.LENGTH_LONG).show() } }
         button("Browse public AniList account") { publicAnimeList() }
         button("Trakt account library") { openTraktLibrary() }
         button("Clear downloaded Trakt history") { android.app.AlertDialog.Builder(this).setTitle("Clear remote history cache?").setMessage("Local viewing records and Trakt account history are unchanged.").setNegativeButton("Cancel",null).setPositiveButton("Clear") { _,_->TraktLibrary.clearCache(this) }.show() }
-        button("Disconnect Trakt locally") { auth.disconnect { TraktLibrary.clearCache(this); showAuth(it) } }
+        button("Disconnect Trakt locally") { RemoteRefreshSchedule.disable(this); auth.disconnect { TraktLibrary.clearCache(this); showAuth(it) } }
         label("Uses Trakt but is not endorsed or certified by Trakt.")
         label("Only selected apps are tracked locally. Catalogue search sends only the search text you choose to Trakt. Only explicitly approved completed watches are uploaded.")
         history = WatchHistory(this)
@@ -1167,6 +1168,14 @@ class MainActivity : Activity() {
             }
             android.app.AlertDialog.Builder(this).setTitle(series.title+" • "+if(season==0) "Specials" else "Season "+season).setView(ScrollView(this).apply { addView(body) }).setNegativeButton("Back") { _,_->showSeries(id) }.setPositiveButton("Close") { _,_->refreshHistory() }.show()
         }
+    }
+    private fun configureAccountRefresh() {
+        val enabled=prefs.getString("auto_refresh_account","").orEmpty().isNotBlank()
+        android.app.AlertDialog.Builder(this).setTitle("Daily Trakt history refresh").setMessage("Download the latest 100 remote watches approximately daily while connected. No upload, no sampled watch time added. Currently: "+if(enabled) "enabled" else "disabled").setNegativeButton("Close",null).setNeutralButton("Disable") { _,_->RemoteRefreshSchedule.disable(this); Toast.makeText(this,"Automatic refresh disabled",Toast.LENGTH_SHORT).show() }.setPositiveButton("Enable for connected account") { _,_->
+            lookup("Verifying account",{ done -> TraktLibrary.accountId(this,done) }) { id:String ->
+                RemoteRefreshSchedule.enable(this,id); Toast.makeText(this,"Daily refresh enabled",Toast.LENGTH_LONG).show()
+            }
+        }.show()
     }
     private fun openTraktLibrary() {
         val labels=listOf("Account watch history","Watchlist","Ratings","Saved playback progress","Downloaded history (local cache)")
