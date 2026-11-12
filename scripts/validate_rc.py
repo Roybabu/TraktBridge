@@ -3,8 +3,9 @@ import xml.etree.ElementTree as ET
 
 root = pathlib.Path(__file__).resolve().parents[1]
 props = dict(line.split("=", 1) for line in (root / "version.properties").read_text().splitlines() if "=" in line)
-assert props["VERSION_NAME"] == "0.99.0"
-assert int(props["VERSION_CODE"]) == 111
+parts = [int(p) for p in props["VERSION_NAME"].split(".")]
+assert len(parts) == 3 and parts[0] == 0 and parts[2] == 0 and parts[1] >= 99
+assert int(props["VERSION_CODE"]) == parts[1] + 12
 a = "{http://schemas.android.com/apk/res/android}"
 manifest = ET.parse(root / "app/src/main/AndroidManifest.xml").getroot()
 app = manifest.find("application")

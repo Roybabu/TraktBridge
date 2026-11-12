@@ -155,3 +155,6 @@ User-initiated beta feedback sharing includes app version and Android API level 
 
 ## v0.99.0
 Release candidate security guard validates version metadata, exported components, required binding permissions, disabled Android backup and cleartext policy. Existing build, lint, unit test and signing gates are retained. See docs/RELEASE_CANDIDATE.md for blockers and validation requirements. Not a stable 1.0 release.
+
+## v0.100.0
+Provider-specific metadata weights, retention windows and screen timing policies are applied to selected playback sessions. Unknown providers use conservative fallback; generic player and advertisement labels are rejected. Profiles are heuristic and require physical-device verification; no unsupported player capability is guaranteed.

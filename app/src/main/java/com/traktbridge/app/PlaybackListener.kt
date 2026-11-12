@@ -90,10 +90,11 @@ class PlaybackListener : NotificationListenerService() {
         val keys=selected.map { it.packageName+":"+it.sessionToken.hashCode() }.toSet()
         retained.keys.retainAll(keys)
         selected.forEach { c ->
+            val profile=DetectionProfiles.forPackage(c.packageName)
             val m = c.metadata
             val p = c.playbackState
             DebugTrace.event("media","selected package="+c.packageName+" metadata="+(m!=null)+" titlePresent="+(!m?.getString(MediaMetadata.METADATA_KEY_TITLE).isNullOrBlank() || !m?.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE).isNullOrBlank())+" state="+(p?.state ?: -1)+" positionMs="+(p?.position ?: -1)+" durationMs="+(m?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0))
-            val direct=m?.getString(MediaMetadata.METADATA_KEY_TITLE)?.takeIf { PlayerRules.validTitle(it) } ?: m?.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE).orEmpty()
+            val direct=m?.getString(MediaMetadata.METADATA_KEY_TITLE)?.takeIf { DetectionProfiles.validMetadata(it) } ?: m?.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE)?.takeIf { DetectionProfiles.validMetadata(it) }.orEmpty()
             val now=System.currentTimeMillis()
             val note=mediaTitles[c.packageName]?.takeIf { now-it.first in 0..120000 }?.second.orEmpty()
             val key=c.packageName+":"+c.sessionToken.hashCode()
@@ -106,12 +107,12 @@ class PlaybackListener : NotificationListenerService() {
             }
             val playing=phase==PlaybackPhase.PLAYING
             val hint=if(playing) TitleAccessibility.hint(this,c.packageName,now-120000,now) else null
-            val prior=retained[key]?.takeIf { tick-it.observed in 0..30000 }
+            val prior=retained[key]?.takeIf { tick-it.observed in 0..profile.retentionMs }
             val metaDetail=m?.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE).orEmpty()
             val recognition=RecognitionEngine.fuse(listOfNotNull(
-                Evidence(direct,metaDetail,"media",85),
-                Evidence(note.takeIf { selected.count { other -> other.packageName==c.packageName }==1 }.orEmpty(),"","notification",70),
-                hint?.takeIf { selected.count { other -> other.packageName==c.packageName }==1 }?.let { Evidence(it.first,it.second,"accessibility",65) }
+                Evidence(direct,metaDetail,"media",profile.mediaWeight),
+                Evidence(note.takeIf { DetectionProfiles.validMetadata(it) && selected.count { other -> other.packageName==c.packageName }==1 }.orEmpty(),"","notification",profile.notificationWeight),
+                hint?.takeIf { selected.count { other -> other.packageName==c.packageName }==1 }?.let { Evidence(it.first,it.second,"accessibility",profile.screenWeight) }
             ))
             val safeRecognition=recognition?.takeIf { !it.conflict && it.score>=65 }
             if(recognition?.conflict==true) retained.remove(key)
@@ -122,7 +123,7 @@ class PlaybackListener : NotificationListenerService() {
             if(p?.state in setOf(PlaybackState.STATE_STOPPED,PlaybackState.STATE_NONE,PlaybackState.STATE_ERROR)) retained.remove(key)
             val mediaDuration=m?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L
             val mediaPosition=PlaybackPosition.sanitize(p?.position ?: -1L,mediaDuration)
-            val screen=if(playing && mediaPosition<0 && title.isNotBlank() && selected.count { it.packageName==c.packageName }==1) TitleAccessibility.timing(this,c.packageName,title,now) else null
+            val screen=if(profile.screenTiming && playing && mediaPosition<0 && title.isNotBlank() && selected.count { it.packageName==c.packageName }==1) TitleAccessibility.timing(this,c.packageName,title,now) else null
             val duration=screen?.duration ?: mediaDuration
             val position=screen?.position ?: mediaPosition
             if(playing && p!=null && p.position>=0 && position<0) DebugTrace.event("progress","package="+c.packageName+" rejected position without valid runtime")
