@@ -197,6 +197,19 @@ class WatchHistory(context: Context): SQLiteOpenHelper(context.applicationContex
         require(status in setOf("queued","uncertain","blocked","synced"))
         writableDatabase.update("viewing",ContentValues().apply { put("status",status); put("sync_message",message) },"id=? AND status IN ('queued','uncertain')",arrayOf(id))
     }
+    // Compare the exact approved snapshot so cancel/re-match/re-approve cannot race a worker.
+    private fun approvalArgs(r: WatchRecord, account: String) = arrayOf(r.id,account,r.matchType,r.traktId.toString(),r.ended.toString())
+    private val approvalWhere = "id=? AND sync_account=? AND match_type=? AND trakt_id=? AND ended=?"
+    fun beginApprovedUpload(r: WatchRecord, account: String): Boolean =
+        writableDatabase.update("viewing",ContentValues().apply {
+            put("status","uncertain"); put("sync_message","Upload in progress or outcome unknown")
+        },approvalWhere+" AND status='queued'",approvalArgs(r,account))==1
+    fun updateApprovedState(r: WatchRecord, account: String, expected: String, status: String, message: String): Boolean {
+        require(expected in setOf("queued","uncertain") && status in setOf("queued","uncertain","blocked","synced"))
+        return writableDatabase.update("viewing",ContentValues().apply {
+            put("status",status); put("sync_message",message)
+        },approvalWhere+" AND status=?",approvalArgs(r,account)+expected)==1
+    }
     fun retryBlocked(id: String) {
         writableDatabase.update("viewing",ContentValues().apply { put("status","queued"); put("sync_message","Retry requested") },"id=? AND status='blocked'",arrayOf(id))
     }
