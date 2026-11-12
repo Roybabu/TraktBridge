@@ -348,6 +348,7 @@ class MainActivity : ComponentActivity() {
         button("Personal collections") { collections() }
         button("Favorite titles") { favorites() }
         button("Automation shortcuts") { automationShortcuts() }
+        button("Cancel all episode reminders") { prefs.edit().putBoolean("episode_reminders",false).apply(); EpisodeReminders.cancelAll(this); Toast.makeText(this,"Reminders cancelled",Toast.LENGTH_SHORT).show() }
         button("Guided tracking setup") { setupGuide() }
         root.addView(Switch(this).apply { text="Daily encrypted on-device history backup"; isChecked=prefs.getBoolean("daily_backup",false); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("daily_backup",checked).apply(); LocalBackupVault.schedule(this@MainActivity,checked) } })
         button("Restore daily device backup") { restoreDailyBackup() }
@@ -743,7 +744,15 @@ class MainActivity : ComponentActivity() {
             for(e in rows) {
                 val card=panel(body)
                 val date=java.time.Instant.parse(e.airs).atZone(java.time.ZoneId.systemDefault()).format(java.time.format.DateTimeFormatter.ofPattern("EEE, dd MMM • HH:mm"))
-                card.addView(txt(date,14,violet,true)); card.addView(txt(e.show,18,ink,true)); card.addView(txt("S"+e.season+" E"+e.episode+if(prefs.getBoolean("hide_spoilers",true)) "" else " • "+e.title,14,muted))
+                card.addView(txt(date,14,violet,true)); card.addView(txt(e.show,18,ink,true));
+                val at=java.time.Instant.parse(e.airs).toEpochMilli()
+                if(at>System.currentTimeMillis()) {
+                    card.addView(txt("Airs in "+durationText(at-System.currentTimeMillis()),13,muted))
+                    card.addView(actionButton("Remind me near air time") {
+                        if(android.os.Build.VERSION.SDK_INT>=33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)!=android.content.pm.PackageManager.PERMISSION_GRANTED) { requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),42); Toast.makeText(this,"Grant notifications, then schedule again",Toast.LENGTH_LONG).show() }
+                        else { prefs.edit().putBoolean("episode_reminders",true).apply(); EpisodeReminders.schedule(this,e); Toast.makeText(this,"Reminder scheduled; timing may vary",Toast.LENGTH_LONG).show() }
+                    })
+                }; card.addView(txt("S"+e.season+" E"+e.episode+if(prefs.getBoolean("hide_spoilers",true)) "" else " • "+e.title,14,muted))
             }
             android.app.AlertDialog.Builder(this).setTitle("Upcoming episodes").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
         }
