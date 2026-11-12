@@ -38,7 +38,7 @@ class MainActivity : Activity() {
         showAuth("Connecting to Trakt…")
         auth.complete(uri) { showAuth(it) }
     }
-    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); handleCallback(intent); handleReview(intent); handleShared(intent) }
+    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); handleCallback(intent); handleReview(intent); handleShared(intent); handleTrackingShortcut(intent) }
     override fun onActivityResult(requestCode:Int,resultCode:Int,data:Intent?) {
         super.onActivityResult(requestCode,resultCode,data)
         if(requestCode==57 && resultCode==RESULT_OK) data?.data?.let { inspectVideo(it) }
@@ -369,6 +369,13 @@ class MainActivity : Activity() {
         handleCallback(intent)
         handleReview(intent)
         handleShared(intent)
+        handleTrackingShortcut(intent)
+    }
+    private fun handleTrackingShortcut(intent:Intent) {
+        if(intent.action!="com.traktbridge.app.OPEN_TRACKING") return
+        intent.action=null
+        showTab(4)
+        android.app.AlertDialog.Builder(this).setTitle("Start playback tracking?").setMessage("Track selected video apps in the background.").setNegativeButton("Cancel",null).setPositiveButton("Start") { _,_->prefs.edit().putBoolean("enabled",true).apply(); startTracking(); recreate() }.show()
     }
     private fun startTracking() {
         runCatching {
