@@ -16,8 +16,8 @@ object DeviceHistory {
     private const val MAX_DURATION=604800000L
     private const val RETENTION=90L*86400000
     data class Event(val id:String,val source:String,val title:String,val detail:String,val started:Long,val ended:Long,val watched:Long,val duration:Long,val position:Long)
-    fun enabled(context:Context)=PlaybackSharing.enabled(context) &&
-        context.getSharedPreferences("tracker",Context.MODE_PRIVATE).getBoolean("device_history",false)
+    fun historyConsent(context:Context)=context.getSharedPreferences("tracker",Context.MODE_PRIVATE).getBoolean("device_history",false)
+    fun enabled(context:Context)=PlaybackSharing.enabled(context) && historyConsent(context)
     fun valid(e:Event,now:Long):Boolean=e.id.matches(Regex("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")) &&
         e.source.length in 1..150 && e.title.length in 1..250 && e.title.isNotBlank() && e.detail.length<=200 &&
         e.started>0 && e.ended>=e.started && e.ended in (now-RETENTION)..(now+120000) &&
@@ -68,6 +68,12 @@ object DeviceHistory {
             try {
                 if(!enabled(context) || DevicePairing.peers(context).none { it.id==peer }) return
                 for(e in events.take(LIMIT).filter { valid(it,now) }) {
+                    val existing=db.rawQuery("SELECT event_id,source,title,detail,started,ended,watched,duration,position FROM device_history WHERE peer=? AND event_id=?",arrayOf(peer,e.id)).use { c -> if(c.moveToFirst()) Event(c.getString(0),c.getString(1),c.getString(2),c.getString(3),c.getLong(4),c.getLong(5),c.getLong(6),c.getLong(7),c.getLong(8)) else null }
+                    when(DeviceHistoryConflict.decide(existing,e)) {
+                        DeviceHistoryConflict.Decision.UNCHANGED->continue
+                        DeviceHistoryConflict.Decision.CONFLICT->{ DebugTrace.event("device-history","Conflicting observation ignored"); continue }
+                        DeviceHistoryConflict.Decision.INSERT->Unit
+                    }
                     val values=ContentValues().apply { put("peer",peer); put("event_id",e.id); put("source",e.source); put("title",e.title); put("detail",e.detail); put("started",e.started); put("ended",e.ended); put("watched",e.watched); put("duration",e.duration); put("position",e.position) }
                     db.insertWithOnConflict("device_history",null,values,SQLiteDatabase.CONFLICT_IGNORE)
                 }
@@ -79,7 +85,7 @@ object DeviceHistory {
     }
     data class Item(val peer:String,val event:Event)
     fun visible(context:Context):List<Item> {
-        if(!enabled(context)) return emptyList()
+        if(!historyConsent(context)) return emptyList()
         val allowed=DevicePairing.peers(context).map { it.id }.toSet()
         val helper=WatchHistory(context)
         try {
