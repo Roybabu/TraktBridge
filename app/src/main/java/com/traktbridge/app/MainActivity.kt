@@ -33,6 +33,7 @@ class MainActivity : ComponentActivity() {
     private var historyFilter=HistoryFilter()
     private var historyLimit=100
     private var librarySelection=""
+    private var restoreContentFocus=false
     private var analyticsPeriod=30
     private var analyticsSource=""
     private var calendarMonth=java.time.YearMonth.now()
@@ -431,6 +432,7 @@ class MainActivity : ComponentActivity() {
         DebugTrace.event("activity","main opened")
         tab=(savedInstanceState?.getInt("tab") ?: DashboardPreferences.startTab(prefs.getInt("startup_tab",0))).coerceIn(0,4)
         librarySelection=savedInstanceState?.getString("library_selection").orEmpty()
+        restoreContentFocus=savedInstanceState?.getBoolean("content_focus",false) ?: false
         importSource=savedInstanceState?.getString("import_source") ?: "com.netflix.mediaclient"
         historyFilter=HistoryFilter(savedInstanceState?.getString("filter_q").orEmpty(),savedInstanceState?.getString("filter_source").orEmpty(),savedInstanceState?.getInt("filter_period") ?: 0,savedInstanceState?.getString("filter_type").orEmpty(),savedInstanceState?.getString("filter_status").orEmpty(),savedInstanceState?.getString("filter_sort") ?: "recent")
         analyticsPeriod=savedInstanceState?.getInt("analytics_period") ?: 30
@@ -938,7 +940,7 @@ class MainActivity : ComponentActivity() {
         runCatching { startActivityForResult(intent,96) }.onFailure { privacyPrompt=false; finish() }
     }
     override fun onDestroy() { bridgeModel.cancel(); if (::history.isInitialized) history.close(); super.onDestroy() }
-    override fun onSaveInstanceState(outState: Bundle) { outState.putString("library_selection",librarySelection); outState.putInt("tab",tab); outState.putString("import_source",importSource); outState.putString("filter_q",historyFilter.query); outState.putString("filter_source",historyFilter.source); outState.putInt("filter_period",historyFilter.period); outState.putString("filter_type",historyFilter.type); outState.putString("filter_status",historyFilter.status); outState.putString("filter_sort",historyFilter.sort); outState.putInt("analytics_period",analyticsPeriod); outState.putString("analytics_source",analyticsSource); outState.putString("calendar_month",calendarMonth.toString()); super.onSaveInstanceState(outState) }
+    override fun onSaveInstanceState(outState: Bundle) { outState.putBoolean("content_focus",tvMode && ::nav.isInitialized && !nav.hasFocus()); outState.putString("library_selection",librarySelection); outState.putInt("tab",tab); outState.putString("import_source",importSource); outState.putString("filter_q",historyFilter.query); outState.putString("filter_source",historyFilter.source); outState.putInt("filter_period",historyFilter.period); outState.putString("filter_type",historyFilter.type); outState.putString("filter_status",historyFilter.status); outState.putString("filter_sort",historyFilter.sort); outState.putInt("analytics_period",analyticsPeriod); outState.putString("analytics_source",analyticsSource); outState.putString("calendar_month",calendarMonth.toString()); super.onSaveInstanceState(outState) }
     private fun dp(n:Int)= (n*resources.displayMetrics.density+0.5f).toInt()
     private fun rounded(color:Int,radius:Int=16)=android.graphics.drawable.GradientDrawable().apply { setColor(color); cornerRadius=dp(radius).toFloat() }
     private fun txt(value:String,size:Int=15,color:Int=ink,bold:Boolean=false)=TextView(this).apply {
@@ -966,11 +968,12 @@ class MainActivity : ComponentActivity() {
     }
     private fun showTab(index:Int) {
         if(index !in 0..4) return
+        if(tab!=index) restoreContentFocus=false
         tab=index; bridgeModel.select(index); settingsPage.visibility=if(index==4) android.view.View.VISIBLE else android.view.View.GONE
         contentPage.visibility=if(index==4) android.view.View.GONE else android.view.View.VISIBLE
         if(tvMode) for(i in 0 until nav.childCount) (nav.getChildAt(i) as TextView).apply { setTextColor(if(i==index) violet else muted); background=TvFocus.background(this@MainActivity,if(i==index) 0xff302a48.toInt() else surface,violet,i==index); isSelected=i==index }
         refreshHistory(); contentPage.scrollTo(0,0)
-        if(tvMode && index==4 && !nav.hasFocus()) TvFocus.firstContent(settingsPage)
+        if(tvMode && index==4 && (!nav.hasFocus() || restoreContentFocus)) { settingsPage.post { if(tab==4) TvFocus.firstContent(settingsPage) }; restoreContentFocus=false }
     }
     private fun emptyState(parent:LinearLayout,title:String,detail:String,label:String,action:()->Unit) {
         parent.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeEmptyState(violet,title,detail,label,action) } })
@@ -980,9 +983,10 @@ class MainActivity : ComponentActivity() {
         val selectedTab=tab
         dashboard.removeAllViews()
         dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeLoading(violet) } })
+        if(tvMode && contentPage.hasFocus()) restoreContentFocus=true
         bridgeModel.load { result ->
             if(isDestroyed || isFinishing || tab!=selectedTab) return@load
-            result.fold({ snapshot -> renderHistory(snapshot.records,snapshot.groups) }, {
+            result.fold({ snapshot -> renderHistory(snapshot.records,snapshot.groups); if(tvMode && restoreContentFocus) { restoreContentFocus=false; contentPage.post { if(tab==selectedTab) TvFocus.firstContent(contentPage) } } }, {
                 dashboard.removeAllViews()
                 emptyState(dashboard,"History unavailable","Existing viewing data has not been cleared.","Retry") { refreshHistory() }
                 dashboard.addView(actionButton("Check database integrity") { checkHistoryIntegrity() })
