@@ -1,0 +1,59 @@
+package com.traktbridge.app
+
+import android.content.Context
+import androidx.work.Worker
+import androidx.work.WorkerParameters
+import androidx.work.WorkManager
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.ExistingPeriodicWorkPolicy
+import java.util.concurrent.TimeUnit
+import java.io.File
+import java.io.FileOutputStream
+import java.security.KeyStore
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.Cipher
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
+import javax.crypto.spec.GCMParameterSpec
+
+object LocalBackupVault {
+    private const val ALIAS="traktbridge-local-backup-v1"
+    private fun key():SecretKey {
+        val ks=KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        (ks.getKey(ALIAS,null) as? SecretKey)?.let { return it }
+        return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES,"AndroidKeyStore").apply {
+            init(KeyGenParameterSpec.Builder(ALIAS,KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT).setKeySize(256).setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).build())
+        }.generateKey()
+    }
+    private fun file(context:Context)=File(context.filesDir,"local-history-backup.enc")
+    @Synchronized fun save(context:Context) {
+        val json=WatchHistory(context).use { HistoryBackup.snapshot(it).toString() }
+        require(json.length<=HistoryBackup.MAX_CHARS)
+        val cipher=Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE,key()) }
+        val data=cipher.iv+cipher.doFinal(json.toByteArray(Charsets.UTF_8))
+        val atomic=android.util.AtomicFile(file(context))
+        val stream=atomic.startWrite()
+        try { stream.write(data); atomic.finishWrite(stream) } catch(e:Exception) { atomic.failWrite(stream); throw e }
+    }
+    @Synchronized fun read(context:Context):String {
+        val f=file(context)
+        require(f.length() in 29..EncryptedBackup.MAX_BYTES.toLong())
+        val data=android.util.AtomicFile(f).readFully()
+        val cipher=Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.DECRYPT_MODE,key(),GCMParameterSpec(128,data.copyOfRange(0,12))) }
+        return String(cipher.doFinal(data.copyOfRange(12,data.size)),Charsets.UTF_8)
+    }
+    fun exists(context:Context)=file(context).exists()
+    @Synchronized fun delete(context:Context) { android.util.AtomicFile(file(context)).delete() }
+    fun schedule(context:Context,enable:Boolean) {
+        val wm=WorkManager.getInstance(context)
+        if(enable) wm.enqueueUniquePeriodicWork("local-history-backup",ExistingPeriodicWorkPolicy.KEEP,PeriodicWorkRequestBuilder<LocalBackupWorker>(24,TimeUnit.HOURS).build())
+        else wm.cancelUniqueWork("local-history-backup")
+    }
+}
+class LocalBackupWorker(context:Context,params:WorkerParameters):Worker(context,params) {
+    override fun doWork():Result {
+        if(!applicationContext.getSharedPreferences("tracker",Context.MODE_PRIVATE).getBoolean("daily_backup",false)) return Result.success()
+        return try { LocalBackupVault.save(applicationContext); Result.success() } catch(_:Exception) { Result.retry() }
+    }
+}

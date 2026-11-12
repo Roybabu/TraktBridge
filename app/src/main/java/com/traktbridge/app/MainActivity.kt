@@ -47,6 +47,15 @@ class MainActivity : Activity() {
         if(resultCode==RESULT_OK && requestCode in 63..64) data?.data?.let { encryptedTransfer(requestCode,it) }
         if(resultCode==RESULT_OK && requestCode in 60..62) data?.data?.let { historyTransfer(requestCode,it) }
     }
+    private fun restoreDailyBackup() {
+        if(!LocalBackupVault.exists(this)) { Toast.makeText(this,"No daily backup yet",Toast.LENGTH_LONG).show(); return }
+        android.app.AlertDialog.Builder(this).setTitle("Restore daily device backup?").setMessage("Existing IDs are skipped. No sync approval is restored.").setNegativeButton("Cancel",null).setPositiveButton("Merge") { _,_->
+            Thread {
+                val result=runCatching { val rows=HistoryBackup.parse(LocalBackupVault.read(applicationContext)); WatchHistory(applicationContext).use { HistoryBackup.merge(it,rows) } }
+                runOnUiThread { if(!isDestroyed && !isFinishing) { Toast.makeText(this,result.fold({ it.first.toString()+" restored • "+it.second+" skipped" },{ "Restore failed" }),Toast.LENGTH_LONG).show(); refreshHistory() } }
+            }.start()
+        }.show()
+    }
     private fun encryptedTransfer(code:Int,uri:android.net.Uri) {
         val field=EditText(this).apply { hint="Backup password (10+ characters)"; inputType=android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD }
         android.app.AlertDialog.Builder(this).setTitle(if(code==63) "Encrypt history backup" else "Unlock history backup").setMessage("Keep the password safely. Lost passwords cannot be recovered. This backup contains viewing history only.").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Continue") { _,_->
@@ -332,6 +341,9 @@ class MainActivity : Activity() {
         button("Personal collections") { collections() }
         button("Favorite titles") { favorites() }
         button("Guided tracking setup") { setupGuide() }
+        root.addView(Switch(this).apply { text="Daily encrypted on-device history backup"; isChecked=prefs.getBoolean("daily_backup",false); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("daily_backup",checked).apply(); LocalBackupVault.schedule(this@MainActivity,checked) } })
+        button("Restore daily device backup") { restoreDailyBackup() }
+        button("Delete daily device backup") { LocalBackupVault.delete(this); Toast.makeText(this,"Device backup deleted",Toast.LENGTH_SHORT).show() }
         button("Encrypted history backup") { startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/octet-stream").putExtra(Intent.EXTRA_TITLE,"traktbridge-history.tbenc"),63) }
         button("Restore encrypted backup") { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*"),64) }
         button("Back up viewing history (JSON)") { pickBackup(60) }
