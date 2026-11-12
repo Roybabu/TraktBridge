@@ -215,3 +215,6 @@ Dependency audit resolves debug and release runtime Maven coordinates, checks kn
 
 ## v0.119.0
 Android instrumentation smoke tests cover activity launch/recreation and local database integrity/backup round-trip. CI emulator matrix targets API 26 and 35 and retains reports. Physical-device playback, TV navigation, OEM behavior and prolonged endurance are still manual validation requirements. No test pass is claimed until CI completes.
+
+## v0.120.0
+Final extended pre-stable release candidate with updated validation checklist and automated workflow presence checks. Corrects uncertain-only queue selection so reconciliation prioritization actually applies. Existing signing gates remain unchanged. Full SQLite encryption, physical-device testing, independent audit and other documented roadmap gaps remain stable-release blockers. CI results must be verified for this exact commit.

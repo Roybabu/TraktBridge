@@ -6,6 +6,11 @@ props = dict(line.split("=", 1) for line in (root / "version.properties").read_t
 parts = [int(p) for p in props["VERSION_NAME"].split(".")]
 assert len(parts) == 3 and parts[0] == 0 and parts[2] == 0 and parts[1] >= 99
 assert int(props["VERSION_CODE"]) == parts[1] + 12
+if parts[1] >= 120:
+    for required in ("dependency-audit.yml", "android-device-tests.yml", "android.yml"):
+        assert (root / ".github/workflows" / required).is_file(), required
+    assert (root / "scripts/scan_dependencies.py").is_file()
+    assert (root / "app/src/androidTest/java/com/traktbridge/app/DeviceSmokeTest.kt").is_file()
 a = "{http://schemas.android.com/apk/res/android}"
 manifest = ET.parse(root / "app/src/main/AndroidManifest.xml").getroot()
 app = manifest.find("application")
