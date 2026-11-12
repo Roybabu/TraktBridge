@@ -416,6 +416,7 @@ class MainActivity : ComponentActivity() {
         label("SETTINGS • Account and tracking")
         root.addView(Switch(this).apply { text="Download artwork only on unmetered networks"; isChecked=prefs.getBoolean("artwork_unmetered",false); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("artwork_unmetered",checked).apply() } })
         button("Clear offline catalogue") { getSharedPreferences("offline_catalogue",MODE_PRIVATE).edit().clear().apply() }
+        button("Clear cached artwork") { Artwork.clear(this); Toast.makeText(this,"Artwork cache cleanup requested",Toast.LENGTH_SHORT).show() }
         button("Check for app updates") { checkUpdates() }
         button("Beta feedback and diagnostics") { betaFeedback() }
         root.addView(Switch(this).apply { text="Hide catalogue spoilers"; isChecked=prefs.getBoolean("hide_spoilers",true); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("hide_spoilers",checked).apply() } })
@@ -978,7 +979,8 @@ class MainActivity : ComponentActivity() {
                 val items=if(tab==1) ViewingAnalytics.sort(ViewingGroups.build(ViewingAnalytics.filter(records,historyFilter)),historyFilter.sort) else groups.filter { it.queued || it.pending }
                 if(items.isEmpty()) panel(dashboard).addView(txt(if(tab==1) "No viewing records yet." else "You're all caught up.",16,muted))
                 val visible=items.take(historyLimit)
-                if(items.size>visible.size) dashboard.addView(actionButton("Show more ("+visible.size+" of "+items.size+")") { historyLimit+=100; refreshHistory() })
+                if(items.size>visible.size && historyLimit<1000) dashboard.addView(actionButton("Show more ("+visible.size+" of "+items.size+")") { historyLimit=ResourcePolicy.nextPage(historyLimit); refreshHistory() })
+                else if(items.size>visible.size) dashboard.addView(txt("Showing first 1000 titles. Use filters to narrow the remaining history.",13,muted))
                 if(tab==1) {
                     val series=SeriesLibrary.build(visible)
                     if(series.isNotEmpty()) { section(dashboard,"Series and anime"); cards(dashboard,series) { parent,item -> seriesCard(parent,item) } }

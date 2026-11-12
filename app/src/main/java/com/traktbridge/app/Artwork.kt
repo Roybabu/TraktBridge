@@ -21,6 +21,15 @@ object Artwork {
         val sample=ArtworkSizing.sample(bounds.outWidth,bounds.outHeight)
         return BitmapFactory.decodeFile(file.path,BitmapFactory.Options().apply { inSampleSize=sample })
     }
+    @Synchronized private fun prune(dir:File) {
+        val files=dir.listFiles()?.filter { it.extension=="webp" }?.sortedByDescending { it.lastModified() }.orEmpty()
+        val remove=ResourcePolicy.evictions(files.map { it.name to it.length() })
+        files.filter { it.name in remove }.forEach { it.delete() }
+    }
+    fun clear(context:Context) {
+        val dir=File(context.cacheDir,"artwork")
+        worker.execute { synchronized(this) { dir.listFiles()?.filter { it.extension=="webp" }?.forEach { it.delete() } } }
+    }
     fun load(context:Context,type:String,id:Long,view:ImageView) {
         if(id<=0 || type !in setOf("movie","show")) return
         val key=type+"-"+id
@@ -63,7 +72,7 @@ object Artwork {
                             val bounds=BitmapFactory.Options().apply { inJustDecodeBounds=true }; BitmapFactory.decodeFile(temp.path,bounds)
                             require(bounds.outWidth in 1..4096 && bounds.outHeight in 1..4096 && bounds.outWidth.toLong()*bounds.outHeight<=8000000)
                             check(temp.renameTo(file))
-                            dir.listFiles()?.filter { it.extension=="webp" }?.sortedByDescending { it.lastModified() }?.drop(100)?.forEach { it.delete() }
+                            prune(dir)
                         } finally { image.disconnect(); temp.delete() }
                     }
                 }

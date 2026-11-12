@@ -206,3 +206,6 @@ Encryption migration readiness checks and encrypted recovery export entry point.
 
 ## v0.116.0
 Prioritized reconciliation of uncertain uploads, bounded queue processing, recovery status dialog and explicit retry action. Uncertain writes are never automatically resent. This is local durable queue recovery, not a new cross-device synchronization backend.
+
+## v0.117.0
+Artwork cache bounded by 32 MiB and 100 files, manual artwork cleanup, power-saver idle polling, and bounded history rendering. Active playback polling remains unchanged. Real battery, CPU and memory profiling remains outstanding.
