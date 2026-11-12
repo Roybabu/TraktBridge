@@ -1587,16 +1587,19 @@ class MainActivity : ComponentActivity() {
             val (entry,row)=choices[index]
             val source=row.optString("package")
             val packages=PlaybackHandoff.packages(source).let { if(tvMode) it else it.reversed() }
-            val link=PlaybackHandoff.link(source,row.optString("contentId"),row.optLong("positionMs",-1))
             val position=row.optLong("positionMs",-1)
             val detail=row.optString("title")+"\n"+row.optString("subtitle")+"\n"+if(position>=0) "Resume near "+durationText(position) else "Resume position unavailable"
             val builder=android.app.AlertDialog.Builder(this).setTitle("Continue on this device").setMessage(detail+"\n\nThe player may require you to find the title or seek manually. The source device keeps playing unless you pause it.")
                 .setNegativeButton("Cancel",null).setPositiveButton("Open player") { _,_->
-                    if(RemotePlayback.visible(this).none { it.device.id==entry.device.id }) { Toast.makeText(this,"Playback observation expired",Toast.LENGTH_LONG).show() }
+                    val fresh=RemotePlayback.visible(this).firstOrNull { it.device.id==entry.device.id }
+                    val current=fresh?.let { e -> (0 until e.rows.length()).mapNotNull { e.rows.optJSONObject(it) }.firstOrNull { candidate -> HandoffPolicy.sameSession(row.optString("sessionId"),candidate.optString("sessionId"),row.optString("title"),candidate.optString("title"),row.optString("subtitle"),candidate.optString("subtitle"),source,candidate.optString("package")) } }
+                    if(current==null) { Toast.makeText(this,"Playback changed or expired. Select the session again.",Toast.LENGTH_LONG).show() }
                     else {
+                        val currentPosition=HandoffPolicy.estimatedPosition(current.optLong("positionMs",-1),current.optLong("durationMs",0),current.optInt("state"),android.os.SystemClock.elapsedRealtime()-requireNotNull(fresh).received)
+                        val currentLink=PlaybackHandoff.link(source,current.optString("contentId"),currentPosition)
                         val launch=packages.firstNotNullOfOrNull { pkg ->
-                            if(link!=null) {
-                                val direct=Intent(Intent.ACTION_VIEW,android.net.Uri.parse(link)).setPackage(pkg)
+                            if(currentLink!=null) {
+                                val direct=Intent(Intent.ACTION_VIEW,android.net.Uri.parse(currentLink)).setPackage(pkg)
                                 if(direct.resolveActivity(packageManager)!=null) direct else null
                             } else null
                         } ?: packages.firstNotNullOfOrNull { pkg -> (if(tvMode) packageManager.getLeanbackLaunchIntentForPackage(pkg) else null) ?: packageManager.getLaunchIntentForPackage(pkg) }
