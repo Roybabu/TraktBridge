@@ -125,6 +125,10 @@ class PlaybackListener : NotificationListenerService() {
                 put("durationMs", duration)
                 put("positionMs", position)
                 put("state", p?.state ?: 0)
+                put("output",when(c.playbackInfo?.playbackType) { android.media.session.MediaController.PlaybackInfo.PLAYBACK_TYPE_REMOTE -> "remote"; android.media.session.MediaController.PlaybackInfo.PLAYBACK_TYPE_LOCAL -> "local"; else -> "unknown" })
+                put("recognitionScore",recognition?.score ?: 0)
+                put("recognitionConflict",recognition?.conflict ?: false)
+                put("positionSource",if(screen!=null) "screen" else if(mediaPosition>=0) "media" else "unknown")
                 put("sampledAt", System.currentTimeMillis())
             })
         }

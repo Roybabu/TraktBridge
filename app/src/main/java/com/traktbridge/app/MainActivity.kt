@@ -342,6 +342,7 @@ class MainActivity : Activity() {
         button("Connect media servers") { serverSettings() }
         root.addView(Switch(this).apply { text="Automatically reuse confirmed local title mappings"; isChecked=prefs.getBoolean("learned_auto",false); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("learned_auto",checked).apply() } })
         button("Clear learned title mappings") { android.app.AlertDialog.Builder(this).setTitle("Clear learned mappings?").setMessage("Existing viewing history and Trakt matches stay unchanged.").setNegativeButton("Cancel",null).setPositiveButton("Clear") { _,_->history.clearLearning() }.show() }
+        label("Remote playback is recognized when Android exposes a media session. Picture-in-picture can continue tracking through the same session; unsupported casts cannot be observed directly.")
         button("Live recognition inspector") { liveInspector() }
         button("Open diagnostic recorder") { startActivity(Intent(this,DebugActivity::class.java)) }
         auth = TraktAuth(applicationContext)
