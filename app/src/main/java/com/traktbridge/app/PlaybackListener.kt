@@ -109,8 +109,10 @@ class PlaybackListener : NotificationListenerService() {
                 Evidence(note,"","notification",70),
                 hint?.let { Evidence(it.first,it.second,"accessibility",65) }
             ))
-            val title=recognition?.title ?: prior?.first.orEmpty()
-            val subtitle=recognition?.detail?.takeIf { it.isNotBlank() } ?: prior?.takeIf { it.first==title }?.second.orEmpty()
+            val safeRecognition=recognition?.takeIf { !it.conflict && it.score>=65 }
+            if(recognition?.conflict==true) retained.remove(key)
+            val title=if(recognition?.conflict==true) "" else safeRecognition?.title ?: prior?.first.orEmpty()
+            val subtitle=if(recognition?.conflict==true) "" else safeRecognition?.detail?.takeIf { it.isNotBlank() } ?: prior?.takeIf { it.first==title }?.second.orEmpty()
             if(playing && recognition!=null) DebugTrace.event("recognition","package="+c.packageName+" score="+recognition.score+" sources="+recognition.sources.joinToString(",")+" conflict="+recognition.conflict)
             if(playing && title.isNotBlank()) retained[key]=title to subtitle
             if(p?.state in setOf(PlaybackState.STATE_STOPPED,PlaybackState.STATE_NONE,PlaybackState.STATE_ERROR)) retained.remove(key)
