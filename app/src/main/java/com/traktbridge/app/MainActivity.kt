@@ -342,6 +342,7 @@ class MainActivity : ComponentActivity() {
         button("Franchise viewing guides") { franchises() }
         button("Recently deleted viewing") { recentlyDeleted() }
         button("Share or import collections") { shareCollections() }
+        button("Smart collections") { smartCollections() }
         button("Personal collections") { collections() }
         button("Favorite titles") { favorites() }
         button("Automation shortcuts") { automationShortcuts() }
@@ -483,6 +484,24 @@ class MainActivity : ComponentActivity() {
                     },{ Toast.makeText(this,"Invalid collection format",Toast.LENGTH_LONG).show() })
                 }.show()
             }
+        }
+    }
+    private fun smartCollections() {
+        val groups=ViewingGroups.build(history.records(0))
+        val choices=listOf("Unfinished viewing","Movies under 90 minutes","Favorites","Most watched","Needs identification","Rewatched titles")
+        choose("Smart collections",choices) { index ->
+            val rows=when(index) {
+                0->SeriesLibrary.continueWatching(groups)
+                1->groups.filter { it.representative.matchType=="movie" && it.durationMs in 1..5400000 }
+                2->groups.filter { val r=it.representative; r.traktId>0 && isFavorite(r.matchType,r.traktId) }
+                3->groups.sortedByDescending { it.sampledMs }
+                4->groups.filter { it.representative.traktId<=0 }
+                else->groups.filter { it.sessions.count { r->r.status=="synced" }>1 }
+            }
+            val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
+            body.addView(txt(rows.size.toString()+" titles • first 50 shown",14,muted))
+            rows.take(50).forEach { titleCard(body,it,false) }
+            android.app.AlertDialog.Builder(this).setTitle(choices[index]).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
         }
     }
     private fun collections() {
