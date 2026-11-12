@@ -603,6 +603,7 @@ class MainActivity : ComponentActivity() {
                 if(continuing.isEmpty()) panel(dashboard).addView(txt("No unfinished sampled viewing yet.",15,muted)) else cards(dashboard,continuing.drop(1).take(6)) { parent,g -> titleCard(parent,g,false) }
                 section(dashboard,"Review queue")
                 val q=panel(dashboard); q.addView(txt("$pending awaiting action",22,ink,true)); q.addView(actionButton("Open review queue") { showTab(2) }); q.addView(actionButton("Review app activity") { reviewUsage() })
+                dashboard.addView(actionButton("Ask your viewing assistant") { localAssistant() })
                 dashboard.addView(actionButton("Upcoming episodes") { upcomingEpisodes() })
                 dashboard.addView(actionButton("Recommendations from your history") { recommendFromHistory() })
                 dashboard.addView(actionButton("Anime catalogue (AniList)") { animeSearch() })
@@ -854,6 +855,25 @@ class MainActivity : ComponentActivity() {
             "manual" -> manualLog()
             "tracking" -> showTab(4)
         }
+    }
+    private fun localAssistant() {
+        val field=EditText(this).apply { hint="Try: unfinished movies or 90 minutes"; setSingleLine(true) }
+        android.app.AlertDialog.Builder(this).setTitle("Viewing assistant").setMessage("Local command matching, not a remote AI service. Supports watch history, time budgets, unfinished titles and subscription summaries.").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Find") { _,_->
+            val q=LocalAssistant.parse(field.text.toString())
+            when(q.action) {
+                "subscriptions"->subscriptions()
+                "recommend"->recommendFromHistory()
+                "history"->{ historyFilter=HistoryFilter(period=q.days); historyLimit=100; showTab(1) }
+                "unfinished","budget"->{
+                    val rows=SeriesLibrary.continueWatching(ViewingGroups.build(history.records(0))).filter { q.action!="budget" || it.remainingMs in 1..(q.minutes*60000L) }
+                    val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
+                    if(rows.isEmpty()) body.addView(txt("No matching unfinished viewing with available progress.",14,muted))
+                    rows.take(30).forEach { titleCard(body,it,false) }
+                    android.app.AlertDialog.Builder(this).setTitle("Your viewing matches").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
+                }
+                else->universalSearch()
+            }
+        }.show()
     }
     private fun universalSearch() {
         val field=EditText(this).apply { hint="Movie, show or anime title"; setSingleLine(true) }
