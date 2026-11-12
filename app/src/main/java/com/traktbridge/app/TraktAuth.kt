@@ -83,8 +83,11 @@ class TraktAuth(context: Context) {
         } ?: return@task "Sign-in expired or state mismatch. Connect again."
         if (uri.getQueryParameter("error") != null) return@task "Trakt authorization cancelled or denied."
         val code = uri.getQueryParameter("code") ?: return@task "Missing authorization code."
-        val response = token(mapOf("grant_type" to "authorization_code", "code" to code, "client_id" to CLIENT_ID, "redirect_uri" to REDIRECT, "code_verifier" to pending.getString("verifier")))
-        synchronized(lock) { saveTokens(response) }
+        synchronized(lock) {
+            if(prefs.contains("pending")) return@task "A newer sign-in is pending. Complete that sign-in instead."
+            val response = token(mapOf("grant_type" to "authorization_code", "code" to code, "client_id" to CLIENT_ID, "redirect_uri" to REDIRECT, "code_verifier" to pending.getString("verifier")))
+            saveTokens(response)
+        }
         "Trakt connected. Use Check Trakt connection to verify."
     }
     private fun saveTokens(response: JSONObject) {
@@ -117,7 +120,7 @@ class TraktAuth(context: Context) {
             val status = c.responseCode
             DebugTrace.event("oauth","HTTP "+status)
             if (status !in 200..299) throw OAuthFailure(status, status == 401)
-            val user = JSONObject(c.inputStream.bufferedReader().use { it.readText() }).optJSONObject("user")
+            val user = JSONObject(boundedText(c.inputStream.bufferedReader())).optJSONObject("user")
             val name = user?.optString("username").orEmpty()
             if (name.isBlank()) "Trakt connection verified" else "Connected to Trakt as " + name
         } finally { c.disconnect() }
@@ -127,6 +130,11 @@ class TraktAuth(context: Context) {
         "Trakt disconnected locally. Revoke access in Trakt settings if desired."
     }
     private class OAuthFailure(val status: Int, val invalidGrant: Boolean): Exception()
+    private fun boundedText(reader:java.io.Reader):String = reader.use {
+        val buffer=CharArray(4096); val out=StringBuilder()
+        while(true) { val n=it.read(buffer); if(n<0) break; require(out.length+n<=1_000_000) { "OAuth response too large" }; out.append(buffer,0,n) }
+        out.toString()
+    }
     private fun token(fields: Map<String, String>): JSONObject {
         val c = URL("https://auth.trakt.tv/oauth/token").openConnection() as HttpsURLConnection
         try {
@@ -139,11 +147,11 @@ class TraktAuth(context: Context) {
             val status = c.responseCode
             DebugTrace.event("oauth","HTTP "+status)
             if (status !in 200..299) {
-                val error = c.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
+                val error = c.errorStream?.bufferedReader()?.let { boundedText(it) }.orEmpty()
                 val invalid = runCatching { JSONObject(error).optString("error") == "invalid_grant" }.getOrDefault(false)
                 throw OAuthFailure(status, invalid)
             }
-            return JSONObject(c.inputStream.bufferedReader().use { it.readText() })
+            return JSONObject(boundedText(c.inputStream.bufferedReader()))
         } finally { c.disconnect() }
     }
 }
