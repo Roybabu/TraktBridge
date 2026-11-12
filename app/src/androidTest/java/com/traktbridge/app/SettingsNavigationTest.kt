@@ -1,0 +1,48 @@
+package com.traktbridge.app
+import androidx.test.core.app.ActivityScenario
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import android.view.View
+import android.widget.LinearLayout
+import android.widget.TextView
+import org.junit.Assert.*
+import org.junit.Test
+import org.junit.runner.RunWith
+
+@RunWith(AndroidJUnit4::class)
+class SettingsNavigationTest {
+    @Test fun categoriesAndBackNavigation() {
+        val prefs=InstrumentationRegistry.getInstrumentation().targetContext.getSharedPreferences("tracker",0)
+        val before=prefs.getBoolean("setup_seen",false)
+        prefs.edit().putBoolean("setup_seen",true).commit()
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    MainActivity::class.java.getDeclaredMethod("showTab",Int::class.javaPrimitiveType).apply { isAccessible=true }.invoke(activity,4)
+                    val overview=MainActivity::class.java.getDeclaredField("settingsOverview").apply { isAccessible=true }.get(activity) as LinearLayout
+                    @Suppress("UNCHECKED_CAST")
+                    val pages=MainActivity::class.java.getDeclaredField("settingsGroups").apply { isAccessible=true }.get(activity) as Map<String,LinearLayout>
+                    assertEquals(8,pages.size)
+                    assertEquals(View.VISIBLE,overview.visibility)
+                    val select=MainActivity::class.java.getDeclaredMethod("showSettingsCategory",String::class.java,Boolean::class.javaPrimitiveType).apply { isAccessible=true }
+                    for(id in pages.keys) {
+                        select.invoke(activity,id,true)
+                        assertEquals(View.GONE,overview.visibility)
+                        assertEquals(1,pages.values.count { it.visibility==View.VISIBLE })
+                        assertEquals(View.VISIBLE,pages.getValue(id).visibility)
+                        assertTrue(pages.getValue(id).childCount>3)
+                    }
+                    activity.onBackPressedDispatcher.onBackPressed()
+                    assertEquals(View.VISIBLE,overview.visibility)
+                    assertTrue(pages.values.all { it.visibility==View.GONE })
+                    select.invoke(activity,"appearance",true)
+                }
+                scenario.recreate()
+                scenario.onActivity { activity ->
+                    val selected=MainActivity::class.java.getDeclaredField("settingsCategory").apply { isAccessible=true }.get(activity)
+                    assertEquals("appearance",selected)
+                }
+            }
+        } finally { prefs.edit().putBoolean("setup_seen",before).commit() }
+    }
+}
