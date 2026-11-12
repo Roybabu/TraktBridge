@@ -287,6 +287,7 @@ class MainActivity : Activity() {
         fun label(s: String) { root.addView(txt(s,15,muted)) }
         fun button(s: String, action: () -> Unit) { root.addView(actionButton(s,action)) }
         label("SETTINGS • Account and tracking")
+        button("Guided tracking setup") { setupGuide() }
         button("Back up viewing history (JSON)") { pickBackup(60) }
         button("Export viewing history (CSV)") { pickBackup(61) }
         button("Restore viewing history (JSON)") { pickBackup(62) }
@@ -370,6 +371,21 @@ class MainActivity : Activity() {
         handleReview(intent)
         handleShared(intent)
         handleTrackingShortcut(intent)
+        if(!prefs.getBoolean("setup_seen",false)) { prefs.edit().putBoolean("setup_seen",true).apply(); setupGuide() }
+    }
+    private fun setupGuide() {
+        val box=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(8),dp(16),dp(8)) }
+        val nm=getSystemService(android.app.NotificationManager::class.java)
+        val component=android.content.ComponentName(this,PlaybackListener::class.java)
+        val access=if(android.os.Build.VERSION.SDK_INT>=27) nm.isNotificationListenerAccessGranted(component) else Settings.Secure.getString(contentResolver,"enabled_notification_listeners").orEmpty().split(":").any { android.content.ComponentName.unflattenFromString(it)==component }
+        fun step(title:String,detail:String,action:()->Unit) {
+            box.addView(txt(title,17,ink,true)); box.addView(txt(detail,13,muted)); box.addView(actionButton("Open "+title,action))
+        }
+        step("Notification access",if(access) "Granted" else "Required for media-session detection.") { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
+        step("Video app selection",(prefs.getStringSet("allowed",emptySet())?.size ?: 0).toString()+" selected. Choose only apps you want tracked.") { chooseInstalledApps() }
+        step("Battery settings","Optional: allow background operation if your device interrupts tracking.") { runCatching { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) } }
+        box.addView(txt("Accessibility title detection and app-activity fallback are optional and require separate consent in Settings. Trakt sign-in is not required for local tracking.",14,muted))
+        android.app.AlertDialog.Builder(this).setTitle("Set up TraktBridge").setView(ScrollView(this).apply { addView(box) }).setNegativeButton("Later",null).setPositiveButton("Done") { _,_->showTab(4) }.show()
     }
     private fun handleTrackingShortcut(intent:Intent) {
         if(intent.action!="com.traktbridge.app.OPEN_TRACKING") return
