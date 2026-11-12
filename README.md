@@ -197,3 +197,6 @@ Compose title summary with spoiler reveal, poster fallback, related-title naviga
 
 ## v0.113.0
 Compose history loading skeletons, accessible progress indication, contextual empty/error cards, and short animated empty-state transitions. Existing cancellation and request-generation guards remain unchanged. Animation respects the platform Compose motion scale; on-device visual and accessibility checks remain pending.
+
+## v0.114.0
+Classic dark and AMOLED surfaces, Android 12+ dynamic dark colors for Compose components, high-contrast Compose text, and adaptive one/two/three-column library layouts. Native dialogs and dynamic native colors remain unchanged. Also fixes the external CSV Watched At header alias discovered by CI; regression test retained. Physical visual and device validation remain outstanding.

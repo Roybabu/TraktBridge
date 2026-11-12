@@ -13,6 +13,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
@@ -21,7 +22,15 @@ import androidx.compose.ui.text.font.FontWeight
 
 @Composable
 fun BridgeTheme(accent:Int,content:@Composable ()->Unit) {
-    MaterialTheme(colorScheme=darkColorScheme(primary=Color(accent),onPrimary=Color(0xff171022),background=Color(0xff0d0f16),surface=Color(0xff1b1e2a),onSurface=Color(0xfff1f0f6)),content=content)
+    val context=LocalContext.current
+    val prefs=context.getSharedPreferences("tracker",android.content.Context.MODE_PRIVATE)
+    val mode=AppearancePolicy.mode(prefs.getString("appearance_mode","dark").orEmpty())
+    val scheme=when {
+        mode=="dynamic" && android.os.Build.VERSION.SDK_INT>=31 -> dynamicDarkColorScheme(context)
+        mode=="amoled" -> darkColorScheme(primary=Color(accent),onPrimary=Color(0xff171022),background=Color.Black,surface=Color(0xff101010),onSurface=Color(0xfff1f0f6))
+        else -> darkColorScheme(primary=Color(accent),onPrimary=Color(0xff171022),background=Color(0xff0d0f16),surface=Color(0xff1b1e2a),onSurface=Color(0xfff1f0f6))
+    }
+    MaterialTheme(colorScheme=if(prefs.getBoolean("high_contrast",false)) scheme.copy(onSurface=Color.White,onSurfaceVariant=Color.White) else scheme,content=content)
 }
 
 @Composable

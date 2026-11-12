@@ -42,8 +42,9 @@ class MainActivity : ComponentActivity() {
     private val ink:Int get()=if(prefs.getBoolean("high_contrast",false)) 0xffffffff.toInt() else 0xfff1f0f6.toInt()
     private val muted:Int get()=if(prefs.getBoolean("high_contrast",false)) 0xffe3e3ef.toInt() else 0xffa9a8ba.toInt()
     private val violet:Int get()=when(prefs.getString("accent","violet")) { "blue"->0xff80bfff.toInt(); "green"->0xff6ee7b7.toInt(); else->0xffb6a0ff.toInt() }
-    private val surface=0xff1b1e2a.toInt()
-    private val bg=0xff0d0f16.toInt()
+    private val amoled:Boolean get()=AppearancePolicy.mode(prefs.getString("appearance_mode","dark").orEmpty())=="amoled"
+    private val surface:Int get()=if(amoled) 0xff101010.toInt() else 0xff1b1e2a.toInt()
+    private val bg:Int get()=if(amoled) 0xff000000.toInt() else 0xff0d0f16.toInt()
     private fun showAuth(message: String = auth.status()) { account.text = message }
     private fun handleCallback(i: Intent) {
         val uri = i.data ?: return
@@ -410,6 +411,7 @@ class MainActivity : ComponentActivity() {
         button("Text size") { choose("Reading size",listOf("System default","Large","Extra large")) { prefs.edit().putInt("reading_size",it).apply(); recreate() } }
         button("Monthly viewing goal and dashboard") { configureGoal() }
         button("Customize dashboard and widget") { customizeDashboard() }
+        button("Appearance theme") { choose("Theme",listOf("Classic dark","AMOLED black","Dynamic dark (Android 12+)")) { prefs.edit().putString("appearance_mode",listOf("dark","amoled","dynamic")[it]).apply(); recreate() } }
         button("Appearance accent") { choose("Accent color",listOf("Violet","Blue","Green")) { prefs.edit().putString("accent",listOf("violet","blue","green")[it]).apply(); recreate() } }
         button("Franchise viewing guides") { franchises() }
         button("Recently deleted viewing") { recentlyDeleted() }
@@ -1570,8 +1572,9 @@ class MainActivity : ComponentActivity() {
         card.addView(actionButton("View title and sessions") { showSessions(g) })
     }
     private fun <T> cards(parent:LinearLayout,items:List<T>,render:(LinearLayout,T)->Unit) {
-        if(ComponentPolicy.columns(resources.configuration.screenWidthDp,resources.configuration.fontScale,tvMode)==1) { items.forEach { render(parent,it) }; return }
-        items.chunked(2).forEach { pair ->
+        val columns=AppearancePolicy.columns(resources.configuration.screenWidthDp,resources.configuration.fontScale,tvMode)
+        if(columns==1) { items.forEach { render(parent,it) }; return }
+        items.chunked(columns).forEach { pair ->
             val row=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=android.view.Gravity.TOP }
             parent.addView(row)
             pair.forEach { item ->
@@ -1579,7 +1582,7 @@ class MainActivity : ComponentActivity() {
                 row.addView(column,LinearLayout.LayoutParams(0,-2,1f).apply { marginEnd=dp(8) })
                 render(column,item)
             }
-            if(pair.size==1) row.addView(android.view.View(this),LinearLayout.LayoutParams(0,1,1f))
+            repeat(columns-pair.size) { row.addView(android.view.View(this),LinearLayout.LayoutParams(0,1,1f)) }
         }
     }
     private fun metricGrid(parent:LinearLayout,metrics:List<Pair<String,String>>) {

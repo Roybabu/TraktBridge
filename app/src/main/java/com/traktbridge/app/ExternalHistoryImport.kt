@@ -15,7 +15,7 @@ object ExternalHistoryImport {
         require(rows.isNotEmpty()) { "Empty CSV" }
         val headers=rows.first().map { it.trim().lowercase(java.util.Locale.ROOT) }
         val ti=listOf("title","name","anime_title").firstNotNullOfOrNull { name -> headers.indexOf(name).takeIf { it>=0 } } ?: error("CSV must include Title or Name")
-        val di=listOf("watched_at","watched date","date","date watched","finish date").firstNotNullOfOrNull { name -> headers.indexOf(name).takeIf { it>=0 } } ?: error("CSV must include a viewing date; ratings and watchlists are not viewing history")
+        val di=listOf("watched_at","watched at","watched date","date","date watched","finish date").firstNotNullOfOrNull { name -> headers.indexOf(name).takeIf { it>=0 } } ?: error("CSV must include a viewing date; ratings and watchlists are not viewing history")
         val si=headers.indexOf("season")
         val ei=headers.indexOf("episode")
         fun escaped(v:String)="\""+v.replace("\"","\"\"")+"\""
