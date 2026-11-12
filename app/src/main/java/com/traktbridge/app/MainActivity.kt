@@ -558,6 +558,7 @@ class MainActivity : Activity() {
                 if(continuing.isEmpty()) panel(dashboard).addView(txt("No unfinished sampled viewing yet.",15,muted)) else cards(dashboard,continuing.drop(1).take(6)) { parent,g -> titleCard(parent,g,false) }
                 section(dashboard,"Review queue")
                 val q=panel(dashboard); q.addView(txt("$pending awaiting action",22,ink,true)); q.addView(actionButton("Open review queue") { showTab(2) }); q.addView(actionButton("Review app activity") { reviewUsage() })
+                dashboard.addView(actionButton("Plan your next watch") { viewingPlanner() })
                 dashboard.addView(actionButton("Upcoming episodes") { upcomingEpisodes() })
                 dashboard.addView(actionButton("Recommendations from your history") { recommendFromHistory() })
                 dashboard.addView(actionButton("Anime catalogue (AniList)") { animeSearch() })
@@ -684,6 +685,25 @@ class MainActivity : Activity() {
                 lookup("Searching Trakt",{ done -> TraktCatalogue.search(title.substringBeforeLast(" ("),"movie",done) }) { rows:List<CatalogueItem> -> choose("Select exact movie",rows.map { it.label() }) { j -> titleDetails("movie",rows[j].id,rows[j].title) } }
             }) }
             android.app.AlertDialog.Builder(this).setTitle(guide.first).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
+        }
+    }
+    private fun viewingPlanner() {
+        val budgets=listOf(30,60,90,120,180)
+        choose("Available viewing time",budgets.map { it.toString()+" minutes" }) { index ->
+            val budget=budgets[index]*60000L
+            val candidates=SeriesLibrary.continueWatching(ViewingGroups.build(history.records(0))).filter { it.positionMs>=0 && it.durationMs>0 && it.remainingMs in 1..budget }
+            val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
+            body.addView(txt("Fits your time based on last reported position.",14,muted))
+            if(candidates.isEmpty()) body.addView(txt("No unfinished titles with known remaining time fit this budget.",14))
+            candidates.take(20).forEach { titleCard(body,it,false) }
+            body.addView(actionButton("Random movie from Trakt watchlist") {
+                lookup("Loading watchlist",{ done -> TraktLibrary.page(this,"watchlist",1,done) }) { page:RemotePage ->
+                    val movie=page.items.filter { it.type=="movie" }.randomOrNull()
+                    if(movie==null) Toast.makeText(this,"No movies on the first watchlist page",Toast.LENGTH_LONG).show()
+                    else titleDetails("movie",movie.id,movie.title)
+                }
+            })
+            android.app.AlertDialog.Builder(this).setTitle("Watch planner").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
         }
     }
     private fun subscriptions() {
