@@ -1085,6 +1085,10 @@ class MainActivity : ComponentActivity() {
                 val visible=items.take(historyLimit)
                 if(items.size>visible.size && historyLimit<1000) dashboard.addView(actionButton("Show more ("+visible.size+" of "+items.size+")") { historyLimit=ResourcePolicy.nextPage(historyLimit); refreshHistory() })
                 else if(items.size>visible.size) dashboard.addView(txt("Showing first 1000 titles. Use filters to narrow the remaining history.",13,muted))
+                if(tab==1 && tvMode && visible.isNotEmpty()) {
+                    val shelf=visible.map { g -> val r=g.representative; TvLibraryItem(r.id,r.matchLabel.ifBlank { r.title },g.platforms.joinToString(" • ") { appLabel(it) },if(r.matchType=="episode") "show" else "movie",if(r.matchType=="episode") r.showId else r.traktId) { showSessions(g) } }
+                    dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeTvShelf(violet,"Your viewing library",shelf) } })
+                }
                 if(tab==1 && adaptiveLayout.mode==AdaptiveUi.Mode.EXPANDED && visible.isNotEmpty()) {
                     val entries=visible.map { g -> val r=g.representative; LibraryEntry(r.id,r.matchLabel.ifBlank { r.title },g.platforms.joinToString(" • ") { appLabel(it) },g.sessions.size.toString()+" sessions • "+durationText(g.sampledMs)+" sampled") { showSessions(g) } }
                     dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeMasterDetail(violet,entries,librarySelection) { librarySelection=it } } })
@@ -1750,7 +1754,10 @@ class MainActivity : ComponentActivity() {
             val type=if(index%2==0) "movie" else "show"; val mode=if(index<2) "trending" else "popular"
             lookup("Loading "+mode,{ done -> TraktCatalogue.discover(type,mode,done) }) { rows:List<CatalogueItem> ->
                 val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
-                cards(body,rows) { parent,item ->
+                if(tvMode) {
+                    val shelf=rows.distinctBy { it.id }.map { item -> TvLibraryItem(item.id.toString(),item.title,item.label(),type,item.id) { titleDetails(type,item.id,item.title) } }
+                    body.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeTvShelf(violet,mode.replaceFirstChar { it.uppercase() },shelf) } })
+                } else cards(body,rows) { parent,item ->
                     val card=panel(parent); val image=ImageView(this).apply { scaleType=ImageView.ScaleType.FIT_CENTER; contentDescription="Poster" }
                     card.addView(image,LinearLayout.LayoutParams(-1,dp(180))); Artwork.load(this,type,item.id,image)
                     card.addView(txt(item.label(),16,ink,true)); card.addView(actionButton("Details") { titleDetails(type,item.id,item.title) })
@@ -1790,7 +1797,7 @@ class MainActivity : ComponentActivity() {
         } }) { d:TitleDetails ->
             val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(12),dp(16),dp(12)) }
             val image=ImageView(this).apply { scaleType=ImageView.ScaleType.FIT_CENTER; contentDescription="Poster for "+d.title; setImageResource(android.R.drawable.ic_media_play); setBackgroundColor(surface) }
-            body.addView(image,LinearLayout.LayoutParams(-1,dp(240))); Artwork.load(this,type,id,image)
+            body.addView(image,LinearLayout.LayoutParams(-1,dp(if(tvMode) 320 else 240))); Artwork.load(this,type,id,image)
             val metadata=listOf(d.year.takeIf { it>0 }?.toString().orEmpty(),d.runtime.takeIf { it>0 }?.let { it.toString()+" min" }.orEmpty(),d.genres).filter { it.isNotBlank() }.joinToString(" • ")
             body.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeTitleSummary(violet,d.title.ifBlank { label },metadata,d.rating,d.released,d.overview,prefs.getBoolean("hide_spoilers",true)) } })
             val groups=ViewingGroups.build(history.records(0)).filter { g -> val row=g.representative; if(type=="movie") row.matchType=="movie" && row.traktId==id else row.matchType=="episode" && row.showId==id }
