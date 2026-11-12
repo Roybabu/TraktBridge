@@ -327,6 +327,7 @@ class MainActivity : Activity() {
         root.addView(Switch(this).apply { text="High contrast text"; isChecked=prefs.getBoolean("high_contrast",false); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("high_contrast",checked).apply(); recreate() } })
         button("Text size") { choose("Reading size",listOf("System default","Large","Extra large")) { prefs.edit().putInt("reading_size",it).apply(); recreate() } }
         button("Appearance accent") { choose("Accent color",listOf("Violet","Blue","Green")) { prefs.edit().putString("accent",listOf("violet","blue","green")[it]).apply(); recreate() } }
+        button("Franchise viewing guides") { franchises() }
         button("Personal collections") { collections() }
         button("Favorite titles") { favorites() }
         button("Guided tracking setup") { setupGuide() }
@@ -655,6 +656,22 @@ class MainActivity : Activity() {
                     }
                 }
             }.show()
+        }
+    }
+    private fun franchises() {
+        val guides=listOf(
+            "The Lord of the Rings • release order" to listOf("The Fellowship of the Ring (2001)","The Two Towers (2002)","The Return of the King (2003)"),
+            "The Dark Knight trilogy • release order" to listOf("Batman Begins (2005)","The Dark Knight (2008)","The Dark Knight Rises (2012)"),
+            "The Matrix • main films, release order" to listOf("The Matrix (1999)","The Matrix Reloaded (2003)","The Matrix Revolutions (2003)","The Matrix Resurrections (2021)"),
+            "Back to the Future • release order" to listOf("Back to the Future (1985)","Back to the Future Part II (1989)","Back to the Future Part III (1990)")
+        )
+        choose("Curated franchise guides",guides.map { it.first }) { index ->
+            val guide=guides[index]
+            val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
+            guide.second.forEachIndexed { i,title -> body.addView(actionButton((i+1).toString()+". "+title) {
+                lookup("Searching Trakt",{ done -> TraktCatalogue.search(title.substringBeforeLast(" ("),"movie",done) }) { rows:List<CatalogueItem> -> choose("Select exact movie",rows.map { it.label() }) { j -> titleDetails("movie",rows[j].id,rows[j].title) } }
+            }) }
+            android.app.AlertDialog.Builder(this).setTitle(guide.first).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
         }
     }
     private fun subscriptions() {
