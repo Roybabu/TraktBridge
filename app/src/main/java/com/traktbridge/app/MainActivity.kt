@@ -1,6 +1,8 @@
 package com.traktbridge.app
 
-import android.app.Activity
+import androidx.activity.ComponentActivity
+import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.ViewCompositionStrategy
 import android.os.Bundle
 import android.content.Intent
 import android.provider.Settings
@@ -8,7 +10,7 @@ import android.widget.*
 import android.view.ViewGroup
 import org.json.JSONArray
 
-class MainActivity : Activity() {
+class MainActivity : ComponentActivity() {
     private val prefs by lazy { getSharedPreferences("tracker", MODE_PRIVATE) }
     private lateinit var output: TextView
     private lateinit var history: WatchHistory
@@ -315,7 +317,7 @@ class MainActivity : Activity() {
         shell=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(bg) }
         shell.setOnApplyWindowInsetsListener { v,insets -> v.setPadding(insets.systemWindowInsetLeft,insets.systemWindowInsetTop,insets.systemWindowInsetRight,insets.systemWindowInsetBottom); insets }
         setContentView(shell)
-        val header=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(24),dp(16),dp(24),dp(12)); addView(txt("TRAKTBRIDGE",12,violet)); addView(txt("Your viewing companion",24,ink,true)); addView(actionButton("Search everything") { universalSearch() }) }
+        val header=ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed); setContent { BridgeHeader(violet) { universalSearch() } } }
         shell.addView(header)
         val frame=android.widget.FrameLayout(this)
         val workspace=LinearLayout(this).apply { orientation=if(wide) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL }
