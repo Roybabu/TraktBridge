@@ -383,6 +383,7 @@ class MainActivity : ComponentActivity() {
         button("Favorite titles") { favorites() }
         button("Automation shortcuts") { automationShortcuts() }
         button("Universal playback shortcuts") { playbackShortcut() }
+        button("Companion status") { val summary=CompanionStatus.summarize(history.records(0)); android.app.AlertDialog.Builder(this).setTitle("Companion status").setMessage("Active sessions: "+summary.active+"\nAwaiting review: "+summary.pending+"\nSampled time: "+durationText(summary.watchedMs)).setPositiveButton("Close",null).show() }
         button("Cancel all episode reminders") { prefs.edit().putBoolean("episode_reminders",false).apply(); EpisodeReminders.cancelAll(this); Toast.makeText(this,"Reminders cancelled",Toast.LENGTH_SHORT).show() }
         button("Privacy mode • stop tracking now") { privacyMode() }
         root.addView(Switch(this).apply { text="Protect app screen from screenshots and recent-app previews"; isChecked=prefs.getBoolean("secure_screen",false); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("secure_screen",checked).apply(); applyScreenProtection() } })

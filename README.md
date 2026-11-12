@@ -122,3 +122,6 @@ Validated internal navigation shortcuts, exact Netflix/YouTube ID launch links a
 
 ## v0.88.0
 TV focus indicators, menu-key navigation access, and seven-day cached title details fallback. Cached metadata is not current streaming availability. Physical TV and offline network testing remain pending.
+
+## v0.89.0
+Read-only catalogue GET retries are bounded, including short Retry-After values. A local companion status summary is available on the phone. This is groundwork, not a Wear OS application or paired-device transport; those remain outstanding. Writes are never retried by this policy.

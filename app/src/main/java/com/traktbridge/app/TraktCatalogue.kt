@@ -18,7 +18,17 @@ data class CatalogueSeason(val number: Int, val title: String)
 object TraktCatalogue {
     private val worker = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
-    private fun get(path: String): JSONArray {
+    private class ReadFailure(val status:Int,val retryAfter:Long?):Exception("Trakt catalogue HTTP "+status)
+    private fun get(path:String):JSONArray {
+        var attempt=0
+        while(true) {
+            try { return getOnce(path) } catch(e:ReadFailure) {
+                val delay=ApiRetryPolicy.delay(e.status,attempt,e.retryAfter) ?: throw e
+                attempt++; Thread.sleep(delay)
+            }
+        }
+    }
+    private fun getOnce(path: String): JSONArray {
         val c = URL("https://api.trakt.tv" + path).openConnection() as HttpsURLConnection
         try {
             c.connectTimeout = 15000; c.readTimeout = 15000; c.instanceFollowRedirects = false
@@ -27,7 +37,7 @@ object TraktCatalogue {
             c.setRequestProperty("Accept", "application/json")
             val status = c.responseCode
             DebugTrace.event("catalogue","HTTP "+status)
-            if (status !in 200..299) error(if (status == 429) "Trakt rate limit reached. Try again later." else "Trakt catalogue HTTP " + status)
+            if (status !in 200..299) throw ReadFailure(status,c.getHeaderField("Retry-After")?.toLongOrNull())
             return JSONArray(c.inputStream.bufferedReader().use { reader -> val out=StringBuilder(); val buf=CharArray(8192); while(true) { val n=reader.read(buf); if(n<0) break; require(out.length+n<=8_000_000) { "Catalogue response too large" }; out.append(buf,0,n) }; out.toString() })
         } finally { c.disconnect() }
     }
