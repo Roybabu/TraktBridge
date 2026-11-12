@@ -163,6 +163,25 @@ class MainActivity : ComponentActivity() {
         }.start()
     }
     private var importSource="com.netflix.mediaclient"
+    private fun externalHistoryImport() {
+        val sources=ExternalHistoryImport.sources
+        choose("Import external viewing history",listOf("Downloaded Trakt history")+sources.map { it+" • CSV interchange" }) { i ->
+            if(i==0) {
+                lookup("Checking Trakt account",{ done -> TraktLibrary.accountId(this,done) }) { account:String ->
+                    val rows=ExternalHistoryImport.fromTrakt(TraktLibrary.cachedHistory(this,account),account)
+                    android.app.AlertDialog.Builder(this).setTitle("Import cached Trakt events?").setMessage(rows.size.toString()+" local review records. Existing remote completions are not uploaded again automatically. No sampled viewing time is added.").setNegativeButton("Cancel",null).setPositiveButton("Import for review") { _,_->
+                        Thread {
+                            val result=runCatching { WatchHistory(applicationContext).use { it.importViewing(rows) } }
+                            runOnUiThread { if(!isDestroyed && !isFinishing) result.fold({ counts -> showTab(2); Toast.makeText(this,counts.first.toString()+" added • "+counts.second+" duplicates",Toast.LENGTH_LONG).show() },{ Toast.makeText(this,"Import failed",Toast.LENGTH_LONG).show() }) }
+                        }.start()
+                    }.show()
+                }
+            } else {
+                importSource=sources[i-1]
+                android.app.AlertDialog.Builder(this).setTitle("CSV interchange format").setMessage("Use a CSV with Title (or Name) and a genuine viewing date (Date or Watched At). Optional Season and Episode columns are supported. Watchlists, ratings and anime progress counts are not viewing events. Convert unsupported export formats first.").setNegativeButton("Cancel",null).setPositiveButton("Choose file") { _,_->startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*"),58) }.show()
+            }
+        }
+    }
     private fun chooseImportProvider() {
         val providers=PlayerRules.apps.entries.toList()
         choose("Choose history source",providers.map { it.key }) { i ->
@@ -180,7 +199,7 @@ class MainActivity : ComponentActivity() {
                     while(true) { val n=reader.read(buffer); if(n<0) break; require(out.length+n<=HistoryImport.MAX_CHARS) { "CSV exceeds size limit" }; out.append(buffer,0,n) }
                     out.toString()
                 }
-                HistoryImport.parse(text,source)
+                if(source in ExternalHistoryImport.sources) ExternalHistoryImport.parseCsv(text,source) else HistoryImport.parse(text,source)
             }
             runOnUiThread {
                 if(isFinishing || isDestroyed) return@runOnUiThread
@@ -412,6 +431,7 @@ class MainActivity : ComponentActivity() {
         button("Check history database integrity") { checkHistoryIntegrity() }
         button("Import Letterboxd diary (CSV)") { importSource="letterboxd"; startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*"),58) }
         button("Import streaming viewing history (CSV)") { chooseImportProvider() }
+        button("Import external history (Trakt, IMDb, Simkl, anime)") { externalHistoryImport() }
         button("Identify local video file") { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("video/*"),57) }
         button("Identify shared movie link") { val field=EditText(this).apply { hint="Paste shared title or link" }; android.app.AlertDialog.Builder(this).setTitle("Identify shared content").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Continue") { _,_-> presentShared(SharedContent.fromText(field.text.toString())) }.show() }
         button("Scan player title (one-shot OCR)") { armOcr() }

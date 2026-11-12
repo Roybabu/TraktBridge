@@ -182,3 +182,6 @@ Advanced local library search combines normalized multi-token titles, personal t
 
 ## v0.108.0
 Curated franchise timelines include Middle-earth story and release orders, exact title/year catalogue verification, and local synced completion checks. Season views expose missing local episode records by exact ID; absence is not proof of unwatched status and unaired episodes may appear. Guides are curated subsets, not exhaustive timelines.
+
+## v0.109.0
+External history importer accepts an explicitly documented CSV interchange format for Trakt, Simkl, IMDb, MyAnimeList and AniList, plus existing Letterboxd diary support. Cached Trakt watch events can be imported for local review with account-scoped event IDs. No sampled playback time or automatic upload approval is created. Native service-specific exports beyond supported column layouts, authenticated Simkl/IMDb/anime service synchronization, and actual export-file testing remain outstanding.
