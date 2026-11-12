@@ -917,9 +917,11 @@ class MainActivity : ComponentActivity() {
         fun step(title:String,detail:String,action:()->Unit) {
             box.addView(txt(title,17,ink,true)); box.addView(txt(detail,13,muted)); box.addView(actionButton("Open "+title,action))
         }
-        step("Notification access",if(access) "Granted" else "Required for media-session detection.") { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
+        for(check in PermissionDiagnostics.read(this)) box.addView(txt((if(check.ready) "Ready" else if(check.required) "Action needed" else "Optional / unavailable")+" • "+check.name+"\n"+check.detail,14,if(check.ready) ink else muted))
+        step("Notification access",if(access) "Granted" else "Required for media-session detection.") { runCatching { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }.onFailure { Toast.makeText(this,"This device does not expose the notification access settings screen.",Toast.LENGTH_LONG).show() } }
         step("Video app selection",(prefs.getStringSet("allowed",emptySet())?.size ?: 0).toString()+" selected. Choose only apps you want tracked.") { chooseInstalledApps() }
         step("Battery settings",BatteryCompatibility.guidance(android.os.Build.MANUFACTURER)+" Optional; no setting is changed automatically.") { runCatching { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) } }
+        step("Start tracking","Enable background sampling after selecting apps and granting access.") { if(TrackingRecovery.listenerGranted(this) && !prefs.getStringSet("allowed",emptySet()).isNullOrEmpty()) { prefs.edit().putBoolean("enabled",true).apply(); startTracking() } else Toast.makeText(this,"Grant notification access and choose playback apps first.",Toast.LENGTH_LONG).show() }
         box.addView(txt("Accessibility title detection and app-activity fallback are optional and require separate consent in Settings. Trakt sign-in is not required for local tracking.",14,muted))
         android.app.AlertDialog.Builder(this).setTitle("Set up TraktBridge").setView(ScrollView(this).apply { addView(box) }).setNegativeButton("Later",null).setPositiveButton("Done") { _,_->showTab(4) }.show()
     }
