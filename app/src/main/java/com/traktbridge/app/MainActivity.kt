@@ -1129,10 +1129,10 @@ class MainActivity : ComponentActivity() {
                     val series=SeriesLibrary.build(visible)
                     if(series.isNotEmpty()) { section(dashboard,"Series and anime"); cards(dashboard,series) { parent,item -> seriesCard(parent,item) } }
                     val movies=visible.filter { it.representative.matchType=="movie" }
-                    if(movies.isNotEmpty()) { section(dashboard,"Movies"); cards(dashboard,movies) { parent,item -> titleCard(parent,item,true) } }
+                    if(movies.isNotEmpty()) { section(dashboard,"Movies"); lazyTitles(dashboard,movies,true) }
                     val other=visible.filter { it.representative.matchType!="movie" && !(it.representative.matchType=="episode" && it.representative.showId>0 && it.representative.season>=0 && it.representative.episode>0) }
-                    if(other.isNotEmpty()) { section(dashboard,"Unidentified viewing"); cards(dashboard,other) { parent,item -> titleCard(parent,item,true) } }
-                } else cards(dashboard,visible) { parent,item -> titleCard(parent,item,true) }
+                    if(other.isNotEmpty()) { section(dashboard,"Unidentified viewing"); lazyTitles(dashboard,other,true) }
+                } else lazyTitles(dashboard,visible,true)
             }
             3 -> {
                 section(dashboard,"Viewing activity")
@@ -2092,7 +2092,7 @@ class MainActivity : ComponentActivity() {
         val min=ms/60000
         return if(min>=60) (min/60).toString()+"h "+(min%60)+"m" else if(min==0L && ms>0) (ms/1000).toString()+"s" else min.toString()+" min"
     }
-    private fun titleCard(parent:LinearLayout,g:ViewingTitle,expanded:Boolean) {
+    private fun titleEntry(g:ViewingTitle,expanded:Boolean):LazyTitleEntry {
         val r=g.representative
         val assessment=g.positionSession?.let { completionAssessment(it) }
         val completion=when { g.sessions.all { it.status=="restored_audit" } -> "Restored history • prior upload not repeated"; g.confirmed -> "Finished • synced to Trakt"; g.queued -> "Completion approved • sync pending"; g.active -> "Currently watching"; assessment?.suggested==true -> "Completion suggested • confirm manually"; g.positionMs>=0 -> "In progress"; else -> "Completion unknown" }
@@ -2113,9 +2113,18 @@ class MainActivity : ComponentActivity() {
             }
         })
         actions.add(UiAction(if((expanded || g.pending || g.queued) && !g.confirmed) "Review / view sessions" else "View sessions") { showSessions(g) })
-        parent.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeTitleCard(violet,row,actions) } })
+        return LazyTitleEntry(r.id,row,actions)
     }
 
+    private fun titleCard(parent:LinearLayout,g:ViewingTitle,expanded:Boolean) {
+        val item=titleEntry(g,expanded)
+        parent.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeTitleCard(violet,item.row,item.actions) } })
+    }
+    private fun lazyTitles(parent:LinearLayout,groups:List<ViewingTitle>,expanded:Boolean) {
+        if(wide || groups.size<8) { cards(parent,groups) { target,g -> titleCard(target,g,expanded) }; return }
+        val items=groups.map { titleEntry(it,expanded) }
+        parent.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeLazyTitles(violet,items) } })
+    }
     private fun duplicateTitles(target:WatchRecord) {
         val rows=LibraryDuplicates.candidates(history.records(0),target)
         choose("Possible duplicate titles",rows.map { it.title+" • "+appLabel(it.source)+" • "+java.text.DateFormat.getDateTimeInstance().format(java.util.Date(it.started)) }) { i ->

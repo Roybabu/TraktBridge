@@ -39,8 +39,11 @@ object Artwork {
         worker.execute { synchronized(this) { dir.listFiles()?.filter { it.extension=="webp" }?.forEach { it.delete() } } }
     }
     fun load(context:Context,type:String,id:Long,view:ImageView) {
-        if(id<=0 || type !in setOf("movie","show")) return
         val key=type+"-"+id
+        if(view.tag==key) return
+        view.tag=key
+        view.setImageResource(android.R.drawable.ic_media_play)
+        if(id<=0 || type !in setOf("movie","show")) return
         val app=context.applicationContext
         val cache=cache(app)
         cache.get(key)?.let { view.setImageBitmap(it); return }
@@ -90,7 +93,7 @@ object Artwork {
             }.getOrNull() ?: runCatching { decode(file) }.getOrNull()
             if(bitmap!=null) { cache.put(key,bitmap); main.post {
                 val image=target.get()
-                if(image!=null && image.isAttachedToWindow) image.setImageBitmap(bitmap)
+                if(image!=null && image.tag==key) image.setImageBitmap(bitmap)
             } }
         }
     }
