@@ -390,6 +390,7 @@ class MainActivity : ComponentActivity() {
         button("Universal playback shortcuts") { playbackShortcut() }
         button("Companion status") { val summary=CompanionStatus.summarize(history.records(0)); android.app.AlertDialog.Builder(this).setTitle("Companion status").setMessage("Active sessions: "+summary.active+"\nAwaiting review: "+summary.pending+"\nSampled time: "+durationText(summary.watchedMs)).setPositiveButton("Close",null).show() }
         button("Cancel all episode reminders") { prefs.edit().putBoolean("episode_reminders",false).apply(); EpisodeReminders.cancelAll(this); Toast.makeText(this,"Reminders cancelled",Toast.LENGTH_SHORT).show() }
+        button("Completion review threshold") { configureCompletionThreshold() }
         button("Playback compatibility profiles") { android.app.AlertDialog.Builder(this).setTitle("Playback profiles").setMessage(PlayerRules.apps.entries.joinToString("\n") { (name,pkg) -> name+": "+DetectionProfiles.forPackage(pkg).label }).setPositiveButton("Close",null).show() }
         button("Privacy dashboard and data controls") { privacyDashboard() }
         button("Privacy mode • stop tracking now") { privacyMode() }
@@ -1638,7 +1639,8 @@ class MainActivity : ComponentActivity() {
         details.addView(txt(r.matchLabel.ifBlank { r.title.ifBlank { "Unidentified video" } },18,ink,true))
         details.addView(txt(g.platforms.joinToString(" • ") { appLabel(it) },13,muted))
         details.addView(txt(g.sessions.size.toString()+" viewing session(s) • "+java.text.DateFormat.getDateInstance().format(java.util.Date(g.latest.ended)),13,muted))
-        val completion=when { g.sessions.all { it.status=="restored_audit" } -> "Restored history • prior upload not repeated"; g.confirmed -> "Finished • synced to Trakt"; g.queued -> "Completion approved • sync pending"; g.active -> "Currently watching"; g.nearEnd -> "Near end • confirm completion"; g.positionMs>=0 -> "In progress"; else -> "Completion unknown" }
+        val assessment=g.positionSession?.let { completionAssessment(it) }
+        val completion=when { g.sessions.all { it.status=="restored_audit" } -> "Restored history • prior upload not repeated"; g.confirmed -> "Finished • synced to Trakt"; g.queued -> "Completion approved • sync pending"; g.active -> "Currently watching"; assessment?.suggested==true -> "Completion suggested • confirm manually"; g.positionMs>=0 -> "In progress"; else -> "Completion unknown" }
         details.addView(txt(completion,14,if(g.confirmed) 0xff6ee7b7.toInt() else 0xfffbbf24.toInt(),true))
         details.addView(txt("Total sampled watch time: "+if(g.sampledMs>0) durationText(g.sampledMs) else "Unknown",13,muted))
         if(g.durationMs>0 && g.positionMs>=0) {
@@ -1682,6 +1684,7 @@ class MainActivity : ComponentActivity() {
         val status=when(r.status) { "synced"->"Synced to Trakt"; "active"->"Watching"; "pending"->"Needs review"; "reviewed"->"Ready to confirm"; "restored_audit"->"Restored audit • no upload"; else->r.status.replaceFirstChar { it.uppercase() } }
         details.addView(txt(status,13,if(r.status=="synced") 0xff6ee7b7.toInt() else 0xfffbbf24.toInt(),true))
         details.addView(txt(if(r.watched<=0) "Watch time unknown" else durationText(r.watched)+" sampled",13,muted))
+        if(r.status in setOf("pending","reviewed")) { val assessment=completionAssessment(r); details.addView(txt("Completion evidence: "+(assessment.percent?.let { it.toString()+"% • " } ?: "")+assessment.reason,12,muted)) }
         if(r.seeks>0 || r.bufferingMs>0 || r.pausedMs>0 || r.uncertainMs>0) details.addView(txt("Paused: "+durationText(r.pausedMs)+" • Buffering: "+durationText(r.bufferingMs)+" • Seeks: "+r.seeks+" (rewinds "+r.rewinds+") • Uncertain: "+durationText(r.uncertainMs),12,muted))
         if(r.duration>0 && r.position>=0) details.addView(ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal).apply { progress=(r.position.toDouble()/r.duration*100).toInt().coerceIn(0,100); progressTintList=android.content.res.ColorStateList.valueOf(violet) })
         if(!expanded) { card.addView(actionButton("View details") { android.app.AlertDialog.Builder(this).setTitle("Viewing details").setMessage(r.matchLabel.ifBlank { r.title.ifBlank { "Unidentified video" } }+"\n"+r.subtitle).setNegativeButton("Close",null).setPositiveButton("Open history") { _,_->showTab(1) }.show() }); return }
@@ -1741,6 +1744,14 @@ class MainActivity : ComponentActivity() {
             dialog.show()
         }
     }
+    private fun configureCompletionThreshold() {
+        val options=listOf(75,80,85,90,95,100)
+        val current=CompletionPolicy.threshold(prefs.getInt("completion_threshold",CompletionPolicy.DEFAULT_THRESHOLD))
+        android.app.AlertDialog.Builder(this).setTitle("Completion review threshold").setMessage("Current: "+current+"%. A suggestion never uploads a completed watch. You must still approve it.").setNeutralButton("Change") { _,_->
+            choose("Suggest completion at",options.map { it.toString()+"%" }) { i -> prefs.edit().putInt("completion_threshold",options[i]).apply(); refreshHistory() }
+        }.setPositiveButton("Close",null).show()
+    }
+    private fun completionAssessment(r:WatchRecord)=CompletionPolicy.assess(r,prefs.getInt("completion_threshold",CompletionPolicy.DEFAULT_THRESHOLD))
     private fun approveUpload(r: WatchRecord,rewatch:Boolean=false) {
         android.app.AlertDialog.Builder(this).setTitle(if(rewatch) "Confirm a separate completed rewatch?" else "Mark as fully watched?")
             .setMessage(r.matchLabel + "\nThis adds a completed watch to Trakt at the recorded end time. Only confirm if you finished the movie or episode. Partial viewing stays local. For app-activity records the end time is only the app exit time.")

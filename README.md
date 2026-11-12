@@ -167,3 +167,6 @@ Absolute episode and OVA/special evidence is distinguished from ordinary season/
 
 ## v0.103.0
 Distinct concurrent local sessions can be sampled when each has a distinct recognized identity and valid media timing. Duplicate or ambiguous same-provider sessions are suppressed. Process-local random session labels avoid hash collisions and expose local/cast output classification; server sessions retain existing server keys. Physical remote device names and identities are not inferred, and same-provider local/server overlap remains conservatively suppressed.
+
+## v0.104.0
+Configurable 75–100% completion review threshold combines valid player position, sampled playback, exact identity, session status and catalogue runtime consistency. Suggestions never authorize uploads; existing explicit approval and account verification are unchanged. Physical-device calibration remains pending.
