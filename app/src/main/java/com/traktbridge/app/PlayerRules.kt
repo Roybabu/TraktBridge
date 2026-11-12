@@ -21,7 +21,7 @@ object PlayerRules {
         "aha" to "ahaflix.tv","Lionsgate Play" to "com.lionsgateplay.videoapp","JioTV" to "com.jio.jioplay.tv",
         "MUBI" to "com.mubi","BBC iPlayer" to "bbc.iplayer.android","Bilibili" to "com.bstar.intl",
         "Emby" to "com.mb.android","Just Player" to "com.brouken.player"
-    )
+    ).apply { ProviderPackages.tv.forEach { (name,pkg) -> if(pkg !in values) put(name,pkg) } }
     private val explicit=setOf("player_title","player_subtitle","playback_title","video_title","episode_title","show_title","player_episode_title","player_show_title","player_title_text","player_episode_label","player_season_episode","video_player_title","player_subtitle_text","media_title","content_title","player_header_title","player_video_title")
     private val local=setOf("title","filename","file_name","media_title","video_title","video_name","player_overlay_title","video_title_text")
     private val generic=setOf("title","subtitle","episode_name","episode_number","season_episode","title_text","txt_title","tv_title","header_title")
