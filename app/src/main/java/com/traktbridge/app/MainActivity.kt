@@ -189,13 +189,13 @@ class MainActivity : Activity() {
             dialog.dismiss()
             val now=System.currentTimeMillis()
             val recent=history.records(0).filter { it.status=="pending" && it.traktId==0L && now-it.ended in 0..1800000L && !it.id.startsWith("shared:") && (candidate.source.isBlank() || candidate.source=="local.file" && it.source in setOf("org.videolan.vlc","com.mxtech.videoplayer.ad","com.mxtech.videoplayer.pro") || it.source==candidate.source) }.take(10)
-            fun create() { val id=history.addSharedCandidate(candidate.source.ifBlank { "shared.content" },title,candidate.detail,candidate.runtime); showTab(2); history.record(id)?.let { identify(it) } }
+            fun create() { val id=history.addSharedCandidate(candidate.source.ifBlank { "shared.content" },title,candidate.detail,candidate.runtime); history.providerRef(id,RecognitionEngine.providerKey(candidate.source,candidate.providerId)); showTab(2); history.record(id)?.let { identify(it) } }
             if(recent.isEmpty()) create() else {
                 val labels=recent.map { appLabel(it.source)+" • "+it.title.ifBlank { "Unidentified video" }+" • "+java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(it.ended)) }+"Create separate identification"
                 choose("Attach to a recent viewing session?",labels) { index ->
                     if(index==recent.size) create() else {
                         val id=recent[index].id
-                        if(history.attachSharedCandidate(id,title,candidate.detail,candidate.runtime)) { showTab(2); history.record(id)?.let { identify(it) } } else Toast.makeText(this,"Viewing record changed. Try again.",Toast.LENGTH_LONG).show()
+                        if(history.attachSharedCandidate(id,title,candidate.detail,candidate.runtime)) { history.providerRef(id,RecognitionEngine.providerKey(candidate.source,candidate.providerId)); showTab(2); history.record(id)?.let { identify(it) } } else Toast.makeText(this,"Viewing record changed. Try again.",Toast.LENGTH_LONG).show()
                     }
                 }
             }
@@ -242,6 +242,8 @@ class MainActivity : Activity() {
         button("Review OCR result") { reviewOcr() }
         button("Clear OCR result") { prefs.edit().remove("ocr_target").remove("ocr_after").remove("ocr_until").remove("ocr_choices").remove("ocr_source").remove("ocr_captured").remove("ocr_status").apply() }
         button("Connect media servers") { serverSettings() }
+        root.addView(Switch(this).apply { text="Automatically reuse confirmed local title mappings"; isChecked=prefs.getBoolean("learned_auto",false); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("learned_auto",checked).apply() } })
+        button("Clear learned title mappings") { android.app.AlertDialog.Builder(this).setTitle("Clear learned mappings?").setMessage("Existing viewing history and Trakt matches stay unchanged.").setNegativeButton("Cancel",null).setPositiveButton("Clear") { _,_->history.clearLearning() }.show() }
         button("Open diagnostic recorder") { startActivity(Intent(this,DebugActivity::class.java)) }
         auth = TraktAuth(applicationContext)
         account = TextView(this).apply { textSize = 16f }
@@ -519,8 +521,10 @@ class MainActivity : Activity() {
             }.show()
     }
     private fun identify(r: WatchRecord) {
-        val field = EditText(this).apply { setText(TraktCatalogue.suggestedQuery(r.title)); hint = "Movie, show or anime title"; setSingleLine(true) }
+        val field = EditText(this).apply { setText(RecognitionEngine.query(r.title)); hint = "Movie, show or anime title"; setSingleLine(true) }
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(24,12,24,12); addView(field); addView(TextView(this@MainActivity).apply { text = "Search sends this title to Trakt. Select the exact movie or episode; nothing is uploaded to your history." }) }
+        val learned=history.learned(r)
+        if(learned!=null && r.traktId==0L) box.addView(actionButton("Use learned match: "+learned.label()) { confirmMatch(r,learned) })
         val dialog = android.app.AlertDialog.Builder(this).setTitle("Identify viewing record").setView(box).setNegativeButton("Cancel",null).setNeutralButton("TV / Anime",null).setPositiveButton("Movie",null).create()
         dialog.setOnShowListener {
             fun launch(type: String) {
@@ -528,9 +532,10 @@ class MainActivity : Activity() {
                 if (q.isBlank()) { field.error = "Enter a title"; return }
                 dialog.dismiss()
                 lookup("Searching Trakt", { done -> TraktCatalogue.search(q,type,done) }) { results: List<CatalogueItem> ->
-                    choose("Select title",results.map { it.label() }) { index ->
-                        val item = results[index]
-                        if (item.type == "movie") confirmMatch(r,item) else selectSeason(r,item)
+                    val ranked=RecognitionEngine.rank(q,r.subtitle,r.duration,results)
+                    choose("Select title • evidence score",ranked.map { it.item.label()+" • "+it.score+"/100\n"+it.reason }) { index ->
+                        val item = ranked[index].item
+                        if (item.type == "movie") confirmMatch(r,item) else selectSuggestedEpisode(r,item)
                     }
                 }
             }
@@ -552,6 +557,14 @@ class MainActivity : Activity() {
     private fun choose(title: String, labels: List<String>, selected: (Int) -> Unit) {
         if (labels.isEmpty()) { android.app.AlertDialog.Builder(this).setTitle(title).setMessage("No results. Try another title or spelling.").setPositiveButton("OK",null).show(); return }
         android.app.AlertDialog.Builder(this).setTitle(title).setItems(labels.toTypedArray()) { _, index -> selected(index) }.setNegativeButton("Cancel",null).show()
+    }
+    private fun selectSuggestedEpisode(r:WatchRecord,show:CatalogueItem) {
+        val ep=RecognitionEngine.episodeOf(r.title+" "+r.subtitle)
+        if(ep==null) { selectSeason(r,show); return }
+        lookup("Checking detected episode", { done -> TraktCatalogue.episodes(show,ep.season,done) }) { episodes:List<CatalogueItem> ->
+            val exact=episodes.singleOrNull { it.episode==ep.episode }
+            if(exact==null) selectSeason(r,show) else android.app.AlertDialog.Builder(this).setTitle("Detected episode").setMessage(exact.label()+"\nSeason and episode agree with the detected text. Confirm the exact episode.").setNegativeButton("Cancel",null).setNeutralButton("Choose another") { _,_->selectSeason(r,show) }.setPositiveButton("Review match") { _,_->confirmMatch(r,exact) }.show()
+        }
     }
     private fun selectSeason(r: WatchRecord, show: CatalogueItem) {
         lookup("Loading seasons", { done -> TraktCatalogue.seasons(show,done) }) { seasons: List<CatalogueSeason> ->

@@ -60,3 +60,6 @@ On Android 14+, explicitly arm one scan for a selected app. After an 8-second de
 
 ## Direct media server integration (0.9.8)
 Configure Plex, Jellyfin, Emby or Kodi using a trusted HTTPS server and explicit playback client selection. Poll session metadata using provider APIs; credentials are encrypted with Android Keystore, redirects are disabled, and server responses are bounded. Server sessions contribute title, episode, position, duration and sampled playback to existing local review. No automatic Trakt upload. Kodi requires HTTPS access to JSON-RPC, typically through a configured reverse proxy. Server playback may be remote; select only a client you own/use.
+
+## Intelligent recognition and learned matches (0.9.9)
+Fuse media-session, notification and accessibility title observations with heuristic evidence scores and conflict reporting. Rank Trakt search candidates by title, year, runtime and episode evidence. Confirmed matches teach provider-scoped exact title/episode and shared provider-ID mappings; optional automatic local reuse never approves a completed watch. Clear learned mappings independently of history. Scores are heuristic, not calibrated probabilities. No automatic network catalogue search.

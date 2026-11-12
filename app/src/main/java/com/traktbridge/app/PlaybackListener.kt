@@ -33,7 +33,7 @@ class PlaybackListener : NotificationListenerService() {
     private val handler = Handler(Looper.getMainLooper())
     private val poll = object : Runnable {
         override fun run() {
-            try { capture(); notifyPending(); notifyUsageFallback() } catch (e: Exception) { DebugTrace.failure("poll",e); prefs.edit().putString("sample_error",e.javaClass.simpleName).apply(); history.finishAll() } finally { handler.postDelayed(this, 5000) }
+            try { capture(); if(prefs.getBoolean("learned_auto",false)) { val n=history.applyLearned(); if(n>0) DebugTrace.event("recognition","learned matches="+n) }; notifyPending(); notifyUsageFallback() } catch (e: Exception) { DebugTrace.failure("poll",e); prefs.edit().putString("sample_error",e.javaClass.simpleName).apply(); history.finishAll() } finally { handler.postDelayed(this, 5000) }
         }
     }
     override fun onListenerConnected() { super.onListenerConnected(); DebugTrace.event("listener","connected"); prefs.edit().putBoolean("listener_connected",true).apply(); handler.removeCallbacks(poll); handler.post(poll) }
@@ -92,9 +92,15 @@ class PlaybackListener : NotificationListenerService() {
             val playing=p?.state==PlaybackState.STATE_PLAYING
             val hint=if(playing) TitleAccessibility.hint(this,c.packageName,now-120000,now) else null
             val prior=retained[key]
-            val real=direct.takeIf { PlayerRules.validTitle(it) } ?: note.takeIf { PlayerRules.validTitle(it) }
-            val title=real ?: hint?.first ?: prior?.first.orEmpty()
-            val subtitle=m?.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE)?.takeIf { it.isNotBlank() } ?: hint?.takeIf { it.first==title }?.second ?: prior?.takeIf { it.first==title }?.second.orEmpty()
+            val metaDetail=m?.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE).orEmpty()
+            val recognition=RecognitionEngine.fuse(listOfNotNull(
+                Evidence(direct,metaDetail,"media",85),
+                Evidence(note,"","notification",70),
+                hint?.let { Evidence(it.first,it.second,"accessibility",65) }
+            ))
+            val title=recognition?.title ?: prior?.first.orEmpty()
+            val subtitle=recognition?.detail?.takeIf { it.isNotBlank() } ?: prior?.takeIf { it.first==title }?.second.orEmpty()
+            if(playing && recognition!=null) DebugTrace.event("recognition","package="+c.packageName+" score="+recognition.score+" sources="+recognition.sources.joinToString(",")+" conflict="+recognition.conflict)
             if(playing && title.isNotBlank()) retained[key]=title to subtitle
             if(p?.state in setOf(PlaybackState.STATE_STOPPED,PlaybackState.STATE_NONE,PlaybackState.STATE_ERROR)) retained.remove(key)
             val mediaDuration=m?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L

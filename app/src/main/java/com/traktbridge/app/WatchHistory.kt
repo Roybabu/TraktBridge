@@ -9,7 +9,7 @@ import java.util.UUID
 data class WatchSample(val key: String, val source: String, val title: String, val subtitle: String, val duration: Long, val position: Long, val playing: Boolean)
 data class WatchRecord(val id: String, val source: String, val title: String, val subtitle: String, val started: Long, val ended: Long, val watched: Long, val duration: Long, val position: Long, val status: String, val matchType: String = "", val traktId: Long = 0, val matchLabel: String = "", val showId: Long = 0, val season: Int = -1, val episode: Int = -1, val catalogueRuntime: Long = 0)
 
-class WatchHistory(context: Context): SQLiteOpenHelper(context.applicationContext, "watch_history.db", null, 5) {
+class WatchHistory(context: Context): SQLiteOpenHelper(context.applicationContext, "watch_history.db", null, 6) {
     companion object {
         private const val MAX_GAP = 12000L
         private const val MIN_WATCH = 15000L
@@ -17,7 +17,12 @@ class WatchHistory(context: Context): SQLiteOpenHelper(context.applicationContex
     }
     private data class Active(val id: String, val sample: WatchSample, val lastTick: Long, val lastPlaying: Long, val watched: Long, val started: Long, val lastWall: Long)
     private val active = mutableMapOf<String, Active>()
+    private fun createLearning(db:SQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS learned (key TEXT PRIMARY KEY, type TEXT NOT NULL, trakt_id INTEGER NOT NULL, label TEXT NOT NULL, show_id INTEGER NOT NULL, season INTEGER NOT NULL, episode INTEGER NOT NULL, runtime INTEGER NOT NULL, title TEXT NOT NULL, year INTEGER NOT NULL)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS provider_refs (record_id TEXT PRIMARY KEY, provider_key TEXT NOT NULL)")
+    }
     override fun onCreate(db: SQLiteDatabase) {
+        createLearning(db)
         db.execSQL("CREATE TABLE viewing (id TEXT PRIMARY KEY, source TEXT NOT NULL, title TEXT NOT NULL, subtitle TEXT NOT NULL, started INTEGER NOT NULL, ended INTEGER NOT NULL, watched INTEGER NOT NULL, duration INTEGER NOT NULL, position INTEGER NOT NULL, status TEXT NOT NULL, match_type TEXT NOT NULL DEFAULT '', trakt_id INTEGER NOT NULL DEFAULT 0, match_label TEXT NOT NULL DEFAULT '', show_id INTEGER NOT NULL DEFAULT 0, season INTEGER NOT NULL DEFAULT -1, episode INTEGER NOT NULL DEFAULT -1, notified INTEGER NOT NULL DEFAULT 0, sync_account TEXT NOT NULL DEFAULT '', sync_message TEXT NOT NULL DEFAULT '', catalogue_runtime INTEGER NOT NULL DEFAULT 0)")
         db.execSQL("CREATE INDEX viewing_status ON viewing(status, ended)")
     }
@@ -35,6 +40,7 @@ class WatchHistory(context: Context): SQLiteOpenHelper(context.applicationContex
             db.execSQL("ALTER TABLE viewing ADD COLUMN sync_account TEXT NOT NULL DEFAULT ''")
             db.execSQL("ALTER TABLE viewing ADD COLUMN sync_message TEXT NOT NULL DEFAULT ''")
         }
+        if (oldVersion < 6) createLearning(db)
         if (oldVersion < 5) db.execSQL("ALTER TABLE viewing ADD COLUMN catalogue_runtime INTEGER NOT NULL DEFAULT 0")
     }
     fun pendingNotifications(): List<WatchRecord> = records().filter { it.status == "pending" && !wasNotified(it.id) }
@@ -104,18 +110,55 @@ class WatchHistory(context: Context): SQLiteOpenHelper(context.applicationContex
         require(title.isNotBlank())
         writableDatabase.update("viewing", ContentValues().apply { put("title",title); put("status","reviewed") }, "id=? AND status='pending'", arrayOf(id))
     }
-    fun match(id: String, item: CatalogueItem) {
+    fun match(id: String, item: CatalogueItem, learn:Boolean=true) {
+        val before=record(id) ?: return
         require(item.id > 0 && (item.type == "movie" || item.type == "episode"))
         require(item.type != "episode" || (item.showId > 0 && item.season >= 0 && item.episode > 0))
-        writableDatabase.update("viewing", ContentValues().apply {
+        val changed=writableDatabase.update("viewing", ContentValues().apply {
             put("match_type",item.type); put("trakt_id",item.id); put("match_label",item.label())
             put("show_id",item.showId); put("season",item.season); put("episode",item.episode); put("catalogue_runtime",item.runtimeMinutes.coerceAtLeast(0)*60000L); put("status","reviewed")
         }, "id=? AND status IN ('pending','reviewed')", arrayOf(id))
+        if(changed==1 && learn) remember(before,item)
     }
     fun clearMatch(id: String) {
+        record(id)?.let { r -> forget(r) }
         writableDatabase.update("viewing", ContentValues().apply {
             put("match_type",""); put("trakt_id",0); put("match_label",""); put("show_id",0); put("season",-1); put("episode",-1); put("catalogue_runtime",0L)
         }, "id=? AND status IN ('pending','reviewed')", arrayOf(id))
+    }
+    fun providerRef(id:String,key:String?) {
+        if(key==null) return
+        writableDatabase.insertWithOnConflict("provider_refs",null,ContentValues().apply { put("record_id",id); put("provider_key",key) },SQLiteDatabase.CONFLICT_REPLACE)
+    }
+    private fun ref(id:String):String?=readableDatabase.rawQuery("SELECT provider_key FROM provider_refs WHERE record_id=?",arrayOf(id)).use { if(it.moveToFirst()) it.getString(0) else null }
+    private fun remember(r:WatchRecord,item:CatalogueItem) {
+        val keys=listOfNotNull(RecognitionEngine.key(r.source,r.title,r.subtitle,item.type),ref(r.id)).distinct()
+        for(key in keys) {
+            // A correction replaces a previously learned mapping for the exact same evidence.
+            writableDatabase.insertWithOnConflict("learned",null,ContentValues().apply {
+                put("key",key); put("type",item.type); put("trakt_id",item.id); put("label",item.label()); put("show_id",item.showId); put("season",item.season); put("episode",item.episode); put("runtime",item.runtimeMinutes); put("title",item.title); put("year",item.year)
+            },SQLiteDatabase.CONFLICT_REPLACE)
+        }
+    }
+    private fun forget(r:WatchRecord) {
+        val keys=listOfNotNull(RecognitionEngine.key(r.source,r.title,r.subtitle,"movie"),RecognitionEngine.key(r.source,r.title,r.subtitle,"episode"),ref(r.id))
+        for(key in keys) writableDatabase.delete("learned","key=?",arrayOf(key))
+    }
+    fun clearLearning() { writableDatabase.delete("learned",null,null) }
+    fun learned(r:WatchRecord):CatalogueItem? {
+        val keys=listOfNotNull(ref(r.id),RecognitionEngine.key(r.source,r.title,r.subtitle,"episode"),RecognitionEngine.key(r.source,r.title,r.subtitle,"movie"))
+        val matches=keys.mapNotNull { key -> readableDatabase.rawQuery("SELECT type,trakt_id,title,year,show_id,season,episode,runtime FROM learned WHERE key=?",arrayOf(key)).use { c ->
+            if(!c.moveToFirst()) null else CatalogueItem(c.getString(0),c.getLong(1),c.getString(2),c.getInt(3),c.getLong(4),c.getInt(5),c.getInt(6),c.getInt(7))
+        } }.distinctBy { it.type+":"+it.id }
+        return matches.singleOrNull()
+    }
+    fun applyLearned(limit:Int=20):Int {
+        var count=0
+        for(r in records(100).filter { it.status=="pending" && it.traktId==0L }.take(limit)) {
+            val item=learned(r) ?: continue
+            match(r.id,item,false); count++
+        }
+        return count
     }
     fun enqueue(id: String, account: String): Boolean {
         require(account.isNotBlank())
