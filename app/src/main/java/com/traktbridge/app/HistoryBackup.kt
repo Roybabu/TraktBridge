@@ -63,12 +63,12 @@ object HistoryBackup {
             require(type!="episode" || (r.getLong("show_id")>0 && r.getLong("season") in 0..Int.MAX_VALUE.toLong() && r.getLong("episode") in 1..Int.MAX_VALUE.toLong())) { "Invalid episode identity" }
             require(r.getLong("seeks")<=Int.MAX_VALUE && r.getLong("rewinds")<=Int.MAX_VALUE)
             require(r.getLong("position")<0 || (r.getLong("duration")>0 && r.getLong("position")<=r.getLong("duration"))) { "Invalid playback position" }
-            require(status in setOf("pending","reviewed","queued","uncertain","blocked","synced","dismissed","reconciled","ignored","trashed"))
+            require(status in setOf("pending","reviewed","queued","uncertain","blocked","synced","dismissed","reconciled","ignored","restored_audit","trashed"))
             ContentValues().apply {
                 textFields.forEach { k -> val s=r.getString(k); require(s.length<=16384); put(k,s) }
                 numberFields.forEach { k -> put(k,r.getLong(k)) }
                 // Never restore authorization to upload, nor assert a sync for a different account.
-                put("status",when(status) { "dismissed","reconciled","ignored" -> status; "pending" -> "pending"; else -> "reviewed" })
+                put("status",when(status) { "dismissed","reconciled","ignored" -> status; "pending" -> "pending"; "synced","uncertain","restored_audit" -> "restored_audit"; else -> "reviewed" })
                 put("sync_account",""); put("sync_message",""); put("notified",1)
             }
         }

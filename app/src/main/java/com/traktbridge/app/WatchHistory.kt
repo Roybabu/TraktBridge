@@ -108,7 +108,7 @@ class WatchHistory(context: Context): SQLiteOpenHelper(context.applicationContex
     @Synchronized fun finishAll() { for (key in active.keys.toList()) finish(key) }
     fun records(limit: Int = 100): List<WatchRecord> {
         val result = mutableListOf<WatchRecord>()
-        readableDatabase.rawQuery("SELECT id,source,title,subtitle,started,ended,watched,duration,position,status,match_type,trakt_id,match_label,show_id,season,episode,catalogue_runtime,paused_ms,buffering_ms,uncertain_ms,seeks,rewinds,position_source FROM viewing WHERE status IN ('pending','active','reviewed','queued','uncertain','blocked','synced') ORDER BY ended DESC"+(if(limit>0) " LIMIT "+limit else ""), null).use { c ->
+        readableDatabase.rawQuery("SELECT id,source,title,subtitle,started,ended,watched,duration,position,status,match_type,trakt_id,match_label,show_id,season,episode,catalogue_runtime,paused_ms,buffering_ms,uncertain_ms,seeks,rewinds,position_source FROM viewing WHERE status IN ('pending','active','reviewed','queued','uncertain','blocked','synced','restored_audit') ORDER BY ended DESC"+(if(limit>0) " LIMIT "+limit else ""), null).use { c ->
             while(c.moveToNext()) result.add(WatchRecord(c.getString(0),c.getString(1),c.getString(2),c.getString(3),c.getLong(4),c.getLong(5),c.getLong(6),c.getLong(7),c.getLong(8),c.getString(9),c.getString(10),c.getLong(11),c.getString(12),c.getLong(13),c.getInt(14),c.getInt(15),c.getLong(16),c.getLong(17),c.getLong(18),c.getLong(19),c.getInt(20),c.getInt(21),c.getString(22)))
         }
         return result

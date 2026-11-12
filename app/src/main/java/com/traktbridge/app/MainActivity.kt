@@ -691,7 +691,7 @@ class MainActivity : ComponentActivity() {
         dashboard.removeAllViews()
         val records=history.records(0)
         val groups=ViewingGroups.build(records)
-        val pending=groups.count { it.queued || (it.pending && !it.confirmed) }
+        val pending=groups.count { it.queued || it.pending }
         when(tab) {
             0 -> {
                 val age=System.currentTimeMillis()-prefs.getLong("last_sample",0)
@@ -728,7 +728,7 @@ class MainActivity : ComponentActivity() {
                     dashboard.addView(txt("Filters: "+listOfNotNull(historyFilter.query.takeIf { it.isNotBlank() }?.let { "Search: "+it },historyFilter.source.takeIf { it.isNotBlank() }?.let { appLabel(it) },historyFilter.period.takeIf { it>0 }?.let { "Last "+it+" days" },historyFilter.type.takeIf { it.isNotBlank() },historyFilter.status.takeIf { it.isNotBlank() } ).joinToString(" • ").ifBlank { "All viewing" },13,muted))
                     if(historyFilter!=HistoryFilter()) dashboard.addView(actionButton("Reset filters") { historyFilter=HistoryFilter(); historyLimit=100; refreshHistory() })
                 }
-                val items=if(tab==1) ViewingAnalytics.sort(ViewingGroups.build(ViewingAnalytics.filter(records,historyFilter)),historyFilter.sort) else groups.filter { it.queued || (it.pending && !it.confirmed) }
+                val items=if(tab==1) ViewingAnalytics.sort(ViewingGroups.build(ViewingAnalytics.filter(records,historyFilter)),historyFilter.sort) else groups.filter { it.queued || it.pending }
                 if(items.isEmpty()) panel(dashboard).addView(txt(if(tab==1) "No viewing records yet." else "You're all caught up.",16,muted))
                 val visible=items.take(historyLimit)
                 if(items.size>visible.size) dashboard.addView(actionButton("Show more ("+visible.size+" of "+items.size+")") { historyLimit+=100; refreshHistory() })
@@ -857,7 +857,7 @@ class MainActivity : ComponentActivity() {
         body.addView(txt("Last sampling error: "+prefs.getString("sample_error","none"),14,muted))
         body.addView(actionButton("Open guided setup") { setupGuide() })
         body.addView(actionButton("Inspect live sessions") { liveInspector() })
-        val groups=ViewingGroups.build(history.records(0)).filter { it.queued || (it.pending && !it.confirmed) }
+        val groups=ViewingGroups.build(history.records(0)).filter { it.queued || it.pending }
         section(body,"Pending review and sync • "+groups.size)
         groups.take(20).forEach { titleCard(body,it,true) }
         android.app.AlertDialog.Builder(this).setTitle("Tracking health").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
@@ -1457,7 +1457,7 @@ class MainActivity : ComponentActivity() {
         details.addView(txt(r.matchLabel.ifBlank { r.title.ifBlank { "Unidentified video" } },18,ink,true))
         details.addView(txt(g.platforms.joinToString(" • ") { appLabel(it) },13,muted))
         details.addView(txt(g.sessions.size.toString()+" viewing session(s) • "+java.text.DateFormat.getDateInstance().format(java.util.Date(g.latest.ended)),13,muted))
-        val completion=when { g.confirmed -> "Finished • synced to Trakt"; g.queued -> "Completion approved • sync pending"; g.active -> "Currently watching"; g.nearEnd -> "Near end • confirm completion"; g.positionMs>=0 -> "In progress"; else -> "Completion unknown" }
+        val completion=when { g.sessions.all { it.status=="restored_audit" } -> "Restored history • prior upload not repeated"; g.confirmed -> "Finished • synced to Trakt"; g.queued -> "Completion approved • sync pending"; g.active -> "Currently watching"; g.nearEnd -> "Near end • confirm completion"; g.positionMs>=0 -> "In progress"; else -> "Completion unknown" }
         details.addView(txt(completion,14,if(g.confirmed) 0xff6ee7b7.toInt() else 0xfffbbf24.toInt(),true))
         details.addView(txt("Total sampled watch time: "+if(g.sampledMs>0) durationText(g.sampledMs) else "Unknown",13,muted))
         if(g.durationMs>0 && g.positionMs>=0) {
@@ -1495,7 +1495,7 @@ class MainActivity : ComponentActivity() {
         details.addView(txt(r.matchLabel.ifBlank { r.title.ifBlank { "Unidentified video" } },18,ink,true))
         if(r.subtitle.isNotBlank()) details.addView(txt(r.subtitle,13,muted))
         details.addView(txt(appLabel(r.source)+" • "+java.text.DateFormat.getDateInstance().format(java.util.Date(r.started)),13,muted))
-        val status=when(r.status) { "synced"->"Synced to Trakt"; "active"->"Watching"; "pending"->"Needs review"; "reviewed"->"Ready to confirm"; else->r.status.replaceFirstChar { it.uppercase() } }
+        val status=when(r.status) { "synced"->"Synced to Trakt"; "active"->"Watching"; "pending"->"Needs review"; "reviewed"->"Ready to confirm"; "restored_audit"->"Restored audit • no upload"; else->r.status.replaceFirstChar { it.uppercase() } }
         details.addView(txt(status,13,if(r.status=="synced") 0xff6ee7b7.toInt() else 0xfffbbf24.toInt(),true))
         details.addView(txt(if(r.watched<=0) "Watch time unknown" else durationText(r.watched)+" sampled",13,muted))
         if(r.seeks>0 || r.bufferingMs>0 || r.pausedMs>0 || r.uncertainMs>0) details.addView(txt("Paused: "+durationText(r.pausedMs)+" • Buffering: "+durationText(r.bufferingMs)+" • Seeks: "+r.seeks+" (rewinds "+r.rewinds+") • Uncertain: "+durationText(r.uncertainMs),12,muted))
