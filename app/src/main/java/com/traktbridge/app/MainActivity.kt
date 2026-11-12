@@ -1529,17 +1529,25 @@ class MainActivity : ComponentActivity() {
             } else if(cached!=null) done(Result.success(TitleDetails(cached.optString("title"),cached.optString("overview"),cached.optInt("year"),cached.optInt("runtime"),cached.optDouble("rating",0.0),cached.optString("genres"),cached.optString("trailer"),cached.optString("released")))) else done(result)
         } }) { d:TitleDetails ->
             val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(12),dp(16),dp(12)) }
-            val image=ImageView(this).apply { scaleType=ImageView.ScaleType.FIT_CENTER; contentDescription="Poster" }
+            val image=ImageView(this).apply { scaleType=ImageView.ScaleType.FIT_CENTER; contentDescription="Poster for "+d.title; setImageResource(android.R.drawable.ic_media_play); setBackgroundColor(surface) }
             body.addView(image,LinearLayout.LayoutParams(-1,dp(240))); Artwork.load(this,type,id,image)
-            body.addView(txt(d.title.ifBlank { label },24,ink,true))
-            body.addView(txt(listOf(d.year.takeIf { it>0 }?.toString().orEmpty(),d.runtime.takeIf { it>0 }?.let { it.toString()+" min" }.orEmpty(),d.genres).filter { it.isNotBlank() }.joinToString(" • "),14,muted))
-            if(d.rating>0) body.addView(txt("Trakt rating: "+String.format(java.util.Locale.US,"%.1f",d.rating)+"/10",16,violet))
-            if(prefs.getBoolean("hide_spoilers",true)) body.addView(actionButton("Reveal synopsis") { android.app.AlertDialog.Builder(this).setTitle(d.title).setMessage(d.overview.ifBlank { "No overview available" }).setPositiveButton("Close",null).show() }) else body.addView(txt(d.overview.ifBlank { "No overview available" },16))
-            if(d.released.isNotBlank()) body.addView(txt("Release: "+d.released,13,muted))
+            val metadata=listOf(d.year.takeIf { it>0 }?.toString().orEmpty(),d.runtime.takeIf { it>0 }?.let { it.toString()+" min" }.orEmpty(),d.genres).filter { it.isNotBlank() }.joinToString(" • ")
+            body.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeTitleSummary(violet,d.title.ifBlank { label },metadata,d.rating,d.released,d.overview,prefs.getBoolean("hide_spoilers",true)) } })
+            val groups=ViewingGroups.build(history.records(0)).filter { g -> val row=g.representative; if(type=="movie") row.matchType=="movie" && row.traktId==id else row.matchType=="episode" && row.showId==id }
+            if(groups.isNotEmpty()) {
+                section(body,"Your viewing history")
+                body.addView(txt(groups.count { it.confirmed }.toString()+" completed titles • "+durationText(groups.sumOf { it.sampledMs })+" sampled",14,muted))
+                body.addView(actionButton("View matching sessions") { if(type=="show") showSeries(id) else showSessions(groups.first()) })
+            }
+            body.addView(actionButton("Related titles") {
+                lookup("Loading related titles",{ done -> TraktCatalogue.related(type,id,done) }) { rows:List<CatalogueItem> ->
+                    choose("Related titles",rows.take(40).map { it.label() }) { index -> val item=rows[index]; titleDetails(item.type,item.id,item.title) }
+                }
+            })
             body.addView(actionButton("Cast and directors") { lookup("Loading credits",{ done -> TraktCatalogue.credits(type,id,done) }) { names:List<String> -> android.app.AlertDialog.Builder(this).setTitle("Cast and crew").setMessage(names.joinToString("\n").ifBlank { "No credits returned" }).setPositiveButton("Close",null).show() } })
             body.addView(actionButton("Where to watch • regional availability") { streamingAvailability(type,id,d.title.ifBlank { label }) })
             body.addView(actionButton("Watchlist / rating") { lookup("Checking account",{ done -> TraktLibrary.accountId(this,done) }) { account:String -> remoteActions(RemoteItem(type,id,d.title),account) } })
-            if(d.trailer.startsWith("https://")) body.addView(actionButton("Open trailer") { runCatching { startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse(d.trailer))) } })
+            TitleDetailPolicy.trailer(d.trailer)?.let { url -> body.addView(actionButton("Watch trailer on YouTube") { runCatching { startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse(url))) }.onFailure { Toast.makeText(this,"No compatible app",Toast.LENGTH_LONG).show() } }) }
             android.app.AlertDialog.Builder(this).setTitle("Title details").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
         }
     }

@@ -5,6 +5,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
@@ -99,6 +101,21 @@ fun BridgeReviewSummary(accent:Int,pending:Int,onLog:()->Unit,onSync:()->Unit) {
                 Button(onClick=onLog,modifier=Modifier.fillMaxWidth()) { Text("Log a watch manually") }
                 OutlinedButton(onClick=onSync,modifier=Modifier.fillMaxWidth()) { Text("Retry approved uploads") }
             }
+        }
+    }
+}
+
+@Composable
+fun BridgeTitleSummary(accent:Int,title:String,metadata:String,rating:Double,release:String,overview:String,hideSpoilers:Boolean) {
+    BridgeTheme(accent) {
+        var reveal by androidx.compose.runtime.remember(title) { androidx.compose.runtime.mutableStateOf(false) }
+        Column(Modifier.fillMaxWidth().padding(vertical=8.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+            Text(title,style=MaterialTheme.typography.headlineMedium,fontWeight=FontWeight.Bold,color=MaterialTheme.colorScheme.onSurface)
+            if(metadata.isNotBlank()) Text(metadata,style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
+            if(rating in 0.1..10.0) AssistChip(onClick={},label={ Text("Trakt "+String.format(java.util.Locale.US,"%.1f",rating)+"/10") },enabled=false)
+            if(release.isNotBlank()) Text("Release: "+release,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+            if(hideSpoilers && !reveal) OutlinedButton(onClick={ reveal=true }) { Text("Reveal synopsis") }
+            else Text(overview.ifBlank { "No overview available" },style=MaterialTheme.typography.bodyLarge,color=MaterialTheme.colorScheme.onSurface)
         }
     }
 }

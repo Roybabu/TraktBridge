@@ -191,3 +191,6 @@ Material 3 Compose navigation on phones/tablets, reusable Compose section headin
 
 ## v0.111.0
 Dashboard sections can be reordered or hidden, startup tab selected, and existing home-screen widget switched between private, continue-watching and review count modes. Widget defaults to private and suppresses titles when credential lock is enabled. Native settings and existing navigation destinations remain available.
+
+## v0.112.0
+Compose title summary with spoiler reveal, poster fallback, related-title navigation and matching local viewing history. Trailer links are restricted to canonical HTTPS YouTube videos. Actual artwork and catalogue coverage depend on Trakt metadata; no embedded video player is introduced.
