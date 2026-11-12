@@ -1019,6 +1019,7 @@ class MainActivity : ComponentActivity() {
     private fun recoverTrackingWhenVisible() {
         val permitted=!prefs.getBoolean("privacy_lock",false) || unlocked
         if(TrackingRecovery.shouldStart(prefs.getBoolean("enabled",false),permitted,TrackingService.running,TrackingRecovery.listenerGranted(this))) startTracking()
+        else if(permitted && prefs.getBoolean("enabled",false) && TrackingRecovery.listenerGranted(this) && !PlaybackListener.wake()) runCatching { android.service.notification.NotificationListenerService.requestRebind(android.content.ComponentName(this,PlaybackListener::class.java)) }
     }
     private fun requirePrivacyUnlock() {
         if(!::shell.isInitialized) return

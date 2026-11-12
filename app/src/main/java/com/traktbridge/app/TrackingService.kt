@@ -46,14 +46,15 @@ class TrackingService: Service() {
     private val heartbeat=object: Runnable {
         override fun run() {
             if(!prefs.getBoolean("enabled",false)) { stopSelf(); return }
-            updateDeviceSync()
+            runCatching { updateDeviceSync() }.onFailure { DebugTrace.failure("device-sync-heartbeat",it) }
             val now=System.currentTimeMillis()
             val last=prefs.getLong("last_sample",0)
             val tick=SystemClock.elapsedRealtime()
             if(TrackingRecovery.listenerGranted(this@TrackingService) && TrackingHealthPolicy.shouldRebind(now,last,tick,lastRebind)) {
                 lastRebind=tick
-                DebugTrace.event("foreground","listener stale; requesting rebind")
-                runCatching { android.service.notification.NotificationListenerService.requestRebind(ComponentName(this@TrackingService,PlaybackListener::class.java)) }
+                val woke=PlaybackListener.wake()
+                DebugTrace.event("foreground","listener stale; directWake="+woke)
+                if(!woke) runCatching { android.service.notification.NotificationListenerService.requestRebind(ComponentName(this@TrackingService,PlaybackListener::class.java)) }
             }
             handler.postDelayed(this,15000)
         }
@@ -77,6 +78,7 @@ class TrackingService: Service() {
         if(!networkRegistered) runCatching { connectivity.registerDefaultNetworkCallback(networkCallback); networkRegistered=true }
         prefs.edit().putBoolean("foreground_running",true).putLong("foreground_started_elapsed",SystemClock.elapsedRealtime()).apply()
         DebugTrace.event("foreground","started")
+        PlaybackListener.wake()
         handler.removeCallbacks(heartbeat); handler.post(heartbeat)
         return START_STICKY
     }
