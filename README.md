@@ -188,3 +188,6 @@ External history importer accepts an explicitly documented CSV interchange forma
 
 ## v0.110.0
 Material 3 Compose navigation on phones/tablets, reusable Compose section headings and a Compose review summary. Existing TV navigation, native dialogs, settings and history cards are retained to preserve behavior. This is an incremental migration, not a complete Compose rewrite.
+
+## v0.111.0
+Dashboard sections can be reordered or hidden, startup tab selected, and existing home-screen widget switched between private, continue-watching and review count modes. Widget defaults to private and suppresses titles when credential lock is enabled. Native settings and existing navigation destinations remain available.

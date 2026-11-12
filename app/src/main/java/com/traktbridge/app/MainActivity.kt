@@ -367,7 +367,7 @@ class MainActivity : ComponentActivity() {
         applyScreenProtection()
         DebugTrace.init(this)
         DebugTrace.event("activity","main opened")
-        tab=(savedInstanceState?.getInt("tab") ?: 0).coerceIn(0,4)
+        tab=(savedInstanceState?.getInt("tab") ?: DashboardPreferences.startTab(prefs.getInt("startup_tab",0))).coerceIn(0,4)
         importSource=savedInstanceState?.getString("import_source") ?: "com.netflix.mediaclient"
         historyFilter=HistoryFilter(savedInstanceState?.getString("filter_q").orEmpty(),savedInstanceState?.getString("filter_source").orEmpty(),savedInstanceState?.getInt("filter_period") ?: 0,savedInstanceState?.getString("filter_type").orEmpty(),savedInstanceState?.getString("filter_status").orEmpty(),savedInstanceState?.getString("filter_sort") ?: "recent")
         analyticsPeriod=savedInstanceState?.getInt("analytics_period") ?: 30
@@ -409,6 +409,7 @@ class MainActivity : ComponentActivity() {
         root.addView(Switch(this).apply { text="High contrast text"; isChecked=prefs.getBoolean("high_contrast",false); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("high_contrast",checked).apply(); recreate() } })
         button("Text size") { choose("Reading size",listOf("System default","Large","Extra large")) { prefs.edit().putInt("reading_size",it).apply(); recreate() } }
         button("Monthly viewing goal and dashboard") { configureGoal() }
+        button("Customize dashboard and widget") { customizeDashboard() }
         button("Appearance accent") { choose("Accent color",listOf("Violet","Blue","Green")) { prefs.edit().putString("accent",listOf("violet","blue","green")[it]).apply(); recreate() } }
         button("Franchise viewing guides") { franchises() }
         button("Recently deleted viewing") { recentlyDeleted() }
@@ -863,6 +864,33 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+    private fun customizeDashboard() {
+        val keys=DashboardPreferences.order(prefs.getString("dashboard_order","").orEmpty()).toMutableList()
+        val hidden=DashboardPreferences.visible(prefs.getString("dashboard_hidden","").orEmpty()).toMutableSet()
+        val labels=mapOf("metrics" to "Statistics","goal" to "Monthly goal","now" to "Now playing","continue" to "Continue watching","review" to "Review queue","discover" to "Discovery shortcuts","recent" to "Recent viewing")
+        val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(8),dp(12),dp(8)) }
+        val items=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }; body.addView(items)
+        fun redraw() {
+            items.removeAllViews()
+            keys.forEachIndexed { index,key ->
+                items.addView(CheckBox(this).apply { text=labels[key]; isChecked=key !in hidden; setOnCheckedChangeListener { _,checked -> if(checked) hidden.remove(key) else hidden.add(key) } })
+                if(index>0) items.addView(actionButton("Move "+labels[key]+" up") { keys.removeAt(index); keys.add(index-1,key); redraw() })
+            }
+        }
+        redraw()
+        body.addView(txt("Default opening tab",14,muted))
+        val tabPicker=Spinner(this).apply { adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,listOf("Home","Library","Review","Activity")); setSelection(DashboardPreferences.startTab(prefs.getInt("startup_tab",0))); body.addView(this) }
+        body.addView(txt("Home-screen widget content",14,muted))
+        val modes=listOf("private","continue","review")
+        val widget=Spinner(this).apply { adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,listOf("Private (no titles)","Continue watching","Review count")); setSelection(modes.indexOf(DashboardPreferences.widgetMode(prefs.getString("widget_mode","private").orEmpty()))); body.addView(this) }
+        android.app.AlertDialog.Builder(this).setTitle("Customize dashboard").setView(ScrollView(this).apply { addView(body) }).setNegativeButton("Cancel",null).setPositiveButton("Save") { _,_->
+            prefs.edit().putString("dashboard_order",keys.joinToString(",")).putString("dashboard_hidden",hidden.joinToString(",")).putInt("startup_tab",tabPicker.selectedItemPosition).putString("widget_mode",modes[widget.selectedItemPosition]).apply()
+            val manager=android.appwidget.AppWidgetManager.getInstance(this)
+            val ids=manager.getAppWidgetIds(android.content.ComponentName(this,ViewingWidget::class.java))
+            if(ids.isNotEmpty()) sendBroadcast(Intent(android.appwidget.AppWidgetManager.ACTION_APPWIDGET_UPDATE).setComponent(android.content.ComponentName(this,ViewingWidget::class.java)).putExtra(android.appwidget.AppWidgetManager.EXTRA_APPWIDGET_IDS,ids))
+            refreshHistory()
+        }.show()
+    }
     private fun renderHistory(records:List<WatchRecord>,groups:List<ViewingTitle>) {
         dashboard.removeAllViews()
         val pending=groups.count { it.queued || it.pending }
@@ -872,26 +900,53 @@ class MainActivity : ComponentActivity() {
                 val live=prefs.getBoolean("enabled",false) && prefs.getBoolean("listener_connected",false) && age in 0..20000
                 val weekly=ViewingAnalytics.filter(records,HistoryFilter(period=7))
                 dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeHomeSummary(violet,live,pending,durationText(weekly.sumOf { it.watched }),{ showTab(4) },{ showTab(2) },{ discover() },{ viewingPlanner() }) } })
+                val hidden=DashboardPreferences.visible(prefs.getString("dashboard_hidden","").orEmpty())
+                for(key in DashboardPreferences.order(prefs.getString("dashboard_order","").orEmpty())) {
+                    if(key in hidden) continue
+                    when(key) {
+                    "metrics" -> {
                 metricGrid(dashboard,listOf("This week" to durationText(weekly.sumOf { it.watched }),"Movies synced" to groups.count { it.confirmed && it.representative.matchType=="movie" }.toString(),"Episodes synced" to groups.count { it.confirmed && it.representative.matchType=="episode" }.toString(),"Needs review" to pending.toString()))
+
+                    }
+                    "goal" -> {
                 if(prefs.getBoolean("show_monthly_goal",true)) monthlyGoalCard(dashboard,records)
+
+                    }
+                    "now" -> {
                 section(dashboard,"Now watching")
                 dashboard.addView(actionButton("Open live Now Playing") { nowPlaying() })
                 val active=groups.filter { it.active }
                 if(active.isEmpty()) panel(dashboard).addView(txt("No verified active playback. Play a video in a selected app.",15,muted)) else cards(dashboard,active.take(2)) { parent,g -> titleCard(parent,g,false) }
+
+                    }
+                    "continue" -> {
                 section(dashboard,"Continue watching")
                 SeriesLibrary.continueWatching(groups).firstOrNull()?.let { heroCard(dashboard,it) }
                 val continuing=SeriesLibrary.continueWatching(groups)
                 if(continuing.isEmpty()) panel(dashboard).addView(txt("No unfinished sampled viewing yet.",15,muted)) else cards(dashboard,continuing.drop(1).take(6)) { parent,g -> titleCard(parent,g,false) }
+
+                    }
+                    "review" -> {
                 section(dashboard,"Review queue")
                 val q=panel(dashboard); q.addView(txt("$pending awaiting action",22,ink,true)); q.addView(actionButton("Open review queue") { showTab(2) }); q.addView(actionButton("Review app activity") { reviewUsage() })
+
+                    }
+                    "discover" -> {
                 dashboard.addView(actionButton("Ask your viewing assistant") { localAssistant() })
                 dashboard.addView(actionButton("Upcoming episodes") { upcomingEpisodes() })
                 dashboard.addView(actionButton("Recommendations from your history") { recommendFromHistory() })
                 dashboard.addView(actionButton("Anime catalogue (AniList)") { animeSearch() })
                 dashboard.addView(actionButton("Open Trakt account library") { openTraktLibrary() })
+
+                    }
+                    "recent" -> {
                 section(dashboard,"Recently watched")
                 val recent=groups.filter { !it.active }.take(5)
                 if(recent.isEmpty()) panel(dashboard).addView(txt("Your viewing history will appear here.",15,muted)) else cards(dashboard,recent) { parent,g -> titleCard(parent,g,false) }
+                    }
+                    }
+                }
+                dashboard.addView(actionButton("Customize dashboard") { customizeDashboard() })
             }
             1,2 -> {
                 if(tab==1) dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeLibraryToolbar(violet,groups.size.toString()+" identified titles and provisional groups",{ universalSearch() },{ editHistoryFilter(records) },{ manualLog() }) } })
