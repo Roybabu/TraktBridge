@@ -104,7 +104,9 @@ class PlaybackListener : NotificationListenerService() {
         val keys=selected.map { sessionKey(it) }.toSet()
         retained.keys.retainAll(keys)
         selected.forEach { c ->
-            val profile=DetectionProfiles.forPackage(c.packageName)
+            val config=resources.configuration
+            val kind=DeviceDetection.kind(config.uiMode and android.content.res.Configuration.UI_MODE_TYPE_MASK == android.content.res.Configuration.UI_MODE_TYPE_TELEVISION,config.smallestScreenWidthDp)
+            val profile=DeviceDetection.profile(DetectionProfiles.forPackage(c.packageName),kind)
             val m = c.metadata
             val p = c.playbackState
             DebugTrace.event("media","selected package="+c.packageName+" metadata="+(m!=null)+" titlePresent="+(!m?.getString(MediaMetadata.METADATA_KEY_TITLE).isNullOrBlank() || !m?.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE).isNullOrBlank())+" state="+(p?.state ?: -1)+" positionMs="+(p?.position ?: -1)+" durationMs="+(m?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0))
@@ -112,7 +114,7 @@ class PlaybackListener : NotificationListenerService() {
             val now=System.currentTimeMillis()
             val explicitSegment=SegmentDetection.metadata(m?.getString(MediaMetadata.METADATA_KEY_TITLE).orEmpty())
             val segment=if(explicitSegment!=PlaybackSegment.UNKNOWN) explicitSegment else if(selected.count { it.packageName==c.packageName }==1) TitleAccessibility.segment(this,c.packageName,now) else PlaybackSegment.UNKNOWN
-            val note=mediaTitles[c.packageName]?.takeIf { now-it.first in 0..120000 }?.second.orEmpty()
+            val note=mediaTitles[c.packageName]?.takeIf { now-it.first in 0..DeviceDetection.notificationAge(profile,kind) }?.second.orEmpty()
             val key=sessionKey(c)
             val phase=when(p?.state) {
                 PlaybackState.STATE_PLAYING -> PlaybackPhase.PLAYING
