@@ -463,6 +463,17 @@ class MainActivity : ComponentActivity() {
         fun label(s: String) { root.addView(txt(s,15,muted)) }
         fun button(s: String, action: () -> Unit) { root.addView(actionButton(s,action)) }
         label("SETTINGS • Account and tracking")
+        button("Cross-device playback sharing") {
+            val enabled=prefs.getBoolean("device_sharing",false)
+            android.app.AlertDialog.Builder(this).setTitle(if(enabled) "Stop device sharing?" else "Enable device sharing?")
+                .setMessage("Share live playback title, episode detail, provider and progress only with approved devices over encrypted local Wi-Fi. Tracking must be running on each device. No video or Trakt credentials are shared.")
+                .setNegativeButton("Cancel",null).setPositiveButton(if(enabled) "Disable" else "Enable") { _,_->
+                    prefs.edit().putBoolean("device_sharing",!enabled).apply()
+                    if(enabled) RemotePlayback.clear()
+                    if(prefs.getBoolean("enabled",false)) startTracking()
+                    Toast.makeText(this,if(enabled) "Sharing disabled" else "Sharing enabled while tracking is active",Toast.LENGTH_LONG).show()
+                }.show()
+        }
         button("Show device pairing QR") { showPairingInvitation() }
         button("Enter pairing invitation and PIN") { approvePairingInvitation() }
         button("Read pairing QR from image") { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("image/*"),97) }

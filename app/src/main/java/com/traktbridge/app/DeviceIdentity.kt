@@ -28,6 +28,12 @@ object DeviceIdentity {
         val label = prefs.getString("label", null) ?: Build.MODEL.take(80)
         return Registration(fingerprint(key), label, key)
     }
+    @Synchronized internal fun tlsMaterial(context: Context): Pair<java.security.PrivateKey,Array<java.security.cert.X509Certificate>> {
+        register(context)
+        val store=KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        return (store.getKey(ALIAS,null) as java.security.PrivateKey) to
+            requireNotNull(store.getCertificateChain(ALIAS)).map { it as java.security.cert.X509Certificate }.toTypedArray()
+    }
     @Synchronized fun sign(context: Context, data: ByteArray): ByteArray {
         register(context)
         val store=KeyStore.getInstance("AndroidKeyStore").apply { load(null) }

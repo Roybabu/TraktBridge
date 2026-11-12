@@ -8,10 +8,20 @@ import android.os.*
 class TrackingService: Service() {
     private val prefs by lazy { getSharedPreferences("tracker",MODE_PRIVATE) }
     private val handler=Handler(Looper.getMainLooper())
+    private var deviceSync: LocalPlaybackSync?=null
+    private fun updateDeviceSync() {
+        val allowed=PlaybackSharing.enabled(this) && PlaybackSharing.localWifi(this)
+        if(!allowed) { deviceSync?.close(); deviceSync=null; return }
+        if(deviceSync==null) runCatching {
+            val sync=LocalPlaybackSync(this)
+            try { sync.start(); deviceSync=sync } catch(e:Exception) { sync.close(); throw e }
+        }.onFailure { DebugTrace.failure("device-sync",it) }
+    }
     private var lastRebind= -60000L
     private val heartbeat=object: Runnable {
         override fun run() {
             if(!prefs.getBoolean("enabled",false)) { stopSelf(); return }
+            updateDeviceSync()
             val now=System.currentTimeMillis()
             val last=prefs.getLong("last_sample",0)
             val tick=SystemClock.elapsedRealtime()
@@ -45,6 +55,7 @@ class TrackingService: Service() {
     }
     override fun onDestroy() {
         handler.removeCallbacks(heartbeat)
+        deviceSync?.close(); deviceSync=null
         prefs.edit().putBoolean("foreground_running",false).apply()
         DebugTrace.event("foreground","stopped")
         super.onDestroy()
