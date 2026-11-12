@@ -43,7 +43,7 @@ class MainActivity : ComponentActivity() {
     private fun showAuth(message: String = auth.status()) { account.text = message }
     private fun handleCallback(i: Intent) {
         val uri = i.data ?: return
-        if (uri.scheme != "traktbridge" || uri.host != "callback") return
+        if (uri.scheme != "traktbridge" || uri.encodedAuthority != "callback" || !uri.encodedPath.isNullOrEmpty() || uri.fragment!=null) return
         i.data = null
         showAuth("Connecting to Trakt…")
         auth.complete(uri) { showAuth(it) }
@@ -279,7 +279,7 @@ class MainActivity : ComponentActivity() {
         }
     }
     private fun handleShared(i:Intent) {
-        if(i.action!=Intent.ACTION_SEND) return
+        if(i.action!=Intent.ACTION_SEND || prefs.getBoolean("privacy_lock",false) && !unlocked) return
         val type=i.type.orEmpty()
         i.action=null
         if(type.startsWith("video/")) {
@@ -325,11 +325,12 @@ class MainActivity : ComponentActivity() {
         dialog.show()
     }
     private fun handleReview(i: Intent) {
-        if(i.action==ViewingNotifications.USAGE_REVIEW) { i.action=null; reviewUsage(); return }
+        if(i.action==ViewingNotifications.USAGE_REVIEW) { i.action=null; if(!prefs.getBoolean("privacy_lock",false) || unlocked) reviewUsage(); return }
         if (i.action != ViewingNotifications.REVIEW) return
         val uri = i.data ?: return
         if (uri.scheme != "traktbridge" || uri.host != "review") return
-        val id = uri.lastPathSegment ?: return
+        if(prefs.getBoolean("privacy_lock",false) && !unlocked) return
+        val id = ComponentPolicy.reviewId(uri.toString()) ?: return
         i.action = null; i.data = null
         ViewingNotifications.cancel(this,id)
         val r = history.record(id) ?: return
@@ -343,7 +344,7 @@ class MainActivity : ComponentActivity() {
         applyScreenProtection()
         DebugTrace.init(this)
         DebugTrace.event("activity","main opened")
-        tab=savedInstanceState?.getInt("tab") ?: 0
+        tab=(savedInstanceState?.getInt("tab") ?: 0).coerceIn(0,4)
         importSource=savedInstanceState?.getString("import_source") ?: "com.netflix.mediaclient"
         historyFilter=HistoryFilter(savedInstanceState?.getString("filter_q").orEmpty(),savedInstanceState?.getString("filter_source").orEmpty(),savedInstanceState?.getInt("filter_period") ?: 0,savedInstanceState?.getString("filter_type").orEmpty(),savedInstanceState?.getString("filter_status").orEmpty(),savedInstanceState?.getString("filter_sort") ?: "recent")
         analyticsPeriod=savedInstanceState?.getInt("analytics_period") ?: 30
@@ -696,7 +697,7 @@ class MainActivity : ComponentActivity() {
         text=value; textSize=size.toFloat()*when(prefs.getInt("reading_size",0)) { 1->1.15f; 2->1.3f; else->1f }; setTextColor(color); if(bold) setTypeface(null,android.graphics.Typeface.BOLD)
     }
     private fun actionButton(label:String,action:()->Unit)=Button(this).apply {
-        text=label; isAllCaps=false; isFocusable=true; if(tvMode) { minWidth=dp(120); setOnFocusChangeListener { view,focused -> view.alpha=if(focused) 1f else 0.85f; view.scaleX=if(focused) 1.03f else 1f; view.scaleY=if(focused) 1.03f else 1f } }; setTextColor(ink); textSize=14f*when(prefs.getInt("reading_size",0)) { 1->1.15f; 2->1.3f; else->1f }; background=rounded(0xff302a48.toInt(),12); minHeight=dp(48)
+        text=label; contentDescription=label; isAllCaps=false; isFocusable=true; if(tvMode) { minWidth=dp(120); setOnFocusChangeListener { view,focused -> view.alpha=if(focused) 1f else 0.85f; view.scaleX=if(focused) 1.03f else 1f; view.scaleY=if(focused) 1.03f else 1f } }; setTextColor(ink); textSize=14f*when(prefs.getInt("reading_size",0)) { 1->1.15f; 2->1.3f; else->1f }; background=rounded(0xff302a48.toInt(),12); minHeight=dp(48)
         layoutParams=LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(6) }; setOnClickListener { action() }
     }
     private fun panel(parent:LinearLayout):LinearLayout=LinearLayout(this).apply {
@@ -709,6 +710,7 @@ class MainActivity : ComponentActivity() {
         return super.dispatchKeyEvent(event)
     }
     private fun showTab(index:Int) {
+        if(index !in 0..4) return
         tab=index; settingsPage.visibility=if(index==4) android.view.View.VISIBLE else android.view.View.GONE
         contentPage.visibility=if(index==4) android.view.View.GONE else android.view.View.VISIBLE
         for(i in 0 until nav.childCount) (nav.getChildAt(i) as TextView).apply { setTextColor(if(i==index) violet else muted); background=rounded(if(i==index) 0xff302a48.toInt() else surface,12) }
@@ -1050,7 +1052,7 @@ class MainActivity : ComponentActivity() {
     }
     private fun handleAutomation(i:Intent) {
         val uri=i.data ?: return
-        if(i.action!=Intent.ACTION_VIEW || uri.scheme!="traktbridge" || uri.host!="shortcut") return
+        if(i.action!=Intent.ACTION_VIEW || uri.scheme!="traktbridge" || uri.host!="shortcut" || prefs.getBoolean("privacy_lock",false) && !unlocked) return
         i.data=null
         when(PlaybackShortcuts.shortcut(uri.toString())) {
             "home" -> showTab(0)
@@ -1372,7 +1374,7 @@ class MainActivity : ComponentActivity() {
         card.addView(actionButton("View title and sessions") { showSessions(g) })
     }
     private fun <T> cards(parent:LinearLayout,items:List<T>,render:(LinearLayout,T)->Unit) {
-        if(!wide) { items.forEach { render(parent,it) }; return }
+        if(ComponentPolicy.columns(resources.configuration.screenWidthDp,resources.configuration.fontScale,tvMode)==1) { items.forEach { render(parent,it) }; return }
         items.chunked(2).forEach { pair ->
             val row=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=android.view.Gravity.TOP }
             parent.addView(row)
@@ -1385,7 +1387,7 @@ class MainActivity : ComponentActivity() {
         }
     }
     private fun metricGrid(parent:LinearLayout,metrics:List<Pair<String,String>>) {
-        metrics.chunked(if(wide) 4 else 2).forEach { pair ->
+        metrics.chunked(if(resources.configuration.fontScale>=1.5f) 1 else if(wide) 4 else 2).forEach { pair ->
             val row=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL }
             parent.addView(row)
             for((label,value) in pair) {

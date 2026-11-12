@@ -134,3 +134,6 @@ New remote history downloads use Android Keystore AES-GCM encryption with accoun
 
 ## v0.92.0
 Navigation labels are translated in Hindi and Spanish using Android locale resources. Optional device-credential gate conceals the dashboard when returning to the app; it is not an independent cryptographic vault. Complete UI localization and dedicated biometric flow/device testing remain outstanding.
+
+## v0.93.0
+Adaptive layouts collapse to one column at large system font scales; actionable controls have accessibility labels. Internal review URI and OAuth callback validation are tightened, and external review/share/navigation actions are blocked while the privacy lock is active. Unused biometric permission is removed (device credential uses system confirmation). Accessibility, component security and device regression testing remain outstanding.
