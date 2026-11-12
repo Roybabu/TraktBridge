@@ -338,6 +338,7 @@ class MainActivity : ComponentActivity() {
         root.addView(Switch(this).apply { text="Hide catalogue spoilers"; isChecked=prefs.getBoolean("hide_spoilers",true); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("hide_spoilers",checked).apply() } })
         root.addView(Switch(this).apply { text="High contrast text"; isChecked=prefs.getBoolean("high_contrast",false); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("high_contrast",checked).apply(); recreate() } })
         button("Text size") { choose("Reading size",listOf("System default","Large","Extra large")) { prefs.edit().putInt("reading_size",it).apply(); recreate() } }
+        button("Monthly viewing goal and dashboard") { configureGoal() }
         button("Appearance accent") { choose("Accent color",listOf("Violet","Blue","Green")) { prefs.edit().putString("accent",listOf("violet","blue","green")[it]).apply(); recreate() } }
         button("Franchise viewing guides") { franchises() }
         button("Recently deleted viewing") { recentlyDeleted() }
@@ -487,6 +488,24 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+    private fun configureGoal() {
+        val field=EditText(this).apply { hint="Monthly sampled hours (0 disables goal)"; inputType=android.text.InputType.TYPE_CLASS_NUMBER; setText(prefs.getInt("monthly_goal",0).toString()) }
+        android.app.AlertDialog.Builder(this).setTitle("Optional viewing goal").setMessage("Track a personal time budget. There are no rewards or pressure to watch more.").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Save") { _,_->
+            val hours=field.text.toString().toIntOrNull()
+            if(hours!=null && hours in 0..744) { prefs.edit().putInt("monthly_goal",hours).apply(); refreshHistory() }
+        }.show()
+    }
+    private fun monthlyGoalCard(parent:LinearLayout,records:List<WatchRecord>) {
+        val hours=prefs.getInt("monthly_goal",0)
+        if(hours<=0) return
+        val month=java.time.YearMonth.now()
+        val total=records.filter { java.time.YearMonth.from(ViewingAnalytics.day(it.ended))==month }.sumOf { it.watched }
+        val card=panel(parent)
+        card.addView(txt("Monthly viewing budget",18,ink,true))
+        card.addView(txt(durationText(total)+" / "+hours+" hours",14,muted))
+        card.addView(ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal).apply { progress=(total.toDouble()/(hours*3600000L)*100).toInt().coerceIn(0,100) })
+        card.addView(actionButton("Adjust budget") { configureGoal() })
+    }
     private fun smartCollections() {
         val groups=ViewingGroups.build(history.records(0))
         val choices=listOf("Unfinished viewing","Movies under 90 minutes","Favorites","Most watched","Needs identification","Rewatched titles")
@@ -634,6 +653,7 @@ class MainActivity : ComponentActivity() {
                 val weekly=ViewingAnalytics.filter(records,HistoryFilter(period=7))
                 dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeHomeSummary(violet,live,pending,durationText(weekly.sumOf { it.watched }),{ showTab(4) },{ showTab(2) },{ discover() },{ viewingPlanner() }) } })
                 metricGrid(dashboard,listOf("This week" to durationText(weekly.sumOf { it.watched }),"Movies synced" to groups.count { it.confirmed && it.representative.matchType=="movie" }.toString(),"Episodes synced" to groups.count { it.confirmed && it.representative.matchType=="episode" }.toString(),"Needs review" to pending.toString()))
+                if(prefs.getBoolean("show_monthly_goal",true)) monthlyGoalCard(dashboard,records)
                 section(dashboard,"Now watching")
                 dashboard.addView(actionButton("Open live Now Playing") { nowPlaying() })
                 val active=groups.filter { it.active }
