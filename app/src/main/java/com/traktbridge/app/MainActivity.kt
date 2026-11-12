@@ -88,7 +88,7 @@ class MainActivity : ComponentActivity() {
                 addView(txt("Verification PIN: "+DevicePairing.verificationCode(token)+"\nExpires in 2 minutes. Scan this QR on your phone or tablet, compare the PIN, then approve an invitation from the other device.",16))
                 addView(EditText(this@MainActivity).apply { setText(token); keyListener=null; setTextIsSelectable(true); maxLines=3 })
             }
-            val dialog=android.app.AlertDialog.Builder(this).setTitle("Pair this device").setView(content).setPositiveButton("Close",null).create()
+            val dialog=BridgeDialogBuilder(this).setTitle("Pair this device").setView(content).setPositiveButton("Close",null).create()
             dialog.show()
             content.postDelayed({ dialog.dismiss() },120000)
         }.onFailure { Toast.makeText(this,"Unable to create invitation",Toast.LENGTH_LONG).show() }
@@ -97,9 +97,9 @@ class MainActivity : ComponentActivity() {
         val token=EditText(this).apply { hint="Signed invitation"; setText(initial); maxLines=4; filters=arrayOf(android.text.InputFilter.LengthFilter(2048)) }
         val pin=EditText(this).apply { hint="8-digit PIN shown on other device"; inputType=android.text.InputType.TYPE_CLASS_NUMBER; filters=arrayOf(android.text.InputFilter.LengthFilter(8)) }
         val content=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; addView(token); addView(pin) }
-        android.app.AlertDialog.Builder(this).setTitle("Verify nearby device").setView(content).setNegativeButton("Cancel",null).setPositiveButton("Verify") { _,_->
+        BridgeDialogBuilder(this).setTitle("Verify nearby device").setView(content).setNegativeButton("Cancel",null).setPositiveButton("Verify") { _,_->
             runCatching { DevicePairing.verify(token.text.toString().trim(),pin.text.toString()) }.fold({ peer ->
-                android.app.AlertDialog.Builder(this).setTitle("Authorize device?").setMessage(peer.label+"\n"+peer.id+"\nApprove only a device you recognize. The other device must also approve your invitation.").setNegativeButton("Cancel",null).setPositiveButton("Authorize") { _,_->
+                BridgeDialogBuilder(this).setTitle("Authorize device?").setMessage(peer.label+"\n"+peer.id+"\nApprove only a device you recognize. The other device must also approve your invitation.").setNegativeButton("Cancel",null).setPositiveButton("Authorize") { _,_->
                     runCatching { DevicePairing.approve(this,peer) }.fold({ Toast.makeText(this,"Identity approved",Toast.LENGTH_SHORT).show() },{ Toast.makeText(this,"Authorization failed",Toast.LENGTH_SHORT).show() })
                 }.show()
             },{ Toast.makeText(this,"Invalid or expired invitation/PIN",Toast.LENGTH_LONG).show() })
@@ -122,11 +122,11 @@ class MainActivity : ComponentActivity() {
         }.start()
     }
     private fun deviceTransferGuide() {
-        android.app.AlertDialog.Builder(this).setTitle("Move your library to another device").setMessage("1. Export a password-encrypted history backup.\n2. Export personal settings separately.\n3. Transfer both files using your preferred private file-sharing method.\n4. Restore them on the other device.\n\nThis is manual transfer, not live synchronization. Account credentials and upload approvals never transfer. Reconnect Trakt separately.").setNegativeButton("Close",null).setNeutralButton("Export settings") { _,_->startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/octet-stream").putExtra(Intent.EXTRA_TITLE,"traktbridge-settings.tbenc"),65) }.setPositiveButton("Export history") { _,_->startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/octet-stream").putExtra(Intent.EXTRA_TITLE,"traktbridge-history.tbenc"),63) }.show()
+        BridgeDialogBuilder(this).setTitle("Move your library to another device").setMessage("1. Export a password-encrypted history backup.\n2. Export personal settings separately.\n3. Transfer both files using your preferred private file-sharing method.\n4. Restore them on the other device.\n\nThis is manual transfer, not live synchronization. Account credentials and upload approvals never transfer. Reconnect Trakt separately.").setNegativeButton("Close",null).setNeutralButton("Export settings") { _,_->startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/octet-stream").putExtra(Intent.EXTRA_TITLE,"traktbridge-settings.tbenc"),65) }.setPositiveButton("Export history") { _,_->startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/octet-stream").putExtra(Intent.EXTRA_TITLE,"traktbridge-history.tbenc"),63) }.show()
     }
     private fun settingsTransfer(code:Int,uri:android.net.Uri) {
         val field=EditText(this).apply { hint="Password (10+ characters)"; inputType=android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD }
-        android.app.AlertDialog.Builder(this).setTitle("Personal settings backup").setMessage("Includes default-profile collections, notes, favorites and selected display settings. Excludes tokens, tracking permissions, other profiles and learned mappings. Existing settings are not overwritten on import.").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Continue") { _,_->
+        BridgeDialogBuilder(this).setTitle("Personal settings backup").setMessage("Includes default-profile collections, notes, favorites and selected display settings. Excludes tokens, tracking permissions, other profiles and learned mappings. Existing settings are not overwritten on import.").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Continue") { _,_->
             val password=field.text.toString().toCharArray(); field.text.clear()
             Thread {
                 try {
@@ -137,7 +137,7 @@ class MainActivity : ComponentActivity() {
                     } else {
                         val data=contentResolver.openInputStream(uri)?.use { input -> val out=java.io.ByteArrayOutputStream(); val buf=ByteArray(8192); while(true) { val n=input.read(buf); if(n<0) break; require(out.size()+n<=8_000_000); out.write(buf,0,n) }; out.toByteArray() } ?: error("Cannot read")
                         val stores=PortableSettings.parse(EncryptedBackup.decrypt(data,password))
-                        runOnUiThread { if(!isDestroyed && !isFinishing) android.app.AlertDialog.Builder(this).setTitle("Merge personal settings?").setMessage("Existing entries remain unchanged. No account credentials or permissions are imported.").setNegativeButton("Cancel",null).setPositiveButton("Merge") { _,_->
+                        runOnUiThread { if(!isDestroyed && !isFinishing) BridgeDialogBuilder(this).setTitle("Merge personal settings?").setMessage("Existing entries remain unchanged. No account credentials or permissions are imported.").setNegativeButton("Cancel",null).setPositiveButton("Merge") { _,_->
                             Thread { val result=runCatching { PortableSettings.merge(applicationContext,stores) }; runOnUiThread { if(!isDestroyed && !isFinishing) { Toast.makeText(this,result.fold({ it.toString()+" entries imported" },{ "Merge failed" }),Toast.LENGTH_LONG).show(); recreate() } } }.start()
                         }.show() }
                     }
@@ -154,13 +154,13 @@ class MainActivity : ComponentActivity() {
                 MigrationReadiness.message(rows.count { it.status=="active" },rows.count { it.status=="queued" },rows.count { it.status=="uncertain" },rows.count { it.status=="blocked" },HistoryBackup.integrity(db))
             } }
             runOnUiThread {
-                if(!isDestroyed && !isFinishing) android.app.AlertDialog.Builder(this).setTitle("Encryption migration readiness").setMessage(result.getOrDefault("Unable to validate database. No changes made.")+"\n\nThe live database remains plaintext. Export an encrypted recovery backup before future migration.").setNegativeButton("Close",null).setPositiveButton("Export encrypted backup") { _,_->startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/octet-stream").putExtra(Intent.EXTRA_TITLE,"traktbridge-history.tbenc"),63) }.show()
+                if(!isDestroyed && !isFinishing) BridgeDialogBuilder(this).setTitle("Encryption migration readiness").setMessage(result.getOrDefault("Unable to validate database. No changes made.")+"\n\nThe live database remains plaintext. Export an encrypted recovery backup before future migration.").setNegativeButton("Close",null).setPositiveButton("Export encrypted backup") { _,_->startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/octet-stream").putExtra(Intent.EXTRA_TITLE,"traktbridge-history.tbenc"),63) }.show()
             }
         }.start()
     }
     private fun restoreDailyBackup() {
         if(!LocalBackupVault.exists(this)) { Toast.makeText(this,"No daily backup yet",Toast.LENGTH_LONG).show(); return }
-        android.app.AlertDialog.Builder(this).setTitle("Restore daily device backup?").setMessage("Existing IDs are skipped. No sync approval is restored.").setNegativeButton("Cancel",null).setPositiveButton("Merge") { _,_->
+        BridgeDialogBuilder(this).setTitle("Restore daily device backup?").setMessage("Existing IDs are skipped. No sync approval is restored.").setNegativeButton("Cancel",null).setPositiveButton("Merge") { _,_->
             Thread {
                 val result=runCatching { val rows=HistoryBackup.parse(LocalBackupVault.read(applicationContext)); WatchHistory(applicationContext).use { HistoryBackup.merge(it,rows) } }
                 runOnUiThread { if(!isDestroyed && !isFinishing) { Toast.makeText(this,result.fold({ it.first.toString()+" restored • "+it.second+" skipped" },{ "Restore failed" }),Toast.LENGTH_LONG).show(); refreshHistory() } }
@@ -169,7 +169,7 @@ class MainActivity : ComponentActivity() {
     }
     private fun encryptedTransfer(code:Int,uri:android.net.Uri) {
         val field=EditText(this).apply { hint="Backup password (10+ characters)"; inputType=android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD }
-        android.app.AlertDialog.Builder(this).setTitle(if(code==63) "Encrypt history backup" else "Unlock history backup").setMessage("Keep the password safely. Lost passwords cannot be recovered. This backup contains viewing history only.").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Continue") { _,_->
+        BridgeDialogBuilder(this).setTitle(if(code==63) "Encrypt history backup" else "Unlock history backup").setMessage("Keep the password safely. Lost passwords cannot be recovered. This backup contains viewing history only.").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Continue") { _,_->
             val password=field.text.toString().toCharArray(); field.text.clear()
             Thread {
                 try {
@@ -185,7 +185,7 @@ class MainActivity : ComponentActivity() {
                         val rows=HistoryBackup.parse(EncryptedBackup.decrypt(data,password))
                         runOnUiThread {
                             if(isDestroyed || isFinishing) return@runOnUiThread
-                            android.app.AlertDialog.Builder(this).setTitle("Merge decrypted history?").setMessage(rows.size.toString()+" records; existing IDs skipped. No upload approval is restored.").setNegativeButton("Cancel",null).setPositiveButton("Merge") { _,_->
+                            BridgeDialogBuilder(this).setTitle("Merge decrypted history?").setMessage(rows.size.toString()+" records; existing IDs skipped. No upload approval is restored.").setNegativeButton("Cancel",null).setPositiveButton("Merge") { _,_->
                                 Thread {
                                     val result=runCatching { WatchHistory(applicationContext).use { HistoryBackup.merge(it,rows) } }
                                     runOnUiThread { if(!isDestroyed && !isFinishing) { Toast.makeText(this,result.fold({ it.first.toString()+" restored • "+it.second+" skipped" },{ "Restore failed" }),Toast.LENGTH_LONG).show(); refreshHistory() } }
@@ -214,7 +214,7 @@ class MainActivity : ComponentActivity() {
                     val rows=HistoryBackup.parse(text)
                     runOnUiThread {
                         if(isDestroyed || isFinishing) return@runOnUiThread
-                        android.app.AlertDialog.Builder(this).setTitle("Restore viewing history").setMessage(rows.size.toString()+" records. Existing IDs will be skipped. Restored entries will not be queued for Trakt upload.").setNegativeButton("Cancel",null).setPositiveButton("Merge") { _,_->
+                        BridgeDialogBuilder(this).setTitle("Restore viewing history").setMessage(rows.size.toString()+" records. Existing IDs will be skipped. Restored entries will not be queued for Trakt upload.").setNegativeButton("Cancel",null).setPositiveButton("Merge") { _,_->
                             Thread {
                                 val merged=runCatching { WatchHistory(applicationContext).use { HistoryBackup.merge(it,rows) } }
                                 runOnUiThread { if(!isDestroyed && !isFinishing) { merged.fold({ counts -> Toast.makeText(this,counts.first.toString()+" restored; "+counts.second+" skipped",Toast.LENGTH_LONG).show(); showTab(1) },{ Toast.makeText(this,"Restore failed",Toast.LENGTH_LONG).show() }) } }
@@ -234,7 +234,7 @@ class MainActivity : ComponentActivity() {
     private fun checkHistoryIntegrity() {
         Thread {
             val ok=runCatching { WatchHistory(applicationContext).use { HistoryBackup.integrity(it) } }.getOrDefault(false)
-            runOnUiThread { if(!isDestroyed && !isFinishing) android.app.AlertDialog.Builder(this).setTitle("Database integrity").setMessage(if(ok) "SQLite quick check passed" else "Integrity check failed or database unavailable. Existing files are preserved. Do not clear app data. Export or retain your encrypted backup before attempting repair.").setPositiveButton("OK",null).show() }
+            runOnUiThread { if(!isDestroyed && !isFinishing) BridgeDialogBuilder(this).setTitle("Database integrity").setMessage(if(ok) "SQLite quick check passed" else "Integrity check failed or database unavailable. Existing files are preserved. Do not clear app data. Export or retain your encrypted backup before attempting repair.").setPositiveButton("OK",null).show() }
         }.start()
     }
     private var importSource="com.netflix.mediaclient"
@@ -244,7 +244,7 @@ class MainActivity : ComponentActivity() {
             if(i==0) {
                 lookup("Checking Trakt account",{ done -> TraktLibrary.accountId(this,done) }) { account:String ->
                     val rows=ExternalHistoryImport.fromTrakt(TraktLibrary.cachedHistory(this,account),account)
-                    android.app.AlertDialog.Builder(this).setTitle("Import cached Trakt events?").setMessage(rows.size.toString()+" local review records. Existing remote completions are not uploaded again automatically. No sampled viewing time is added.").setNegativeButton("Cancel",null).setPositiveButton("Import for review") { _,_->
+                    BridgeDialogBuilder(this).setTitle("Import cached Trakt events?").setMessage(rows.size.toString()+" local review records. Existing remote completions are not uploaded again automatically. No sampled viewing time is added.").setNegativeButton("Cancel",null).setPositiveButton("Import for review") { _,_->
                         Thread {
                             val result=runCatching { WatchHistory(applicationContext).use { it.importViewing(rows) } }
                             runOnUiThread { if(!isDestroyed && !isFinishing) result.fold({ counts -> showTab(2); Toast.makeText(this,counts.first.toString()+" added • "+counts.second+" duplicates",Toast.LENGTH_LONG).show() },{ Toast.makeText(this,"Import failed",Toast.LENGTH_LONG).show() }) }
@@ -253,7 +253,7 @@ class MainActivity : ComponentActivity() {
                 }
             } else {
                 importSource=sources[i-1]
-                android.app.AlertDialog.Builder(this).setTitle("CSV interchange format").setMessage("Use a CSV with Title (or Name) and a genuine viewing date (Date or Watched At). Optional Season and Episode columns are supported. Watchlists, ratings and anime progress counts are not viewing events. Convert unsupported export formats first.").setNegativeButton("Cancel",null).setPositiveButton("Choose file") { _,_->startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*"),58) }.show()
+                BridgeDialogBuilder(this).setTitle("CSV interchange format").setMessage("Use a CSV with Title (or Name) and a genuine viewing date (Date or Watched At). Optional Season and Episode columns are supported. Watchlists, ratings and anime progress counts are not viewing events. Convert unsupported export formats first.").setNegativeButton("Cancel",null).setPositiveButton("Choose file") { _,_->startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*"),58) }.show()
             }
         }
     }
@@ -280,15 +280,15 @@ class MainActivity : ComponentActivity() {
                 if(isFinishing || isDestroyed) return@runOnUiThread
                 result.fold({ preview ->
                     val sample=preview.rows.take(5).joinToString("\n") { it.day.toString()+" • "+it.title }
-                    android.app.AlertDialog.Builder(this).setTitle("Review history import").setMessage(appLabel(source)+"\n"+preview.rows.size+" valid rows • "+preview.skipped+" skipped\n\n"+sample+"\n\nImported activity does not prove playback or completion. Dates without times remain date-only. Nothing is uploaded to Trakt.").setNegativeButton("Cancel",null).setPositiveButton("Import") { _,_->
+                    BridgeDialogBuilder(this).setTitle("Review history import").setMessage(appLabel(source)+"\n"+preview.rows.size+" valid rows • "+preview.skipped+" skipped\n\n"+sample+"\n\nImported activity does not prove playback or completion. Dates without times remain date-only. Nothing is uploaded to Trakt.").setNegativeButton("Cancel",null).setPositiveButton("Import") { _,_->
                         Thread {
                             val saved=runCatching { WatchHistory(applicationContext).use { it.importViewing(preview.rows) } }
                             runOnUiThread {
-                                if(!isDestroyed && !isFinishing) saved.fold({ counts -> showTab(2); android.app.AlertDialog.Builder(this).setTitle("Import complete").setMessage(counts.first.toString()+" added • "+counts.second+" already imported").setPositiveButton("OK",null).show() },{ Toast.makeText(this,"Import failed",Toast.LENGTH_LONG).show() })
+                                if(!isDestroyed && !isFinishing) saved.fold({ counts -> showTab(2); BridgeDialogBuilder(this).setTitle("Import complete").setMessage(counts.first.toString()+" added • "+counts.second+" already imported").setPositiveButton("OK",null).show() },{ Toast.makeText(this,"Import failed",Toast.LENGTH_LONG).show() })
                             }
                         }.start()
                     }.show()
-                },{ android.app.AlertDialog.Builder(this).setTitle("Cannot import CSV").setMessage(it.message ?: "Invalid history file").setPositiveButton("OK",null).show() })
+                },{ BridgeDialogBuilder(this).setTitle("Cannot import CSV").setMessage(it.message ?: "Invalid history file").setPositiveButton("OK",null).show() })
             }
         }.start()
     }
@@ -297,9 +297,9 @@ class MainActivity : ComponentActivity() {
         val day=java.time.Instant.ofEpochMilli(r.started).atZone(zone).toLocalDate()
         val row=ImportedViewing(r.source,r.title,r.subtitle,day,null,r.id)
         val matches=HistoryImport.candidates(row,history.records(0),zone)
-        if(matches.isEmpty()) { android.app.AlertDialog.Builder(this).setTitle("No exact local match").setMessage("No local viewing with the same provider, date and title. Keep this record or identify it on Trakt.").setPositiveButton("OK",null).show(); return }
+        if(matches.isEmpty()) { BridgeDialogBuilder(this).setTitle("No exact local match").setMessage("No local viewing with the same provider, date and title. Keep this record or identify it on Trakt.").setPositiveButton("OK",null).show(); return }
         choose("Reconcile with local viewing",matches.map { it.title+" • "+durationText(it.watched)+" sampled • "+java.text.DateFormat.getDateTimeInstance().format(java.util.Date(it.started)) }) { index ->
-            android.app.AlertDialog.Builder(this).setTitle("Link imported activity?").setMessage("Keep the existing local viewing record and hide this duplicate import. No watch time or completion will be added.").setNegativeButton("Cancel",null).setPositiveButton("Reconcile") { _,_->
+            BridgeDialogBuilder(this).setTitle("Link imported activity?").setMessage("Keep the existing local viewing record and hide this duplicate import. No watch time or completion will be added.").setNegativeButton("Cancel",null).setPositiveButton("Reconcile") { _,_->
                 if(history.reconcileImport(r.id,matches[index].id)) refreshHistory()
             }.show()
         }
@@ -310,7 +310,7 @@ class MainActivity : ComponentActivity() {
         val packages=(prefs.getStringSet("allowed",emptySet()) ?: emptySet()).sortedBy { appLabel(it) }
         choose("Choose one player to scan",packages.map { appLabel(it) }) { index ->
             val pkg=packages[index]
-            android.app.AlertDialog.Builder(this).setTitle("One-time on-device OCR").setMessage("TraktBridge will attempt one screenshot of the selected app's window, beginning in 8 seconds and expiring after 45 seconds. Open the video and reveal its controls. Only edge regions are read locally; the image is not saved or uploaded. Protected windows cannot be captured. Review any detected text before using it.").setNegativeButton("Cancel",null).setPositiveButton("Arm scan") { _,_->
+            BridgeDialogBuilder(this).setTitle("One-time on-device OCR").setMessage("TraktBridge will attempt one screenshot of the selected app's window, beginning in 8 seconds and expiring after 45 seconds. Open the video and reveal its controls. Only edge regions are read locally; the image is not saved or uploaded. Protected windows cannot be captured. Review any detected text before using it.").setNegativeButton("Cancel",null).setPositiveButton("Arm scan") { _,_->
                 val now=System.currentTimeMillis()
                 prefs.edit().putLong("ocr_generation",prefs.getLong("ocr_generation",0)+1).remove("ocr_choices").remove("ocr_source").remove("ocr_captured").putString("ocr_target",pkg).putLong("ocr_after",now+8000).putLong("ocr_until",now+45000).putString("ocr_status","Armed").apply()
                 Toast.makeText(this,"Open the selected player and reveal controls after 8 seconds",Toast.LENGTH_LONG).show()
@@ -321,14 +321,14 @@ class MainActivity : ComponentActivity() {
         val status=prefs.getString("ocr_status","No OCR scan yet").orEmpty()
         val source=prefs.getString("ocr_source","").orEmpty()
         val choices=runCatching { org.json.JSONArray(prefs.getString("ocr_choices","[]")) }.getOrDefault(org.json.JSONArray())
-        if(choices.length()==0) { android.app.AlertDialog.Builder(this).setTitle("OCR result").setMessage(status).setPositiveButton("OK",null).show(); return }
+        if(choices.length()==0) { BridgeDialogBuilder(this).setTitle("OCR result").setMessage(status).setPositiveButton("OK",null).show(); return }
         val entries=(0 until choices.length()).map { choices.getJSONObject(it) }
         choose("Review OCR title candidates",entries.map { it.optString("title") }) { index ->
             val c=entries[index]
             val detail=c.optString("detail")
             val pos=c.optLong("position",-1); val dur=c.optLong("duration",0)
             val timer=if(PlaybackPosition.valid(pos,dur)) "\nVisible timer estimate: "+durationText(pos)+" / "+durationText(dur) else ""
-            android.app.AlertDialog.Builder(this).setTitle("Use this title?").setMessage(c.optString("title")+"\n"+detail+timer+"\nOCR may misread text. Timers are not automatically used as verified progress.").setNegativeButton("Cancel",null).setPositiveButton("Identify") { _,_->
+            BridgeDialogBuilder(this).setTitle("Use this title?").setMessage(c.optString("title")+"\n"+detail+timer+"\nOCR may misread text. Timers are not automatically used as verified progress.").setNegativeButton("Cancel",null).setPositiveButton("Identify") { _,_->
                 presentShared(SharedCandidate(c.optString("title"),detail,source))
             }.show()
         }
@@ -343,7 +343,7 @@ class MainActivity : ComponentActivity() {
             val token=EditText(this).apply { hint=if(kind=="kodi") "Username:password (if required)" else "Server API token"; inputType=android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD; setText(old?.token.orEmpty()) }
             val client=EditText(this).apply { hint="Playback client / device ID"; setSingleLine(true); setText(old?.client.orEmpty()) }
             val box=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(24,12,24,12); addView(url); addView(token); addView(client); addView(txt("Use a trusted HTTPS server. Discover clients while the intended device is connected. Only the selected client is tracked. Credentials stay encrypted on this device. Server playback may occur on another device.",14,muted)) }
-            val d=android.app.AlertDialog.Builder(this).setTitle(names[index]+" connection").setView(box).setNegativeButton("Cancel",null).setNeutralButton(if(old!=null) "Disconnect" else "Discover clients",null).setPositiveButton("Discover and save",null).create()
+            val d=BridgeDialogBuilder(this).setTitle(names[index]+" connection").setView(box).setNegativeButton("Cancel",null).setNeutralButton(if(old!=null) "Disconnect" else "Discover clients",null).setPositiveButton("Discover and save",null).create()
             d.setOnShowListener {
                 fun discover() {
                     val c=ServerConfig(kind,url.text.toString().trim(),token.text.toString(),client.text.toString().trim().ifBlank { "discover" })
@@ -394,11 +394,11 @@ class MainActivity : ComponentActivity() {
         }.start()
     }
     private fun presentShared(candidate:SharedCandidate?) {
-        if(candidate==null) { android.app.AlertDialog.Builder(this).setTitle("Content not identified").setMessage("Share a video file or a movie title with its link. Private downloads cannot be opened by TraktBridge.").setPositiveButton("OK",null).show(); return }
+        if(candidate==null) { BridgeDialogBuilder(this).setTitle("Content not identified").setMessage("Share a video file or a movie title with its link. Private downloads cannot be opened by TraktBridge.").setPositiveButton("OK",null).show(); return }
         val field=EditText(this).apply { setSingleLine(true); hint="Movie, show or anime title"; setText(candidate.title) }
         val box=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(24,12,24,12); addView(field)
             addView(txt(listOfNotNull(candidate.detail.takeIf { it.isNotBlank() },candidate.providerId.takeIf { it.isNotBlank() }?.let { "Provider content ID: "+it },candidate.runtime.takeIf { it>0 }?.let { "File runtime: "+durationText(it) },"Confirm the title. Sharing content is not evidence of playback.").joinToString("\n"),14,muted)) }
-        val dialog=android.app.AlertDialog.Builder(this).setTitle("Identify shared content").setView(box).setNegativeButton("Cancel",null).setPositiveButton("Continue",null).create()
+        val dialog=BridgeDialogBuilder(this).setTitle("Identify shared content").setView(box).setNegativeButton("Cancel",null).setPositiveButton("Continue",null).create()
         dialog.setOnShowListener { dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener {
             val title=field.text.toString().trim()
             if(!ContentRecognition.usable(title)) { field.error="Enter the movie or show title"; return@setOnClickListener }
@@ -429,7 +429,7 @@ class MainActivity : ComponentActivity() {
         ViewingNotifications.cancel(this,id)
         val r = history.record(id) ?: return
         if (r.status == "pending" || r.status == "reviewed") {
-            if(r.traktId>0) android.app.AlertDialog.Builder(this).setTitle("Review viewing").setMessage(r.matchLabel+"\nDid you finish this title?").setNegativeButton("Not finished",null).setNeutralButton("Wrong title") { _,_-> identify(r) }.setPositiveButton("Finished") { _,_->approveUpload(r) }.show() else identify(r)
+            if(r.traktId>0) BridgeDialogBuilder(this).setTitle("Review viewing").setMessage(r.matchLabel+"\nDid you finish this title?").setNegativeButton("Not finished",null).setNeutralButton("Wrong title") { _,_-> identify(r) }.setPositiveButton("Finished") { _,_->approveUpload(r) }.show() else identify(r)
         }
     }
     private val apps = PlayerRules.apps
@@ -485,24 +485,24 @@ class MainActivity : ComponentActivity() {
         button("Manage paired devices and revoke access") { managePairedDevices() }
         button("Cross-device history sharing") {
             val enabled=prefs.getBoolean("device_history",false)
-            android.app.AlertDialog.Builder(this).setTitle(if(enabled) "Disable history sharing?" else "Share viewing history with paired devices?")
+            BridgeDialogBuilder(this).setTitle(if(enabled) "Disable history sharing?" else "Share viewing history with paired devices?")
                 .setMessage("Separate opt-in: exchange up to 100 recent sampled sessions from the last 90 days. Remote history stays read-only and never inherits Trakt approval. Disabling hides received history; clear it separately if desired.")
                 .setNegativeButton("Cancel",null).setPositiveButton(if(enabled) "Disable" else "Enable") { _,_-> prefs.edit().putBoolean("device_history",!enabled).apply() }.show()
         }
         button("View cross-device history") { showDeviceHistory() }
         button("Clear received device history") {
-            android.app.AlertDialog.Builder(this).setTitle("Clear received history?").setMessage("Local viewing history and Trakt approvals are unchanged. If sharing remains enabled, paired devices may send history again.").setNegativeButton("Cancel",null).setPositiveButton("Clear") { _,_-> Thread { runCatching { DeviceHistory.clear(applicationContext) } }.start() }.show()
+            BridgeDialogBuilder(this).setTitle("Clear received history?").setMessage("Local viewing history and Trakt approvals are unchanged. If sharing remains enabled, paired devices may send history again.").setNegativeButton("Cancel",null).setPositiveButton("Clear") { _,_-> Thread { runCatching { DeviceHistory.clear(applicationContext) } }.start() }.show()
         }
         button("Configure optional cloud relay") { configureDeviceRelay() }
         button("Allow remote playback controls") {
             val enabled=prefs.getBoolean("device_controls",false)
-            android.app.AlertDialog.Builder(this).setTitle(if(enabled) "Disable remote controls?" else "Allow paired devices to control playback?")
+            BridgeDialogBuilder(this).setTitle(if(enabled) "Disable remote controls?" else "Allow paired devices to control playback?")
                 .setMessage("Paired devices may play or pause supported selected media sessions. Controls require a separate opt-in and can be disabled at any time.")
                 .setNegativeButton("Cancel",null).setPositiveButton(if(enabled) "Disable" else "Enable") { _,_-> prefs.edit().putBoolean("device_controls",!enabled).apply() }.show()
         }
         button("Cross-device playback sharing") {
             val enabled=prefs.getBoolean("device_sharing",false)
-            android.app.AlertDialog.Builder(this).setTitle(if(enabled) "Stop device sharing?" else "Enable device sharing?")
+            BridgeDialogBuilder(this).setTitle(if(enabled) "Stop device sharing?" else "Enable device sharing?")
                 .setMessage("Share live playback title, episode detail, provider and progress only with approved devices over encrypted local Wi-Fi. Tracking must be running on each device. No video or Trakt credentials are shared.")
                 .setNegativeButton("Cancel",null).setPositiveButton(if(enabled) "Disable" else "Enable") { _,_->
                     prefs.edit().putBoolean("device_sharing",!enabled).apply()
@@ -518,7 +518,7 @@ class MainActivity : ComponentActivity() {
         button("Discover nearby devices") {
             val status=TextView(this).apply { text="Searching local network…"; setPadding(dp(20),dp(12),dp(20),dp(12)) }
             val scanner=DeviceDiscovery(this) { names -> status.text=if(names.isEmpty()) "No nearby devices found. Open discovery on another device." else names.joinToString("\n") }
-            val dialog=android.app.AlertDialog.Builder(this).setTitle("Nearby devices (unverified)").setView(status).setPositiveButton("Close",null).create()
+            val dialog=BridgeDialogBuilder(this).setTitle("Nearby devices (unverified)").setView(status).setPositiveButton("Close",null).create()
             dialog.setOnDismissListener { scanner.close() }
             dialog.show()
             runCatching { scanner.start() }.onFailure { status.text="Local discovery unavailable" }
@@ -527,7 +527,7 @@ class MainActivity : ComponentActivity() {
         button("Device identity") {
             runCatching { DeviceIdentity.register(this) }.fold({ device ->
                 val field=EditText(this).apply { setText(device.label); filters=arrayOf(android.text.InputFilter.LengthFilter(80)) }
-                android.app.AlertDialog.Builder(this).setTitle("This device")
+                BridgeDialogBuilder(this).setTitle("This device")
                     .setMessage("Device fingerprint: "+device.id+"\nLocal registration only. No playback is shared yet.")
                     .setView(field).setNegativeButton("Close",null).setPositiveButton("Rename") { _,_->
                         runCatching { DeviceIdentity.rename(this,field.text.toString()) }.onFailure { Toast.makeText(this,"Invalid device name",Toast.LENGTH_SHORT).show() }
@@ -561,10 +561,10 @@ class MainActivity : ComponentActivity() {
         button("Favorite titles") { favorites() }
         button("Automation shortcuts") { automationShortcuts() }
         button("Universal playback shortcuts") { playbackShortcut() }
-        button("Companion status") { val summary=CompanionStatus.summarize(history.records(0)); android.app.AlertDialog.Builder(this).setTitle("Companion status").setMessage("Active sessions: "+summary.active+"\nAwaiting review: "+summary.pending+"\nSampled time: "+durationText(summary.watchedMs)).setPositiveButton("Close",null).show() }
+        button("Companion status") { val summary=CompanionStatus.summarize(history.records(0)); BridgeDialogBuilder(this).setTitle("Companion status").setMessage("Active sessions: "+summary.active+"\nAwaiting review: "+summary.pending+"\nSampled time: "+durationText(summary.watchedMs)).setPositiveButton("Close",null).show() }
         button("Cancel all episode reminders") { prefs.edit().putBoolean("episode_reminders",false).apply(); EpisodeReminders.cancelAll(this); Toast.makeText(this,"Reminders cancelled",Toast.LENGTH_SHORT).show() }
         button("Completion review threshold") { configureCompletionThreshold() }
-        button("Playback compatibility profiles") { android.app.AlertDialog.Builder(this).setTitle("Playback profiles").setMessage(PlayerRules.apps.entries.joinToString("\n") { (name,pkg) -> name+": "+DetectionProfiles.forPackage(pkg).label }).setPositiveButton("Close",null).show() }
+        button("Playback compatibility profiles") { BridgeDialogBuilder(this).setTitle("Playback profiles").setMessage(PlayerRules.apps.entries.joinToString("\n") { (name,pkg) -> name+": "+DetectionProfiles.forPackage(pkg).label }).setPositiveButton("Close",null).show() }
         button("Privacy dashboard and data controls") { privacyDashboard() }
         button("Privacy mode • stop tracking now") { privacyMode() }
         root.addView(Switch(this).apply { text="Require biometric or device credential on app resume"; isChecked=prefs.getBoolean("privacy_lock",false); setOnCheckedChangeListener { _,checked -> if(checked && !getSystemService(android.app.KeyguardManager::class.java).isDeviceSecure) { isChecked=false; Toast.makeText(this@MainActivity,"Set a device screen lock first",Toast.LENGTH_LONG).show() } else { prefs.edit().putBoolean("privacy_lock",checked).apply(); if(checked) { unlocked=false; requirePrivacyUnlock() } } } })
@@ -586,13 +586,13 @@ class MainActivity : ComponentActivity() {
         button("Import streaming viewing history (CSV)") { chooseImportProvider() }
         button("Import external history (Trakt, IMDb, Simkl, anime)") { externalHistoryImport() }
         button("Identify local video file") { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("video/*"),57) }
-        button("Identify shared movie link") { val field=EditText(this).apply { hint="Paste shared title or link" }; android.app.AlertDialog.Builder(this).setTitle("Identify shared content").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Continue") { _,_-> presentShared(SharedContent.fromText(field.text.toString())) }.show() }
+        button("Identify shared movie link") { val field=EditText(this).apply { hint="Paste shared title or link" }; BridgeDialogBuilder(this).setTitle("Identify shared content").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Continue") { _,_-> presentShared(SharedContent.fromText(field.text.toString())) }.show() }
         button("Scan player title (one-shot OCR)") { armOcr() }
         button("Review OCR result") { reviewOcr() }
         button("Clear OCR result") { prefs.edit().putLong("ocr_generation",prefs.getLong("ocr_generation",0)+1).remove("ocr_target").remove("ocr_after").remove("ocr_until").remove("ocr_choices").remove("ocr_source").remove("ocr_captured").remove("ocr_status").apply() }
         button("Connect media servers") { serverSettings() }
         root.addView(Switch(this).apply { text="Automatically reuse confirmed local title mappings"; isChecked=prefs.getBoolean("learned_auto",false); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("learned_auto",checked).apply() } })
-        button("Clear learned title mappings") { android.app.AlertDialog.Builder(this).setTitle("Clear learned mappings?").setMessage("Existing viewing history and Trakt matches stay unchanged.").setNegativeButton("Cancel",null).setPositiveButton("Clear") { _,_->history.clearLearning() }.show() }
+        button("Clear learned title mappings") { BridgeDialogBuilder(this).setTitle("Clear learned mappings?").setMessage("Existing viewing history and Trakt matches stay unchanged.").setNegativeButton("Cancel",null).setPositiveButton("Clear") { _,_->history.clearLearning() }.show() }
         label("Remote playback is recognized when Android exposes a media session. Picture-in-picture can continue tracking through the same session; unsupported casts cannot be observed directly.")
         button("Tracking health and review center") { trackingHealth() }
         button("Live recognition inspector") { liveInspector() }
@@ -608,7 +608,7 @@ class MainActivity : ComponentActivity() {
         button("My anime progress (local)") { animeLocalProgress() }
         button("Browse public AniList account") { publicAnimeList() }
         button("Trakt account library") { openTraktLibrary() }
-        button("Clear downloaded Trakt history") { android.app.AlertDialog.Builder(this).setTitle("Clear remote history cache?").setMessage("Local viewing records and Trakt account history are unchanged.").setNegativeButton("Cancel",null).setPositiveButton("Clear") { _,_->TraktLibrary.clearCache(this) }.show() }
+        button("Clear downloaded Trakt history") { BridgeDialogBuilder(this).setTitle("Clear remote history cache?").setMessage("Local viewing records and Trakt account history are unchanged.").setNegativeButton("Cancel",null).setPositiveButton("Clear") { _,_->TraktLibrary.clearCache(this) }.show() }
         button("Disconnect Trakt locally") { RemoteRefreshSchedule.disable(this); auth.disconnect { TraktLibrary.clearCache(this); showAuth(it) } }
         label("Uses Trakt but is not endorsed or certified by Trakt.")
         label("Only selected apps are tracked locally. Catalogue search sends only the search text you choose to Trakt. Only explicitly approved completed watches are uploaded.")
@@ -633,7 +633,7 @@ class MainActivity : ComponentActivity() {
         button("Battery optimization settings") { runCatching { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) } }
         label("Optional title suggestions read recognized controls in selected apps. One-shot OCR requires separate explicit permission; no automatic uploads.")
         button("Enable title detection (Accessibility)") {
-            android.app.AlertDialog.Builder(this).setTitle("Optional title detection").setMessage("Android Accessibility can expose screen content. TraktBridge checks selected video apps for player titles and video detail headings near play actions. Suggestions stay local and are never uploaded automatically. Enable only if you agree.").setNegativeButton("Cancel",null).setPositiveButton("Agree and open settings") { _,_ -> prefs.edit().putBoolean("title_optin",true).apply(); startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }.show()
+            BridgeDialogBuilder(this).setTitle("Optional title detection").setMessage("Android Accessibility can expose screen content. TraktBridge checks selected video apps for player titles and video detail headings near play actions. Suggestions stay local and are never uploaded automatically. Enable only if you agree.").setNegativeButton("Cancel",null).setPositiveButton("Agree and open settings") { _,_ -> prefs.edit().putBoolean("title_optin",true).apply(); startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }.show()
         }
         button("Disable title detection") {
             val edit=prefs.edit().putLong("ocr_generation",prefs.getLong("ocr_generation",0)+1).putBoolean("title_optin",false).remove("ocr_target").remove("ocr_after").remove("ocr_until").remove("ocr_choices").remove("ocr_source").remove("ocr_captured").remove("ocr_status")
@@ -682,7 +682,7 @@ class MainActivity : ComponentActivity() {
     private fun betaFeedback() {
         val field=EditText(this).apply { hint="Describe the issue and steps to reproduce"; minLines=4; maxLines=8 }
         val info=packageManager.getPackageInfo(packageName,0).versionName.orEmpty()
-        android.app.AlertDialog.Builder(this).setTitle("Beta feedback").setMessage("Review your text before sharing. No viewing history, account credentials or diagnostic logs are attached automatically.").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Share") { _,_->
+        BridgeDialogBuilder(this).setTitle("Beta feedback").setMessage("Review your text before sharing. No viewing history, account credentials or diagnostic logs are attached automatically.").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Share") { _,_->
             val report="TraktBridge "+info+"\nAndroid "+android.os.Build.VERSION.SDK_INT+"\n"+field.text.toString().trim().take(4000)
             runCatching { startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT,report),"Share beta feedback")) }.onFailure { Toast.makeText(this,"No sharing app available",Toast.LENGTH_LONG).show() }
         }.show()
@@ -691,7 +691,7 @@ class MainActivity : ComponentActivity() {
         lookup("Checking GitHub",{ done -> UpdateCheck.check(done) }) { latest:String ->
             val current=packageManager.getPackageInfo(packageName,0).versionName.orEmpty()
             val newer=runCatching { UpdateCheck.compare(latest,current)>0 }.getOrDefault(false)
-            android.app.AlertDialog.Builder(this).setTitle("App updates").setMessage("Installed: "+current+"\nRepository: "+latest+"\n"+if(newer) "Newer source version available. Download only a successful permanently signed build." else "No newer repository version detected.").setNegativeButton("Close",null).setPositiveButton("GitHub builds") { _,_->startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://github.com/Roybabu/TraktBridge/actions"))) }.show()
+            BridgeDialogBuilder(this).setTitle("App updates").setMessage("Installed: "+current+"\nRepository: "+latest+"\n"+if(newer) "Newer source version available. Download only a successful permanently signed build." else "No newer repository version detected.").setNegativeButton("Close",null).setPositiveButton("GitHub builds") { _,_->startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://github.com/Roybabu/TraktBridge/actions"))) }.show()
         }
     }
     private fun libraryStatus(type:String,id:Long):String=personalStore("library_status").getString(type+":"+id,"").orEmpty()
@@ -713,10 +713,10 @@ class MainActivity : ComponentActivity() {
                 startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT,payload),"Share collection"))
             } else {
                 val field=EditText(this).apply { hint="Paste a shared TraktBridge collection"; minLines=4 }
-                android.app.AlertDialog.Builder(this).setTitle("Import collection").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Preview") { _,_->
+                BridgeDialogBuilder(this).setTitle("Import collection").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Preview") { _,_->
                     val parsed=runCatching { CollectionExchange.parse(field.text.toString()) }
                     parsed.fold({ incoming ->
-                        android.app.AlertDialog.Builder(this).setTitle("Import "+incoming.first+"?").setMessage(incoming.second.length().toString()+" titles. Existing collections will not be overwritten.").setNegativeButton("Cancel",null).setPositiveButton("Import") { _,_->
+                        BridgeDialogBuilder(this).setTitle("Import "+incoming.first+"?").setMessage(incoming.second.length().toString()+" titles. Existing collections will not be overwritten.").setNegativeButton("Cancel",null).setPositiveButton("Import") { _,_->
                             var name=incoming.first; var suffix=2
                             while(store.contains(name)) { name=incoming.first+" ("+suffix+")"; suffix++ }
                             store.edit().putString(name,incoming.second.toString()).apply()
@@ -745,13 +745,13 @@ class MainActivity : ComponentActivity() {
         body.addView(actionButton("Pause tracking") { privacyMode() })
         body.addView(actionButton("Disable automatic remote refresh") { RemoteRefreshSchedule.disable(this); Toast.makeText(this,"Remote refresh disabled",Toast.LENGTH_SHORT).show() })
         body.addView(actionButton("Delete downloaded remote history") {
-            android.app.AlertDialog.Builder(this).setTitle("Clear cached history?").setMessage("Local viewing records and your Trakt account are unchanged.").setNegativeButton("Cancel",null).setPositiveButton("Clear") { _,_->TraktLibrary.clearCache(this) }.show()
+            BridgeDialogBuilder(this).setTitle("Clear cached history?").setMessage("Local viewing records and your Trakt account are unchanged.").setNegativeButton("Cancel",null).setPositiveButton("Clear") { _,_->TraktLibrary.clearCache(this) }.show()
         })
         body.addView(actionButton("Export encrypted history") { startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/octet-stream").putExtra(Intent.EXTRA_TITLE,"traktbridge-history.tbenc"),63) })
-        android.app.AlertDialog.Builder(this).setTitle("Privacy dashboard").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
+        BridgeDialogBuilder(this).setTitle("Privacy dashboard").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
     }
     private fun privacyMode() {
-        android.app.AlertDialog.Builder(this).setTitle("Pause all playback tracking?").setMessage("Sampling, title hints and optional usage reminders stop. Existing history and already approved uploads are retained. Restart tracking manually in Settings.").setNegativeButton("Cancel",null).setPositiveButton("Pause tracking") { _,_->
+        BridgeDialogBuilder(this).setTitle("Pause all playback tracking?").setMessage("Sampling, title hints and optional usage reminders stop. Existing history and already approved uploads are retained. Restart tracking manually in Settings.").setNegativeButton("Cancel",null).setPositiveButton("Pause tracking") { _,_->
             val generation=prefs.getLong("ocr_generation",0)+1
             val edit=prefs.edit().putBoolean("enabled",false).putBoolean("device_sharing",false).putBoolean("device_controls",false).putBoolean("device_history",false).putBoolean("title_optin",false).remove("usage_since").remove("sessions").remove("last_nonempty_sessions")
             prefs.all.keys.filter { it.startsWith("ocr_") || it.startsWith("title_hint:") || it.startsWith("title_detail:") || it.startsWith("title_time:") }.forEach { edit.remove(it) }
@@ -760,7 +760,7 @@ class MainActivity : ComponentActivity() {
     }
     private fun configureGoal() {
         val field=EditText(this).apply { hint="Monthly sampled hours (0 disables goal)"; inputType=android.text.InputType.TYPE_CLASS_NUMBER; setText(prefs.getInt("monthly_goal",0).toString()) }
-        android.app.AlertDialog.Builder(this).setTitle("Optional viewing goal").setMessage("Track a personal time budget. There are no rewards or pressure to watch more.").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Save") { _,_->
+        BridgeDialogBuilder(this).setTitle("Optional viewing goal").setMessage("Track a personal time budget. There are no rewards or pressure to watch more.").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Save") { _,_->
             val hours=field.text.toString().toIntOrNull()
             if(hours!=null && hours in 0..744) { prefs.edit().putInt("monthly_goal",hours).apply(); refreshHistory() }
         }.show()
@@ -785,7 +785,7 @@ class MainActivity : ComponentActivity() {
         choose("Smart watchlists",lists.map { it.name }+listOf("Create automatic watchlist")) { i ->
             if(i==lists.size) {
                 val field=EditText(this).apply { hint="Watchlist name"; setSingleLine(true) }
-                android.app.AlertDialog.Builder(this).setTitle("New smart watchlist").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Continue") { _,_->
+                BridgeDialogBuilder(this).setTitle("New smart watchlist").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Continue") { _,_->
                     val name=field.text.toString().trim().take(80)
                     if(name.isBlank() || store.contains(name) || lists.size>=50) { Toast.makeText(this,"Use a unique name; maximum 50 lists",Toast.LENGTH_LONG).show(); return@setPositiveButton }
                     choose("Automatic categorization",listOf("Unfinished","Under 90 minutes remaining","Needs review","Rewatches","Last 7 days","Completed")) { rule ->
@@ -804,7 +804,7 @@ class MainActivity : ComponentActivity() {
                 val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
                 body.addView(txt(rows.size.toString()+" matching titles • updated from local history",14,muted))
                 rows.take(100).forEach { titleCard(body,it,false) }
-                android.app.AlertDialog.Builder(this).setTitle(list.name).setView(ScrollView(this).apply { addView(body) }).setNegativeButton("Close",null).setNeutralButton("Delete list") { _,_->store.edit().remove(list.name).apply() }.show()
+                BridgeDialogBuilder(this).setTitle(list.name).setView(ScrollView(this).apply { addView(body) }).setNegativeButton("Close",null).setNeutralButton("Delete list") { _,_->store.edit().remove(list.name).apply() }.show()
             }
         }
     }
@@ -823,7 +823,7 @@ class MainActivity : ComponentActivity() {
             val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
             body.addView(txt(rows.size.toString()+" titles • first 50 shown",14,muted))
             rows.take(50).forEach { titleCard(body,it,false) }
-            android.app.AlertDialog.Builder(this).setTitle(choices[index]).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
+            BridgeDialogBuilder(this).setTitle(choices[index]).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
         }
     }
     private fun collectionProfiles() {
@@ -832,7 +832,7 @@ class MainActivity : ComponentActivity() {
         choose("Collection profiles",listOf("Default")+names+listOf("Create profile")) { index ->
             if(index==names.size+1) {
                 val field=EditText(this).apply { hint="Profile label" }
-                android.app.AlertDialog.Builder(this).setTitle("New collection profile").setMessage("Only collections and personal notes are separated. Playback history and Trakt account remain shared on this device.").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Create") { _,_->
+                BridgeDialogBuilder(this).setTitle("New collection profile").setMessage("Only collections and personal notes are separated. Playback history and Trakt account remain shared on this device.").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Create") { _,_->
                     val name=field.text.toString().trim().take(40)
                     if(name.isNotBlank() && name!="Default") {
                         store.edit().putStringSet("names",names.toSet()+name).putString("selected",name).apply()
@@ -862,14 +862,14 @@ class MainActivity : ComponentActivity() {
         val folder=pick("Collection folder",names.map { it.ifBlank { "All folders" } })
         val sorts=listOf("recent","title","watchtime","remaining","oldest")
         val sort=pick("Sort",listOf("Recent","Title A–Z","Most watched","Remaining time","Oldest first"))
-        android.app.AlertDialog.Builder(this).setTitle("Organize library").setView(ScrollView(this).apply { addView(body) }).setNegativeButton("Cancel",null).setNeutralButton("Manage folders") { _,_->collections() }.setPositiveButton("Search") { _,_->
+        BridgeDialogBuilder(this).setTitle("Organize library").setView(ScrollView(this).apply { addView(body) }).setNegativeButton("Cancel",null).setNeutralButton("Manage folders") { _,_->collections() }.setPositiveButton("Search") { _,_->
             val name=names[folder.selectedItemPosition]
             val keys=if(name.isBlank()) null else runCatching { val a=JSONArray(store.getString(name,"[]")); (0 until a.length()).mapNotNull { a.optJSONObject(it)?.optString("key") }.toSet() }.getOrDefault(emptySet())
             val rows=LibraryOrganization.search(ViewingGroups.build(history.records(0)),q.text.toString(),tags[tag.selectedItemPosition],keys,tagsByKey,sorts[sort.selectedItemPosition])
             val results=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
             results.addView(txt(rows.size.toString()+" titles • first 100 shown",14,muted))
             rows.take(100).forEach { titleCard(results,it,false) }
-            android.app.AlertDialog.Builder(this).setTitle("Library search results").setView(ScrollView(this).apply { addView(results) }).setPositiveButton("Close",null).show()
+            BridgeDialogBuilder(this).setTitle("Library search results").setView(ScrollView(this).apply { addView(results) }).setPositiveButton("Close",null).show()
         }.show()
     }
     private fun collections() {
@@ -878,7 +878,7 @@ class MainActivity : ComponentActivity() {
         choose("Collections",names+"Create collection") { i ->
             if(i==names.size) {
                 val field=EditText(this).apply { hint="Collection name" }
-                android.app.AlertDialog.Builder(this).setTitle("New collection").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Create") { _,_->
+                BridgeDialogBuilder(this).setTitle("New collection").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Create") { _,_->
                     val name=LibraryOrganization.folder(field.text.toString())
                     if(name!=null && !store.contains(name) && store.all.size<200) store.edit().putString(name,"[]").apply()
                 }.show()
@@ -886,7 +886,7 @@ class MainActivity : ComponentActivity() {
                 val name=names[i]; val a=JSONArray(store.getString(name,"[]"))
                 val rows=(0 until a.length()).map { a.getJSONObject(it) }
                 choose(name,rows.map { it.optString("label") }) { j ->
-                    android.app.AlertDialog.Builder(this).setTitle(rows[j].optString("label")).setNegativeButton("Close",null).setPositiveButton("Remove from collection") { _,_->
+                    BridgeDialogBuilder(this).setTitle(rows[j].optString("label")).setNegativeButton("Close",null).setPositiveButton("Remove from collection") { _,_->
                         val next=JSONArray(); rows.filterIndexed { k,_->k!=j }.forEach { next.put(it) }; store.edit().putString(name,next.toString()).apply()
                     }.show()
                 }
@@ -915,7 +915,7 @@ class MainActivity : ComponentActivity() {
         val items=store.all.entries.sortedBy { it.value.toString() }
         choose("Favorite titles",items.map { it.value.toString() }) { i ->
             val entry=items[i]; val type=entry.key.substringBefore(":"); val id=entry.key.substringAfter(":").toLongOrNull() ?: return@choose
-            android.app.AlertDialog.Builder(this).setTitle(entry.value.toString()).setNegativeButton("Close",null).setNeutralButton("Remove") { _,_->store.edit().remove(entry.key).apply(); favorites() }.setPositiveButton("Local history") { _,_->historyFilter=HistoryFilter(query=entry.value.toString().substringBefore(" • ")); showTab(1) }.show()
+            BridgeDialogBuilder(this).setTitle(entry.value.toString()).setNegativeButton("Close",null).setNeutralButton("Remove") { _,_->store.edit().remove(entry.key).apply(); favorites() }.setPositiveButton("Local history") { _,_->historyFilter=HistoryFilter(query=entry.value.toString().substringBefore(" • ")); showTab(1) }.show()
         }
     }
     private fun setupGuide() {
@@ -932,13 +932,13 @@ class MainActivity : ComponentActivity() {
         step("Battery settings",BatteryCompatibility.guidance(android.os.Build.MANUFACTURER)+" Optional; no setting is changed automatically.") { runCatching { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) } }
         step("Start tracking","Enable background sampling after selecting apps and granting access.") { if(TrackingRecovery.listenerGranted(this) && !prefs.getStringSet("allowed",emptySet()).isNullOrEmpty()) { prefs.edit().putBoolean("enabled",true).apply(); startTracking() } else Toast.makeText(this,"Grant notification access and choose playback apps first.",Toast.LENGTH_LONG).show() }
         box.addView(txt("Accessibility title detection and app-activity fallback are optional and require separate consent in Settings. Trakt sign-in is not required for local tracking.",14,muted))
-        android.app.AlertDialog.Builder(this).setTitle("Set up TraktBridge").setView(ScrollView(this).apply { addView(box) }).setNegativeButton("Later",null).setPositiveButton("Done") { _,_->showTab(4) }.show()
+        BridgeDialogBuilder(this).setTitle("Set up TraktBridge").setView(ScrollView(this).apply { addView(box) }).setNegativeButton("Later",null).setPositiveButton("Done") { _,_->showTab(4) }.show()
     }
     private fun handleTrackingShortcut(intent:Intent) {
         if(intent.action!="com.traktbridge.app.OPEN_TRACKING") return
         intent.action=null
         showTab(4)
-        android.app.AlertDialog.Builder(this).setTitle("Start playback tracking?").setMessage("Track selected video apps in the background.").setNegativeButton("Cancel",null).setPositiveButton("Start") { _,_->prefs.edit().putBoolean("enabled",true).apply(); startTracking(); recreate() }.show()
+        BridgeDialogBuilder(this).setTitle("Start playback tracking?").setMessage("Track selected video apps in the background.").setNegativeButton("Cancel",null).setPositiveButton("Start") { _,_->prefs.edit().putBoolean("enabled",true).apply(); startTracking(); recreate() }.show()
     }
     private fun startTracking() {
         runCatching {
@@ -1038,7 +1038,7 @@ class MainActivity : ComponentActivity() {
         body.addView(txt("Home-screen widget content",14,muted))
         val modes=listOf("private","continue","review")
         val widget=Spinner(this).apply { adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,listOf("Private (no titles)","Continue watching","Review count")); setSelection(modes.indexOf(DashboardPreferences.widgetMode(prefs.getString("widget_mode","private").orEmpty()))); body.addView(this) }
-        android.app.AlertDialog.Builder(this).setTitle("Customize dashboard").setView(ScrollView(this).apply { addView(body) }).setNegativeButton("Cancel",null).setPositiveButton("Save") { _,_->
+        BridgeDialogBuilder(this).setTitle("Customize dashboard").setView(ScrollView(this).apply { addView(body) }).setNegativeButton("Cancel",null).setPositiveButton("Save") { _,_->
             prefs.edit().putString("dashboard_order",keys.joinToString(",")).putString("dashboard_hidden",hidden.joinToString(",")).putInt("startup_tab",tabPicker.selectedItemPosition).putString("widget_mode",modes[widget.selectedItemPosition]).apply()
             val manager=android.appwidget.AppWidgetManager.getInstance(this)
             val ids=manager.getAppWidgetIds(android.content.ComponentName(this,ViewingWidget::class.java))
@@ -1170,7 +1170,7 @@ class MainActivity : ComponentActivity() {
     private fun streamingAvailability(type:String,id:Long,title:String) {
         val initial=prefs.getString("availability_region",java.util.Locale.getDefault().country).orEmpty()
         val field=EditText(this).apply { hint="Country code, e.g. IN, AE, US"; setSingleLine(true); setText(initial) }
-        android.app.AlertDialog.Builder(this).setTitle("Where to watch").setMessage("Choose your country. JustWatch searches by title; Trakt opens the exact catalogue ID. Availability, pricing and subscriptions must be verified on the destination site.").setView(field).setNegativeButton("Cancel",null).setNeutralButton("Trakt") { _,_->openTraktWatchPage(type,id) }.setPositiveButton("Search JustWatch") { _,_->
+        BridgeDialogBuilder(this).setTitle("Where to watch").setMessage("Choose your country. JustWatch searches by title; Trakt opens the exact catalogue ID. Availability, pricing and subscriptions must be verified on the destination site.").setView(field).setNegativeButton("Cancel",null).setNeutralButton("Trakt") { _,_->openTraktWatchPage(type,id) }.setPositiveButton("Search JustWatch") { _,_->
             val region=StreamingAvailability.region(field.text.toString())
             val url=region?.let { StreamingAvailability.search(title,it) }
             if(url==null) Toast.makeText(this,"Enter a valid two-letter country code and title.",Toast.LENGTH_LONG).show()
@@ -1191,7 +1191,7 @@ class MainActivity : ComponentActivity() {
         choose("Playback shortcut",listOf("Netflix","YouTube","Open installed player")) { i ->
             if(i==2) { openPlaybackApp(PlayerRules.apps.values.toList()); return@choose }
             val source=if(i==0) "com.netflix.mediaclient" else "com.google.android.youtube"
-            android.app.AlertDialog.Builder(this).setTitle("Open exact provider title").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Open") { _,_->
+            BridgeDialogBuilder(this).setTitle("Open exact provider title").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Open") { _,_->
                 val url=PlaybackShortcuts.providerLink(source,field.text.toString().trim())
                 if(url==null) Toast.makeText(this,"Invalid provider ID",Toast.LENGTH_LONG).show()
                 else runCatching { startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse(url))) }.onFailure { Toast.makeText(this,"No compatible app",Toast.LENGTH_LONG).show() }
@@ -1223,14 +1223,14 @@ class MainActivity : ComponentActivity() {
                     })
                 }; card.addView(txt("S"+e.season+" E"+e.episode+if(prefs.getBoolean("hide_spoilers",true)) "" else " • "+e.title,14,muted))
             }
-            android.app.AlertDialog.Builder(this).setTitle("Upcoming episodes").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
+            BridgeDialogBuilder(this).setTitle("Upcoming episodes").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
         }
     }
     private fun externalIdentity(record:WatchRecord) {
         val field=EditText(this).apply { hint="IMDb tt1234567 or TMDB numeric ID"; setSingleLine(true) }
         choose("External catalogue identifier",listOf("IMDb","TMDB")) { index ->
             val namespace=if(index==0) "imdb" else "tmdb"
-            android.app.AlertDialog.Builder(this).setTitle("Enter "+namespace.uppercase()+" ID").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Search") { _,_->
+            BridgeDialogBuilder(this).setTitle("Enter "+namespace.uppercase()+" ID").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Search") { _,_->
                 val id=field.text.toString().trim()
                 if(!id.matches(if(namespace=="imdb") Regex("tt[0-9]{5,12}") else Regex("[0-9]{1,12}"))) { Toast.makeText(this,"Invalid identifier",Toast.LENGTH_LONG).show(); return@setPositiveButton }
                 lookup("Resolving external identifier",{ done -> TraktCatalogue.searchExternal(id,namespace,done) }) { rows:List<CatalogueItem> ->
@@ -1249,7 +1249,7 @@ class MainActivity : ComponentActivity() {
         val notes=EditText(this).apply { hint="Your review or notes"; minLines=4; setText(current.optString("notes")) }
         val tags=EditText(this).apply { hint="Tags separated by commas"; setText(current.optString("tags")) }
         body.addView(notes); body.addView(tags)
-        android.app.AlertDialog.Builder(this).setTitle(label).setView(body).setNegativeButton("Cancel",null).setPositiveButton("Save privately") { _,_->
+        BridgeDialogBuilder(this).setTitle(label).setView(body).setNegativeButton("Cancel",null).setPositiveButton("Save privately") { _,_->
             store.edit().putString(key,org.json.JSONObject().put("label",label).put("notes",notes.text.toString().take(10000)).put("tags",LibraryOrganization.tags(tags.text.toString()).joinToString(",")).toString()).apply()
         }.show()
     }
@@ -1266,18 +1266,18 @@ class MainActivity : ComponentActivity() {
                         if(exact==null) choose("Verify exact film manually",rows.map { it.label() }) { j -> titleDetails("movie",rows[j].id,rows[j].title) }
                         else {
                             val watched=history.records(0).any { it.matchType=="movie" && it.traktId==exact.id && it.status=="synced" }
-                            android.app.AlertDialog.Builder(this).setTitle(entry.title).setMessage(if(watched) "Synced completion in local history" else "No synced completion in local history").setNegativeButton("Close",null).setPositiveButton("Details") { _,_->titleDetails("movie",exact.id,exact.title) }.show()
+                            BridgeDialogBuilder(this).setTitle(entry.title).setMessage(if(watched) "Synced completion in local history" else "No synced completion in local history").setNegativeButton("Close",null).setPositiveButton("Details") { _,_->titleDetails("movie",exact.id,exact.title) }.show()
                         }
                     }
                 })
             }
-            android.app.AlertDialog.Builder(this).setTitle(guide.name).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
+            BridgeDialogBuilder(this).setTitle(guide.name).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
         }
     }
     private fun syncRecoveryStatus() {
         val rows=history.records(0)
         val counts=listOf("queued","uncertain","blocked").joinToString("\n") { status -> status+": "+rows.count { it.status==status } }
-        android.app.AlertDialog.Builder(this).setTitle("Offline sync recovery").setMessage(counts+"\n\nQueued records retry when online. Uncertain uploads are checked against remote history without resending. Blocked records require account verification or manual retry.").setNegativeButton("Close",null).setPositiveButton("Check approved queue") { _,_->HistorySync.schedule(this); showTab(2) }.show()
+        BridgeDialogBuilder(this).setTitle("Offline sync recovery").setMessage(counts+"\n\nQueued records retry when online. Uncertain uploads are checked against remote history without resending. Blocked records require account verification or manual retry.").setNegativeButton("Close",null).setPositiveButton("Check approved queue") { _,_->HistorySync.schedule(this); showTab(2) }.show()
     }
     private fun trackingHealth() {
         val nm=getSystemService(android.app.NotificationManager::class.java)
@@ -1297,12 +1297,12 @@ class MainActivity : ComponentActivity() {
         val groups=ViewingGroups.build(history.records(0)).filter { it.queued || it.pending }
         section(body,"Pending review and sync • "+groups.size)
         groups.take(20).forEach { titleCard(body,it,true) }
-        android.app.AlertDialog.Builder(this).setTitle("Tracking health").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
+        BridgeDialogBuilder(this).setTitle("Tracking health").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
     }
     private fun recentlyDeleted() {
         val rows=history.trashed()
         choose("Recently deleted",rows.map { it.matchLabel.ifBlank { it.title.ifBlank { "Unidentified video" } } }) { i ->
-            android.app.AlertDialog.Builder(this).setTitle("Restore viewing record?").setMessage("Restore for local review. Nothing will be uploaded.").setNegativeButton("Cancel",null).setPositiveButton("Restore") { _,_->history.restoreTrash(rows[i].id); refreshHistory() }.show()
+            BridgeDialogBuilder(this).setTitle("Restore viewing record?").setMessage("Restore for local review. Nothing will be uploaded.").setNegativeButton("Cancel",null).setPositiveButton("Restore") { _,_->history.restoreTrash(rows[i].id); refreshHistory() }.show()
         }
     }
     private fun peopleSearch(q:String) {
@@ -1324,7 +1324,7 @@ class MainActivity : ComponentActivity() {
         if(chosen.isEmpty()) body.addView(txt("No known remaining times fit.",14,muted))
         chosen.forEachIndexed { i,g -> body.addView(txt((i+1).toString()+". "+g.representative.matchLabel.ifBlank { g.representative.title }+" • "+durationText(g.remainingMs),15)) }
         body.addView(txt("Based on last reported positions, not guaranteed runtime. No playback or uploads start automatically.",13,muted))
-        android.app.AlertDialog.Builder(this).setTitle("Viewing plan").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
+        BridgeDialogBuilder(this).setTitle("Viewing plan").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
     }
     private fun viewingPlanner() {
         val budgets=listOf(30,60,90,120,180)
@@ -1343,7 +1343,7 @@ class MainActivity : ComponentActivity() {
                     else titleDetails("movie",movie.id,movie.title)
                 }
             })
-            android.app.AlertDialog.Builder(this).setTitle("Watch planner").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
+            BridgeDialogBuilder(this).setTitle("Watch planner").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
         }
     }
     private fun subscriptions() {
@@ -1367,7 +1367,7 @@ class MainActivity : ComponentActivity() {
                 val price=EditText(this).apply { hint="Monthly cost in INR"; inputType=android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL; setText(cost.toString()) }
                 val renewal=EditText(this).apply { hint="Renewal date YYYY-MM-DD (optional)"; setText(data.optString("renewal")) }
                 fields.addView(price); fields.addView(renewal)
-                android.app.AlertDialog.Builder(this).setTitle(appLabel(pkg)).setView(fields).setNegativeButton("Cancel",null).setPositiveButton("Save") { _,_->
+                BridgeDialogBuilder(this).setTitle(appLabel(pkg)).setView(fields).setNegativeButton("Cancel",null).setPositiveButton("Save") { _,_->
                     val amount=price.text.toString().toDoubleOrNull()
                     val date=renewal.text.toString().trim()
                     if(amount==null || !amount.isFinite() || amount !in 0.0..1000000.0 || (date.isNotBlank() && runCatching { java.time.LocalDate.parse(date) }.isFailure)) Toast.makeText(this,"Invalid amount or date",Toast.LENGTH_LONG).show()
@@ -1377,7 +1377,7 @@ class MainActivity : ComponentActivity() {
         }
         body.addView(txt("Total monthly cost: ₹"+String.format(java.util.Locale.US,"%.2f",total),20,ink,true))
         body.addView(txt("Amounts are entered manually. Sampled hours can be incomplete; renewal dates are not billing confirmations.",13,muted))
-        android.app.AlertDialog.Builder(this).setTitle("Subscription manager").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
+        BridgeDialogBuilder(this).setTitle("Subscription manager").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
     }
     private fun serviceDashboard() {
         val rows=history.records(0)
@@ -1394,7 +1394,7 @@ class MainActivity : ComponentActivity() {
             body.addView(actionButton("Filter all history") { historyFilter=HistoryFilter(source=pkg); historyLimit=100; showTab(1) })
             section(body,"Continue watching")
             SeriesLibrary.continueWatching(groups).take(8).forEach { titleCard(body,it,false) }
-            android.app.AlertDialog.Builder(this).setTitle(appLabel(pkg)).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
+            BridgeDialogBuilder(this).setTitle(appLabel(pkg)).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
         }
     }
     private fun automationShortcuts() {
@@ -1407,7 +1407,7 @@ class MainActivity : ComponentActivity() {
                 getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(android.content.ClipData.newPlainText("TraktBridge shortcut",link))
             })
         }
-        android.app.AlertDialog.Builder(this).setTitle("Automation shortcuts").setView(body).setPositiveButton("Close",null).show()
+        BridgeDialogBuilder(this).setTitle("Automation shortcuts").setView(body).setPositiveButton("Close",null).show()
     }
     private fun handleAutomation(i:Intent) {
         val uri=i.data ?: return
@@ -1424,7 +1424,7 @@ class MainActivity : ComponentActivity() {
     }
     private fun localAssistant() {
         val field=EditText(this).apply { hint="Try: unfinished movies or 90 minutes"; setSingleLine(true) }
-        android.app.AlertDialog.Builder(this).setTitle("Viewing assistant").setMessage("Local command matching, not a remote AI service. Supports watch history, time budgets, unfinished titles and subscription summaries.").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Find") { _,_->
+        BridgeDialogBuilder(this).setTitle("Viewing assistant").setMessage("Local command matching, not a remote AI service. Supports watch history, time budgets, unfinished titles and subscription summaries.").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Find") { _,_->
             val q=LocalAssistant.parse(field.text.toString())
             when(q.action) {
                 "subscriptions"->subscriptions()
@@ -1435,7 +1435,7 @@ class MainActivity : ComponentActivity() {
                     val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
                     if(rows.isEmpty()) body.addView(txt("No matching unfinished viewing with available progress.",14,muted))
                     rows.take(30).forEach { titleCard(body,it,false) }
-                    android.app.AlertDialog.Builder(this).setTitle("Your viewing matches").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
+                    BridgeDialogBuilder(this).setTitle("Your viewing matches").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
                 }
                 else->universalSearch()
             }
@@ -1443,7 +1443,7 @@ class MainActivity : ComponentActivity() {
     }
     private fun universalSearch() {
         val field=EditText(this).apply { hint="Movie, show or anime title"; setSingleLine(true) }
-        android.app.AlertDialog.Builder(this).setTitle("Universal search").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Search") { _,_->
+        BridgeDialogBuilder(this).setTitle("Universal search").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Search") { _,_->
             val q=field.text.toString().trim().take(200)
             if(q.isBlank()) return@setPositiveButton
             val local=ViewingGroups.build(ViewingAnalytics.filter(history.records(0),HistoryFilter(query=q)))
@@ -1466,13 +1466,13 @@ class MainActivity : ComponentActivity() {
                     choose("Anime matches",rows.map { it.english.ifBlank { it.romaji } }) { index -> startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://anilist.co/anime/"+rows[index].id))) }
                 }
             })
-            android.app.AlertDialog.Builder(this).setTitle("Search: "+q).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
+            BridgeDialogBuilder(this).setTitle("Search: "+q).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
         }.show()
     }
     private fun manualLog() {
         val field=EditText(this).apply { hint="Movie or episode title"; setSingleLine(true) }
         val box=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(8),dp(16),dp(8)); addView(field); addView(txt("Choose the date and time you finished. No measured watch time will be added.",13,muted)) }
-        android.app.AlertDialog.Builder(this).setTitle("Manual watch log").setView(box).setNegativeButton("Cancel",null).setPositiveButton("Choose date") { _,_->
+        BridgeDialogBuilder(this).setTitle("Manual watch log").setView(box).setNegativeButton("Cancel",null).setPositiveButton("Choose date") { _,_->
             val title=field.text.toString().trim()
             if(title.isBlank()) return@setPositiveButton
             val now=java.time.LocalDateTime.now()
@@ -1513,7 +1513,7 @@ class MainActivity : ComponentActivity() {
                 items.take(20).forEach { r -> body.addView(txt(r.matchLabel.ifBlank { r.title.ifBlank { "Unidentified video" } }+" • "+appLabel(r.source)+" • "+durationText(r.watched),14,muted)) }
                 if(items.size>20) body.addView(txt("More entries in the viewing calendar.",13,muted))
             }
-            android.app.AlertDialog.Builder(this).setTitle("Viewing journal").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
+            BridgeDialogBuilder(this).setTitle("Viewing journal").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
         }
     }
     private fun deviceCenter() {
@@ -1521,7 +1521,7 @@ class MainActivity : ComponentActivity() {
         val peers=DevicePairing.peers(this).sortedBy { it.label }
         val live=RemotePlayback.visible(this).map { it.device.id }.toSet()
         val view=ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow) }
-        val dialog=android.app.AlertDialog.Builder(this).setTitle("Connected devices").setView(view).setPositiveButton("Close",null).create()
+        val dialog=BridgeDialogBuilder(this).setTitle("Connected devices").setView(view).setPositiveButton("Close",null).create()
         view.setContent {
             BridgeDevices(violet,identity?.label ?: "This device",peers.map { PairedUiDevice(it.id,it.label,it.id in live) },prefs.getBoolean("device_sharing",false),prefs.getBoolean("device_history",false),prefs.getBoolean("device_controls",false),
                 { dialog.dismiss(); showPairingInvitation() },
@@ -1534,7 +1534,7 @@ class MainActivity : ComponentActivity() {
         if(wide) dialog.window?.setLayout((resources.displayMetrics.widthPixels*0.76).toInt(),-2)
     }
     private fun confirmDeviceRevocation(peer:DevicePairing.Peer?) {
-        android.app.AlertDialog.Builder(this).setTitle(if(peer==null) "Revoke all devices?" else "Revoke "+peer.label+"?")
+        BridgeDialogBuilder(this).setTitle(if(peer==null) "Revoke all devices?" else "Revoke "+peer.label+"?")
             .setMessage("Remove playback, history and control access. Local viewing history and Trakt approvals remain unchanged. Pair again with a fresh invitation to restore access.")
             .setNegativeButton("Cancel",null).setPositiveButton("Revoke") { _,_->
                 runCatching {
@@ -1557,7 +1557,7 @@ class MainActivity : ComponentActivity() {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
             setContent { BridgeDeviceHistory(violet,rows,loading,error) }
         }
-        val dialog=android.app.AlertDialog.Builder(this).setTitle("Cross-device history").setView(body).setPositiveButton("Close",null).create()
+        val dialog=BridgeDialogBuilder(this).setTitle("Cross-device history").setView(body).setPositiveButton("Close",null).create()
         dialog.show()
         if(wide) dialog.window?.setLayout((resources.displayMetrics.widthPixels*0.76).toInt(),-2)
         Thread {
@@ -1579,7 +1579,7 @@ class MainActivity : ComponentActivity() {
         val port=EditText(this).apply { hint="Port"; inputType=android.text.InputType.TYPE_CLASS_NUMBER; setText((current?.port ?: 8765).toString()) }
         val secret=EditText(this).apply { hint="43-character deployment secret"; inputType=android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD; setSingleLine(true) }
         val content=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; addView(host); addView(port); addView(secret) }
-        android.app.AlertDialog.Builder(this).setTitle("Optional self-hosted cloud relay")
+        BridgeDialogBuilder(this).setTitle("Optional self-hosted cloud relay")
             .setMessage("Use only a relay you trust. Playback is encrypted end-to-end between paired devices. The relay can see connection metadata. Mobile data may be used. No hosted service is configured by default.")
             .setView(content).setNegativeButton("Cancel",null).setNeutralButton("Disable") { _,_->
                 runCatching { RelaySettings.disable(this); RemotePlayback.clear(); if(prefs.getBoolean("enabled",false)) startTracking() }
@@ -1600,7 +1600,7 @@ class MainActivity : ComponentActivity() {
             val packages=PlaybackHandoff.packages(source).let { if(tvMode) it else it.reversed() }
             val position=row.optLong("positionMs",-1)
             val detail=row.optString("title")+"\n"+row.optString("subtitle")+"\n"+if(position>=0) "Resume near "+durationText(position) else "Resume position unavailable"
-            val builder=android.app.AlertDialog.Builder(this).setTitle("Continue on this device").setMessage(detail+"\n\nThe player may require you to find the title or seek manually. The source device keeps playing unless you pause it.")
+            val builder=BridgeDialogBuilder(this).setTitle("Continue on this device").setMessage(detail+"\n\nThe player may require you to find the title or seek manually. The source device keeps playing unless you pause it.")
                 .setNegativeButton("Cancel",null).setPositiveButton("Open player") { _,_->
                     val fresh=RemotePlayback.visible(this).firstOrNull { it.device.id==entry.device.id }
                     val current=fresh?.let { e -> (0 until e.rows.length()).mapNotNull { e.rows.optJSONObject(it) }.firstOrNull { candidate -> HandoffPolicy.sameSession(row.optString("sessionId"),candidate.optString("sessionId"),row.optString("title"),candidate.optString("title"),row.optString("subtitle"),candidate.optString("subtitle"),source,candidate.optString("package")) } }
@@ -1648,7 +1648,7 @@ class MainActivity : ComponentActivity() {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
             setContent { BridgeLiveDashboard(violet,rows,status,{ remotePlaybackControls() },{ continueOnThisDevice() },{ showTab(4) }) }
         }
-        val dialog=android.app.AlertDialog.Builder(this).setTitle("Now Playing • All devices").setView(body).setPositiveButton("Close",null).create()
+        val dialog=BridgeDialogBuilder(this).setTitle("Now Playing • All devices").setView(body).setPositiveButton("Close",null).create()
         val handler=android.os.Handler(android.os.Looper.getMainLooper())
         val tick=object:Runnable {
             override fun run() {
@@ -1681,7 +1681,7 @@ class MainActivity : ComponentActivity() {
     }
     private fun liveInspector() {
         val body=TextView(this).apply { setPadding(dp(16),dp(12),dp(16),dp(12)); setTextIsSelectable(true) }
-        val dialog=android.app.AlertDialog.Builder(this).setTitle("Live recognition inspector").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).create()
+        val dialog=BridgeDialogBuilder(this).setTitle("Live recognition inspector").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).create()
         val handler=android.os.Handler(android.os.Looper.getMainLooper())
         val tick=object:Runnable {
             override fun run() {
@@ -1700,7 +1700,7 @@ class MainActivity : ComponentActivity() {
             runCatching { val o=org.json.JSONObject(value.toString()); LocalAnimeEntry(o.optInt("id"),o.optString("title"),o.optInt("progress"),o.optInt("episodes")) }.getOrNull()
         }
         val field=EditText(this).apply { hint="Search movies, series and anime"; setSingleLine(true) }
-        android.app.AlertDialog.Builder(this).setTitle("Unified library").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Browse") { _,_->
+        BridgeDialogBuilder(this).setTitle("Unified library").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Browse") { _,_->
             val library=UnifiedLibrary.build(history.records(0),anime,field.text.toString())
             choose("Library categories",listOf("Movies ("+library.movies.size+")","TV / Trakt series ("+library.series.size+")","AniList local anime ("+library.anime.size+")","Unidentified ("+library.unidentified.size+")")) { category ->
                 when(category) {
@@ -1729,7 +1729,7 @@ class MainActivity : ComponentActivity() {
         val store=personalStore("anime_progress")
         val old=runCatching { org.json.JSONObject(store.getString(id.toString(),"{}")) }.getOrDefault(org.json.JSONObject())
         val field=EditText(this).apply { hint="Episodes completed"; inputType=android.text.InputType.TYPE_CLASS_NUMBER; setText(old.optInt("progress",0).toString()) }
-        android.app.AlertDialog.Builder(this).setTitle(title).setMessage("Local personal progress only. No anime account synchronization.").setView(field).setNegativeButton("Cancel",null).setNeutralButton("Remove") { _,_->store.edit().remove(id.toString()).apply() }.setPositiveButton("Save") { _,_->
+        BridgeDialogBuilder(this).setTitle(title).setMessage("Local personal progress only. No anime account synchronization.").setView(field).setNegativeButton("Cancel",null).setNeutralButton("Remove") { _,_->store.edit().remove(id.toString()).apply() }.setPositiveButton("Save") { _,_->
             val n=field.text.toString().toIntOrNull()
             if(n!=null && n in 0..(if(episodes>0) episodes else 10000)) store.edit().putString(id.toString(),org.json.JSONObject().put("id",id).put("title",title).put("episodes",episodes).put("progress",n).toString()).apply()
             else Toast.makeText(this,"Invalid episode count",Toast.LENGTH_LONG).show()
@@ -1737,7 +1737,7 @@ class MainActivity : ComponentActivity() {
     }
     private fun publicAnimeList() {
         val field=EditText(this).apply { hint="AniList username"; setSingleLine(true) }
-        android.app.AlertDialog.Builder(this).setTitle("Public AniList library").setMessage("Read-only public list. Private accounts require authentication; no viewing history is uploaded.").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Load") { _,_->
+        BridgeDialogBuilder(this).setTitle("Public AniList library").setMessage("Read-only public list. Private accounts require authentication; no viewing history is uploaded.").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Load") { _,_->
             val name=field.text.toString().trim()
             lookup("Loading public anime list",{ done -> AnimeCatalogue.publicList(name,done) }) { rows:List<AnimeListEntry> ->
                 choose("AniList • "+name,rows.take(500).map { it.title+" • "+it.progress+"/"+(if(it.episodes>0) it.episodes.toString() else "?")+" • "+it.status }) { i -> startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://anilist.co/anime/"+rows[i].id))) }
@@ -1746,13 +1746,13 @@ class MainActivity : ComponentActivity() {
     }
     private fun animeSearch() {
         val field=EditText(this).apply { hint="English, Japanese or romaji title"; setSingleLine(true) }
-        android.app.AlertDialog.Builder(this).setTitle("Search AniList").setMessage("Your search text is sent to AniList. No account access or history upload.").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Search") { _,_->
+        BridgeDialogBuilder(this).setTitle("Search AniList").setMessage("Your search text is sent to AniList. No account access or history upload.").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Search") { _,_->
             val q=field.text.toString().trim()
             if(q.isBlank()) return@setPositiveButton
             lookup("Searching anime",{ done -> AnimeCatalogue.search(q,done) }) { rows:List<AnimeResult> ->
                 choose("Anime matches",rows.map { it.english.ifBlank { it.romaji }+" • "+it.romaji }) { i ->
                     val a=rows[i]
-                    android.app.AlertDialog.Builder(this).setTitle(a.english.ifBlank { a.romaji }).setMessage(a.romaji+"\n"+a.native+"\nEpisodes: "+if(a.episodes>0) a.episodes.toString()+"\n\n"+a.description else "Unknown\n\n"+a.description).setNegativeButton("Close",null).setNeutralButton("Track locally") { _,_->editAnimeProgress(a.id,a.english.ifBlank { a.romaji },a.episodes) }.setPositiveButton("AniList details") { _,_->startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://anilist.co/anime/"+a.id))) }.show()
+                    BridgeDialogBuilder(this).setTitle(a.english.ifBlank { a.romaji }).setMessage(a.romaji+"\n"+a.native+"\nEpisodes: "+if(a.episodes>0) a.episodes.toString()+"\n\n"+a.description else "Unknown\n\n"+a.description).setNegativeButton("Close",null).setNeutralButton("Track locally") { _,_->editAnimeProgress(a.id,a.english.ifBlank { a.romaji },a.episodes) }.setPositiveButton("AniList details") { _,_->startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://anilist.co/anime/"+a.id))) }.show()
                 }
             }
         }.show()
@@ -1761,11 +1761,11 @@ class MainActivity : ComponentActivity() {
         val records=history.records(0)
         val seeds=RecommendationEngine.seeds(records,System.currentTimeMillis())
         if(seeds.isEmpty()) {
-            android.app.AlertDialog.Builder(this).setTitle("Recommendations").setMessage("Confirm some viewing history first, or browse trending titles.").setNegativeButton("Close",null).setPositiveButton("Discover") { _,_->discover() }.show()
+            BridgeDialogBuilder(this).setTitle("Recommendations").setMessage("Confirm some viewing history first, or browse trending titles.").setNegativeButton("Close",null).setPositiveButton("Discover") { _,_->discover() }.show()
             return
         }
         val hiddenStore=personalStore("recommendation_hidden")
-        android.app.AlertDialog.Builder(this).setTitle("Personalized recommendations").setMessage("Trakt receives up to five catalogue title IDs to find related content. Viewing times and local feedback stay on this device.").setNegativeButton("Cancel",null).setNeutralButton("Reset hidden titles") { _,_->hiddenStore.edit().clear().apply(); recommendFromHistory() }.setPositiveButton("Find titles") { _,_->
+        BridgeDialogBuilder(this).setTitle("Personalized recommendations").setMessage("Trakt receives up to five catalogue title IDs to find related content. Viewing times and local feedback stay on this device.").setNegativeButton("Cancel",null).setNeutralButton("Reset hidden titles") { _,_->hiddenStore.edit().clear().apply(); recommendFromHistory() }.setPositiveButton("Find titles") { _,_->
             lookup("Finding personal recommendations",{ done -> TraktCatalogue.personalized(seeds,done) }) { batches:List<RelatedBatch> ->
                 val rows=RecommendationEngine.rank(batches,RecommendationEngine.seen(records),hiddenStore.all.keys)
                 val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
@@ -1782,7 +1782,7 @@ class MainActivity : ComponentActivity() {
                         else { hiddenStore.edit().putBoolean(item.type+":"+item.id,true).apply(); card.visibility=android.view.View.GONE }
                     })
                 }
-                android.app.AlertDialog.Builder(this).setTitle("For you").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
+                BridgeDialogBuilder(this).setTitle("For you").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
             }
         }.show()
     }
@@ -1800,7 +1800,7 @@ class MainActivity : ComponentActivity() {
                     card.addView(image,LinearLayout.LayoutParams(-1,dp(180))); Artwork.load(this,type,item.id,image)
                     card.addView(txt(item.label(),16,ink,true)); card.addView(actionButton("Details") { titleDetails(type,item.id,item.title) })
                 }
-                android.app.AlertDialog.Builder(this).setTitle(mode.replaceFirstChar { it.uppercase() }).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
+                BridgeDialogBuilder(this).setTitle(mode.replaceFirstChar { it.uppercase() }).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
             }
         }
     }
@@ -1849,11 +1849,11 @@ class MainActivity : ComponentActivity() {
                     choose("Related titles",rows.take(40).map { it.label() }) { index -> val item=rows[index]; titleDetails(item.type,item.id,item.title) }
                 }
             })
-            body.addView(actionButton("Cast and directors") { lookup("Loading credits",{ done -> TraktCatalogue.credits(type,id,done) }) { names:List<String> -> android.app.AlertDialog.Builder(this).setTitle("Cast and crew").setMessage(names.joinToString("\n").ifBlank { "No credits returned" }).setPositiveButton("Close",null).show() } })
+            body.addView(actionButton("Cast and directors") { lookup("Loading credits",{ done -> TraktCatalogue.credits(type,id,done) }) { names:List<String> -> BridgeDialogBuilder(this).setTitle("Cast and crew").setMessage(names.joinToString("\n").ifBlank { "No credits returned" }).setPositiveButton("Close",null).show() } })
             body.addView(actionButton("Where to watch • regional availability") { streamingAvailability(type,id,d.title.ifBlank { label }) })
             body.addView(actionButton("Watchlist / rating") { lookup("Checking account",{ done -> TraktLibrary.accountId(this,done) }) { account:String -> remoteActions(RemoteItem(type,id,d.title),account) } })
             TitleDetailPolicy.trailer(d.trailer)?.let { url -> body.addView(actionButton("Watch trailer on YouTube") { runCatching { startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse(url))) }.onFailure { Toast.makeText(this,"No compatible app",Toast.LENGTH_LONG).show() } }) }
-            android.app.AlertDialog.Builder(this).setTitle("Title details").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
+            BridgeDialogBuilder(this).setTitle("Title details").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
         }
     }
     private fun heroCard(parent:LinearLayout,g:ViewingTitle) {
@@ -1914,7 +1914,7 @@ class MainActivity : ComponentActivity() {
         val status=spinner("Status",listOf("All statuses","Synced","Unfinished","Approved / queued"),statuses.indexOf(historyFilter.status))
         val sorts=listOf("recent","title","watchtime")
         val sort=spinner("Sort",listOf("Most recent","Title A–Z","Most sampled watch time"),sorts.indexOf(historyFilter.sort))
-        android.app.AlertDialog.Builder(this).setTitle("History filters").setView(ScrollView(this).apply { addView(box) }).setNegativeButton("Cancel",null).setPositiveButton("Apply") { _,_->
+        BridgeDialogBuilder(this).setTitle("History filters").setView(ScrollView(this).apply { addView(box) }).setNegativeButton("Cancel",null).setPositiveButton("Apply") { _,_->
             historyFilter=HistoryFilter(q.text.toString(),sources[source.selectedItemPosition],periods[period.selectedItemPosition],types[type.selectedItemPosition],statuses[status.selectedItemPosition],sorts[sort.selectedItemPosition]); historyLimit=MemoryPolicy.pageSize(lowRam); refreshHistory()
         }.show()
     }
@@ -1954,7 +1954,7 @@ class MainActivity : ComponentActivity() {
         val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
         body.addView(txt(durationText(day.sampledMs)+" sampled • "+day.sessions+" sessions",16,ink,true))
         ViewingGroups.build(records.filter { ViewingAnalytics.day(it.ended)==day.date }).forEach { titleCard(body,it,true) }
-        android.app.AlertDialog.Builder(this).setTitle(day.date.toString()).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
+        BridgeDialogBuilder(this).setTitle(day.date.toString()).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
     }
     private fun seriesCard(parent:LinearLayout,series:SeriesGroup) {
         val card=panel(parent)
@@ -1993,7 +1993,7 @@ class MainActivity : ComponentActivity() {
             body.addView(actionButton("View full "+label.lowercase()) { dialog?.dismiss(); showCatalogueSeason(series.id,season.number) })
             for(episode in season.episodes) titleCard(body,episode,true)
         }
-        dialog=android.app.AlertDialog.Builder(this).setTitle(series.title).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close") { _,_->refreshHistory() }.create()
+        dialog=BridgeDialogBuilder(this).setTitle(series.title).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close") { _,_->refreshHistory() }.create()
         dialog.show()
     }
     private fun showCatalogueSeason(id:Long,season:Int) {
@@ -2016,12 +2016,12 @@ class MainActivity : ComponentActivity() {
                     card.addView(txt("No local viewing record",13,muted))
                 }
             }
-            android.app.AlertDialog.Builder(this).setTitle(series.title+" • "+if(season==0) "Specials" else "Season "+season).setView(ScrollView(this).apply { addView(body) }).setNegativeButton("Back") { _,_->showSeries(id) }.setPositiveButton("Close") { _,_->refreshHistory() }.show()
+            BridgeDialogBuilder(this).setTitle(series.title+" • "+if(season==0) "Specials" else "Season "+season).setView(ScrollView(this).apply { addView(body) }).setNegativeButton("Back") { _,_->showSeries(id) }.setPositiveButton("Close") { _,_->refreshHistory() }.show()
         }
     }
     private fun configureAccountRefresh() {
         val enabled=prefs.getString("auto_refresh_account","").orEmpty().isNotBlank()
-        android.app.AlertDialog.Builder(this).setTitle("Daily Trakt history refresh").setMessage("Download the latest 100 remote watches approximately daily while connected. No upload, no sampled watch time added. Currently: "+if(enabled) "enabled" else "disabled").setNegativeButton("Close",null).setNeutralButton("Disable") { _,_->RemoteRefreshSchedule.disable(this); Toast.makeText(this,"Automatic refresh disabled",Toast.LENGTH_SHORT).show() }.setPositiveButton("Enable for connected account") { _,_->
+        BridgeDialogBuilder(this).setTitle("Daily Trakt history refresh").setMessage("Download the latest 100 remote watches approximately daily while connected. No upload, no sampled watch time added. Currently: "+if(enabled) "enabled" else "disabled").setNegativeButton("Close",null).setNeutralButton("Disable") { _,_->RemoteRefreshSchedule.disable(this); Toast.makeText(this,"Automatic refresh disabled",Toast.LENGTH_SHORT).show() }.setPositiveButton("Enable for connected account") { _,_->
             lookup("Verifying account",{ done -> TraktLibrary.accountId(this,done) }) { id:String ->
                 RemoteRefreshSchedule.enable(this,id); Toast.makeText(this,"Daily refresh enabled",Toast.LENGTH_LONG).show()
             }
@@ -2066,18 +2066,18 @@ class MainActivity : ComponentActivity() {
             if(page.page>1) body.addView(actionButton("Previous page") { dialog?.dismiss(); loadRemotePage(kind,page.page-1) })
             if(page.items.isNotEmpty() && (page.pages==null || page.page<page.pages)) body.addView(actionButton("Next page") { dialog?.dismiss(); loadRemotePage(kind,page.page+1) })
         } else body.addView(txt("Showing the latest 100 cached entries.",12,muted))
-        dialog=android.app.AlertDialog.Builder(this).setTitle("Trakt account library").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).create()
+        dialog=BridgeDialogBuilder(this).setTitle("Trakt account library").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).create()
         dialog.show()
     }
     private fun remoteSeriesProgress(showId:Long,title:String) {
         lookup("Loading account progress",{ done -> TraktLibrary.progress(this,showId,done) }) { result:RemoteProgress ->
-            android.app.AlertDialog.Builder(this).setTitle(title).setMessage(result.completed.toString()+" of "+result.aired+" aired episodes completed on Trakt"+if(result.next.isBlank()) "" else "\nNext episode: "+result.next).setPositiveButton("OK",null).show()
+            BridgeDialogBuilder(this).setTitle(title).setMessage(result.completed.toString()+" of "+result.aired+" aired episodes completed on Trakt"+if(result.next.isBlank()) "" else "\nNext episode: "+result.next).setPositiveButton("OK",null).show()
         }
     }
     private fun remoteActions(item:RemoteItem,account:String) {
         choose(item.title,listOf("Add to Trakt watchlist","Remove from Trakt watchlist","Rate on Trakt","Remove Trakt rating")) { index ->
             fun confirm(action:String,rating:Int=0) {
-                android.app.AlertDialog.Builder(this).setTitle("Confirm Trakt account change").setMessage(item.title+"\n"+action+if(rating>0) " "+rating+"/10" else "").setNegativeButton("Cancel",null).setPositiveButton("Confirm") { _,_->
+                BridgeDialogBuilder(this).setTitle("Confirm Trakt account change").setMessage(item.title+"\n"+action+if(rating>0) " "+rating+"/10" else "").setNegativeButton("Cancel",null).setPositiveButton("Confirm") { _,_->
                     lookup("Updating Trakt",{ done -> TraktLibrary.mutate(this,account,item,action,rating,done) }) { message:String -> Toast.makeText(this,message,Toast.LENGTH_LONG).show() }
                 }.show()
             }
@@ -2130,7 +2130,7 @@ class MainActivity : ComponentActivity() {
     private fun duplicateTitles(target:WatchRecord) {
         val rows=LibraryDuplicates.candidates(history.records(0),target)
         choose("Possible duplicate titles",rows.map { it.title+" • "+appLabel(it.source)+" • "+java.text.DateFormat.getDateTimeInstance().format(java.util.Date(it.started)) }) { i ->
-            android.app.AlertDialog.Builder(this).setTitle("Link to same catalogue title?").setMessage(rows[i].title+" → "+target.matchLabel+"\nVerify the exact title and episode. Original sessions and sampled time remain unchanged. Nothing is approved or uploaded.").setNegativeButton("Cancel",null).setPositiveButton("Link title") { _,_->
+            BridgeDialogBuilder(this).setTitle("Link to same catalogue title?").setMessage(rows[i].title+" → "+target.matchLabel+"\nVerify the exact title and episode. Original sessions and sampled time remain unchanged. Nothing is approved or uploaded.").setNegativeButton("Cancel",null).setPositiveButton("Link title") { _,_->
                 if(history.linkDuplicateTitle(target.id,rows[i].id)) { ViewingNotifications.cancel(this,rows[i].id); refreshHistory() } else Toast.makeText(this,"Record changed; review again",Toast.LENGTH_LONG).show()
             }.show()
         }
@@ -2142,7 +2142,7 @@ class MainActivity : ComponentActivity() {
             if(session.id in g.possibleRewatchIds) body.addView(txt("Possible rewatch — review before approving",14,muted))
             recordCard(body,session,true,g.confirmed || g.queued)
         }
-        android.app.AlertDialog.Builder(this).setTitle(g.representative.matchLabel.ifBlank { g.representative.title.ifBlank { "Viewing sessions" } }).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close") { _,_->refreshHistory() }.show()
+        BridgeDialogBuilder(this).setTitle(g.representative.matchLabel.ifBlank { g.representative.title.ifBlank { "Viewing sessions" } }).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close") { _,_->refreshHistory() }.show()
     }
     private fun recordCard(parent:LinearLayout,r:WatchRecord,expanded:Boolean,completionAlreadyRecorded:Boolean=false) {
         val status=when(r.status) { "synced"->"Synced to Trakt"; "active"->"Watching"; "pending"->"Needs review"; "reviewed"->"Ready to confirm"; "restored_audit"->"Restored audit • no upload"; else->r.status.replaceFirstChar { it.uppercase() } }
@@ -2155,7 +2155,7 @@ class MainActivity : ComponentActivity() {
         }
         val row=TitleUi(r.matchLabel.ifBlank { r.title.ifBlank { "Unidentified video" } },r.subtitle.ifBlank { appLabel(r.source) },appLabel(r.source)+" • "+java.text.DateFormat.getDateInstance().format(java.util.Date(r.started)),status,if(r.watched<=0) "Watch time unknown" else durationText(r.watched)+" sampled",progress,if(progress!=null) durationText(r.position)+" / "+durationText(r.duration) else "",evidence,if(r.matchType=="episode") "show" else "movie",if(r.matchType=="episode") r.showId else r.traktId)
         val actions=mutableListOf<UiAction>()
-        if(!expanded) actions.add(UiAction("View details") { android.app.AlertDialog.Builder(this).setTitle("Viewing details").setMessage(r.matchLabel.ifBlank { r.title.ifBlank { "Unidentified video" } }+"\n"+r.subtitle).setNegativeButton("Close",null).setPositiveButton("Open history") { _,_->showTab(1) }.show() })
+        if(!expanded) actions.add(UiAction("View details") { BridgeDialogBuilder(this).setTitle("Viewing details").setMessage(r.matchLabel.ifBlank { r.title.ifBlank { "Unidentified video" } }+"\n"+r.subtitle).setNegativeButton("Close",null).setPositiveButton("Open history") { _,_->showTab(1) }.show() })
         else {
             if(r.traktId>0) actions.add(UiAction("Trakt watchlist / rating") { lookup("Checking account",{ done -> TraktLibrary.accountId(this,done) }) { account:String -> remoteActions(RemoteItem(r.matchType,r.traktId,r.matchLabel,r.showId,r.season,r.episode),account) } })
             if(r.id.startsWith("import:") && r.status=="pending") actions.add(UiAction("Reconcile with local history") { reconcileImported(r) })
@@ -2167,11 +2167,11 @@ class MainActivity : ComponentActivity() {
             if(r.status=="uncertain") actions.add(UiAction("Reconcile with Trakt (no resend)") { HistorySync.schedule(this); refreshHistory() })
             if(r.status=="pending") actions.add(UiAction("Review / edit title") {
                 val field=EditText(this).apply { setText(r.title); hint="Movie or episode title" }
-                android.app.AlertDialog.Builder(this).setTitle("Confirm locally (not synced)").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Save") { _,_->
+                BridgeDialogBuilder(this).setTitle("Confirm locally (not synced)").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Save") { _,_->
                     val title=field.text.toString().trim(); if(title.isNotEmpty()) { history.review(r.id,title); ViewingNotifications.cancel(this,r.id); refreshHistory() }
                 }.show()
             })
-            if(r.status in setOf("pending","reviewed")) actions.add(UiAction("Delete viewing record") { android.app.AlertDialog.Builder(this).setTitle("Delete this local record?").setNegativeButton("Cancel",null).setPositiveButton("Delete") { _,_-> history.trash(r.id); ViewingNotifications.cancel(this,r.id); refreshHistory() }.show() })
+            if(r.status in setOf("pending","reviewed")) actions.add(UiAction("Delete viewing record") { BridgeDialogBuilder(this).setTitle("Delete this local record?").setNegativeButton("Cancel",null).setPositiveButton("Delete") { _,_-> history.trash(r.id); ViewingNotifications.cancel(this,r.id); refreshHistory() }.show() })
         }
         parent.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeTitleCard(violet,row,actions) } })
     }
@@ -2184,7 +2184,7 @@ class MainActivity : ComponentActivity() {
         val packages=(packageManager.queryIntentActivities(launch,0).map { it.activityInfo.packageName } + selected + apps.values)
             .filter { it != packageName }.distinct().sortedBy { appLabel(it).lowercase() }
         val checked=packages.map { it in selected }.toBooleanArray()
-        android.app.AlertDialog.Builder(this).setTitle("Select only video apps you want tracked")
+        BridgeDialogBuilder(this).setTitle("Select only video apps you want tracked")
             .setMultiChoiceItems(packages.map { appLabel(it)+" ("+it+")" }.toTypedArray(),checked) { _, index, enabled ->
                 if(enabled) selected.add(packages[index]) else selected.remove(packages[index])
             }.setNegativeButton("Cancel",null).setPositiveButton("Save") { _,_ ->
@@ -2193,7 +2193,7 @@ class MainActivity : ComponentActivity() {
     }
     private fun reviewUsage() {
         if(!prefs.contains("usage_since") || !UsageFallback.allowed(this)) {
-            android.app.AlertDialog.Builder(this).setMessage("Enable app-activity fallback and grant Usage access first. Only selected apps are queried, and app activity is not proof of video playback.").setPositiveButton("OK",null).show(); return
+            BridgeDialogBuilder(this).setMessage("Enable app-activity fallback and grant Usage access first. Only selected apps are queried, and app activity is not proof of video playback.").setPositiveButton("OK",null).show(); return
         }
         val selected=prefs.getStringSet("allowed",emptySet()) ?: emptySet()
         val items=runCatching { UsageFallback.recent(this,selected,prefs.getLong("usage_since",System.currentTimeMillis())) }.getOrDefault(emptyList())
@@ -2202,7 +2202,7 @@ class MainActivity : ComponentActivity() {
             val item=items[i]
             val suggestion=TitleAccessibility.hint(this,item.source,item.start,item.end)
             val field=EditText(this).apply { hint="What did you watch?"; setSingleLine(true); setText(suggestion?.first.orEmpty()) }
-            val dialog=android.app.AlertDialog.Builder(this).setTitle("Confirm you watched a video").setMessage("App activity may include browsing or idle time. Confirm or correct any suggested title only if you watched something. Actual watch time is unknown.").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Add locally",null).create()
+            val dialog=BridgeDialogBuilder(this).setTitle("Confirm you watched a video").setMessage("App activity may include browsing or idle time. Confirm or correct any suggested title only if you watched something. Actual watch time is unknown.").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Add locally",null).create()
             dialog.setOnShowListener { dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val title=field.text.toString().trim()
                 if(title.isBlank()) { field.error="Enter title"; return@setOnClickListener }
@@ -2215,26 +2215,26 @@ class MainActivity : ComponentActivity() {
     private fun configureCompletionThreshold() {
         val options=listOf(75,80,85,90,95,100)
         val current=CompletionPolicy.threshold(prefs.getInt("completion_threshold",CompletionPolicy.DEFAULT_THRESHOLD))
-        android.app.AlertDialog.Builder(this).setTitle("Completion review threshold").setMessage("Current: "+current+"%. A suggestion never uploads a completed watch. You must still approve it.").setNeutralButton("Change") { _,_->
+        BridgeDialogBuilder(this).setTitle("Completion review threshold").setMessage("Current: "+current+"%. A suggestion never uploads a completed watch. You must still approve it.").setNeutralButton("Change") { _,_->
             choose("Suggest completion at",options.map { it.toString()+"%" }) { i -> prefs.edit().putInt("completion_threshold",options[i]).apply(); refreshHistory() }
         }.setPositiveButton("Close",null).show()
     }
     private fun completionAssessment(r:WatchRecord)=CompletionPolicy.assess(r,prefs.getInt("completion_threshold",CompletionPolicy.DEFAULT_THRESHOLD))
     private fun approveUpload(r: WatchRecord,rewatch:Boolean=false) {
-        android.app.AlertDialog.Builder(this).setTitle(if(rewatch) "Confirm a separate completed rewatch?" else "Mark as fully watched?")
+        BridgeDialogBuilder(this).setTitle(if(rewatch) "Confirm a separate completed rewatch?" else "Mark as fully watched?")
             .setMessage(r.matchLabel + "\nThis adds a completed watch to Trakt at the recorded end time. Only confirm if you finished the movie or episode. Partial viewing stays local. For app-activity records the end time is only the app exit time.")
             .setNegativeButton("Cancel",null).setPositiveButton("Verify account") { _,_ ->
                 Thread {
                     val result=runCatching { HistorySync.accountForApproval(applicationContext) }
                     runOnUiThread {
                         if(!isFinishing && !isDestroyed) result.fold({ accountId ->
-                            android.app.AlertDialog.Builder(this).setTitle("Approve upload to connected Trakt account?")
+                            BridgeDialogBuilder(this).setTitle("Approve upload to connected Trakt account?")
                                 .setMessage(r.matchLabel + "\nAccount ID: " + accountId + "\nApproved records will retry when online.")
                                 .setNegativeButton("Cancel",null).setPositiveButton("Approve and sync") { _,_ ->
                                     if(history.enqueue(r.id,accountId,rewatch,r.traktId,r.matchType,r.ended)) HistorySync.schedule(this) else Toast.makeText(this,"This title already has a completion or pending upload for this account.",Toast.LENGTH_LONG).show()
                                     refreshHistory()
                                 }.show()
-                        },{ android.app.AlertDialog.Builder(this).setTitle("Account verification required").setMessage("Connect to Trakt and verify the account online before approving uploads.").setPositiveButton("OK",null).show() })
+                        },{ BridgeDialogBuilder(this).setTitle("Account verification required").setMessage("Connect to Trakt and verify the account online before approving uploads.").setPositiveButton("OK",null).show() })
                     }
                 }.start()
             }.show()
@@ -2245,7 +2245,7 @@ class MainActivity : ComponentActivity() {
         box.addView(actionButton("Search by IMDb / TMDB ID") { externalIdentity(r) })
         val learned=history.learned(r)
         if(learned!=null && r.traktId==0L) box.addView(actionButton("Use learned match: "+learned.label()) { confirmMatch(r,learned) })
-        val dialog = android.app.AlertDialog.Builder(this).setTitle("Identify viewing record").setView(box).setNegativeButton("Cancel",null).setNeutralButton("TV / Anime",null).setPositiveButton("Movie",null).create()
+        val dialog = BridgeDialogBuilder(this).setTitle("Identify viewing record").setView(box).setNegativeButton("Cancel",null).setNeutralButton("TV / Anime",null).setPositiveButton("Movie",null).create()
         dialog.setOnShowListener {
             fun launch(type: String) {
                 val q = field.text.toString().trim()
@@ -2265,30 +2265,30 @@ class MainActivity : ComponentActivity() {
         dialog.show()
     }
     private fun <T> lookup(label: String, request: ((Result<T>) -> Unit) -> Unit, success: (T) -> Unit) {
-        val progress = android.app.AlertDialog.Builder(this).setMessage(label + "…").setNegativeButton("Cancel",null).create()
+        val progress = BridgeDialogBuilder(this).setMessage(label + "…").setNegativeButton("Cancel",null).create()
         progress.show()
         try { request { result ->
             if (!isFinishing && !isDestroyed && progress.isShowing) {
                 progress.dismiss()
-                try { result.getOrThrow().let(success) } catch(e:Exception) { DebugTrace.failure("catalogue-ui",e); android.app.AlertDialog.Builder(this).setTitle("Catalogue unavailable").setMessage("Unable to complete this request. Try again later.").setPositiveButton("OK",null).show() }
+                try { result.getOrThrow().let(success) } catch(e:Exception) { DebugTrace.failure("catalogue-ui",e); BridgeDialogBuilder(this).setTitle("Catalogue unavailable").setMessage("Unable to complete this request. Try again later.").setPositiveButton("OK",null).show() }
             }
         } } catch(e:Exception) { progress.dismiss(); DebugTrace.failure("catalogue-request",e); if(!isFinishing && !isDestroyed) Toast.makeText(this,"Unable to start request. Try again.",Toast.LENGTH_LONG).show() }
     }
     private fun choose(title: String, labels: List<String>, selected: (Int) -> Unit) {
-        if (labels.isEmpty()) { android.app.AlertDialog.Builder(this).setTitle(title).setMessage("No results. Try another title or spelling.").setPositiveButton("OK",null).show(); return }
-        android.app.AlertDialog.Builder(this).setTitle(title).setItems(labels.toTypedArray()) { _, index -> BridgeHaptics.tap(window.decorView); selected(index) }.setNegativeButton("Cancel",null).show()
+        if (labels.isEmpty()) { BridgeDialogBuilder(this).setTitle(title).setMessage("No results. Try another title or spelling.").setPositiveButton("OK",null).show(); return }
+        BridgeDialogBuilder(this).setTitle(title).setItems(labels.toTypedArray()) { _, index -> BridgeHaptics.tap(window.decorView); selected(index) }.setNegativeButton("Cancel",null).show()
     }
     private fun selectSuggestedEpisode(r:WatchRecord,show:CatalogueItem) {
         val evidence=r.title+" "+r.subtitle
         val ep=RecognitionEngine.episodeOf(evidence) ?: AnimeEpisodeMapping.specialNumber(evidence)
         if(ep==null) {
             val absolute=AnimeEpisodeMapping.absoluteNumber(evidence)
-            if(absolute==null) selectSeason(r,show) else android.app.AlertDialog.Builder(this).setTitle("Episode numbering").setMessage("Detected episode "+absolute+". Absolute anime numbering may differ from catalogue season numbering. Choose the exact season and episode manually.").setPositiveButton("Choose episode") { _,_->selectSeason(r,show) }.setNegativeButton("Cancel",null).show()
+            if(absolute==null) selectSeason(r,show) else BridgeDialogBuilder(this).setTitle("Episode numbering").setMessage("Detected episode "+absolute+". Absolute anime numbering may differ from catalogue season numbering. Choose the exact season and episode manually.").setPositiveButton("Choose episode") { _,_->selectSeason(r,show) }.setNegativeButton("Cancel",null).show()
             return
         }
         lookup("Checking detected episode", { done -> TraktCatalogue.episodes(show,ep.season,done) }) { episodes:List<CatalogueItem> ->
             val exact=RecognitionEngine.exactEpisode(show.id,ep,episodes)
-            if(exact==null) selectSeason(r,show) else android.app.AlertDialog.Builder(this).setTitle("Detected episode").setMessage(exact.label()+"\nSeason and episode agree with the detected text. Confirm the exact episode.").setNegativeButton("Cancel",null).setNeutralButton("Choose another") { _,_->selectSeason(r,show) }.setPositiveButton("Review match") { _,_->confirmMatch(r,exact) }.show()
+            if(exact==null) selectSeason(r,show) else BridgeDialogBuilder(this).setTitle("Detected episode").setMessage(exact.label()+"\nSeason and episode agree with the detected text. Confirm the exact episode.").setNegativeButton("Cancel",null).setNeutralButton("Choose another") { _,_->selectSeason(r,show) }.setPositiveButton("Review match") { _,_->confirmMatch(r,exact) }.show()
         }
     }
     private fun selectSeason(r: WatchRecord, show: CatalogueItem) {
@@ -2302,7 +2302,7 @@ class MainActivity : ComponentActivity() {
         }
     }
     private fun confirmMatch(r: WatchRecord, item: CatalogueItem) {
-        android.app.AlertDialog.Builder(this).setTitle("Save local match?").setMessage(item.label() + "\nTrakt ID: " + item.id + "\nThis does not mark it watched on Trakt.").setNegativeButton("Cancel",null).setPositiveButton("Save match") { _,_ -> history.match(r.id,item); ViewingNotifications.cancel(this,r.id); refreshHistory() }.show()
+        BridgeDialogBuilder(this).setTitle("Save local match?").setMessage(item.label() + "\nTrakt ID: " + item.id + "\nThis does not mark it watched on Trakt.").setNegativeButton("Cancel",null).setPositiveButton("Save match") { _,_ -> history.match(r.id,item); ViewingNotifications.cancel(this,r.id); refreshHistory() }.show()
     }
     private fun refresh() {
         val raw=prefs.getString("sessions","[]") ?: "[]"
