@@ -269,7 +269,7 @@ class MainActivity : Activity() {
         shell=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(bg) }
         shell.setOnApplyWindowInsetsListener { v,insets -> v.setPadding(insets.systemWindowInsetLeft,insets.systemWindowInsetTop,insets.systemWindowInsetRight,insets.systemWindowInsetBottom); insets }
         setContentView(shell)
-        val header=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(24),dp(16),dp(24),dp(12)); addView(txt("TRAKTBRIDGE",12,violet)); addView(txt("Your viewing companion",24,ink,true)) }
+        val header=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(24),dp(16),dp(24),dp(12)); addView(txt("TRAKTBRIDGE",12,violet)); addView(txt("Your viewing companion",24,ink,true)); addView(actionButton("Search library") { showTab(1); editHistoryFilter(history.records(0)) }) }
         shell.addView(header)
         val frame=android.widget.FrameLayout(this)
         val workspace=LinearLayout(this).apply { orientation=if(wide) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL }
@@ -281,7 +281,7 @@ class MainActivity : Activity() {
         nav=LinearLayout(this).apply { orientation=if(wide) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL; setPadding(dp(8),dp(8),dp(8),dp(8)); setBackgroundColor(surface) }
         if(wide) { workspace.addView(nav,LinearLayout.LayoutParams(dp(156),-1)); workspace.addView(frame,LinearLayout.LayoutParams(0,-1,1f)) }
         else { workspace.addView(frame,LinearLayout.LayoutParams(-1,0,1f)); workspace.addView(nav,LinearLayout.LayoutParams(-1,-2)) }
-        listOf("Home","History","Review","Stats","Settings").forEachIndexed { i,name -> nav.addView(TextView(this).apply { text=name; textSize=if(wide) 15f else 12f; gravity=android.view.Gravity.CENTER; minHeight=dp(52); setOnClickListener { showTab(i) } },if(wide) LinearLayout.LayoutParams(-1,dp(58)).apply { bottomMargin=dp(6) } else LinearLayout.LayoutParams(0,-2,1f)) }
+        listOf("Home","Library","Review","Activity","Settings").forEachIndexed { i,name -> nav.addView(TextView(this).apply { text=name; textSize=if(wide) 15f else 12f; gravity=android.view.Gravity.CENTER; minHeight=dp(52); setOnClickListener { showTab(i) } },if(wide) LinearLayout.LayoutParams(-1,dp(58)).apply { bottomMargin=dp(6) } else LinearLayout.LayoutParams(0,-2,1f)) }
         fun label(s: String) { root.addView(txt(s,15,muted)) }
         fun button(s: String, action: () -> Unit) { root.addView(actionButton(s,action)) }
         label("SETTINGS • Account and tracking")
@@ -418,8 +418,9 @@ class MainActivity : Activity() {
                 val active=groups.filter { it.active }
                 if(active.isEmpty()) panel(dashboard).addView(txt("No verified active playback. Play a video in a selected app.",15,muted)) else cards(dashboard,active.take(2)) { parent,g -> titleCard(parent,g,false) }
                 section(dashboard,"Continue watching")
+                SeriesLibrary.continueWatching(groups).firstOrNull()?.let { heroCard(dashboard,it) }
                 val continuing=SeriesLibrary.continueWatching(groups)
-                if(continuing.isEmpty()) panel(dashboard).addView(txt("No unfinished sampled viewing yet.",15,muted)) else cards(dashboard,continuing.take(6)) { parent,g -> titleCard(parent,g,false) }
+                if(continuing.isEmpty()) panel(dashboard).addView(txt("No unfinished sampled viewing yet.",15,muted)) else cards(dashboard,continuing.drop(1).take(6)) { parent,g -> titleCard(parent,g,false) }
                 section(dashboard,"Review queue")
                 val q=panel(dashboard); q.addView(txt("$pending awaiting action",22,ink,true)); q.addView(actionButton("Open review queue") { showTab(2) }); q.addView(actionButton("Review app activity") { reviewUsage() })
                 dashboard.addView(actionButton("Open Trakt account library") { openTraktLibrary() })
@@ -470,6 +471,20 @@ class MainActivity : Activity() {
 
             }
         }
+    }
+    private fun heroCard(parent:LinearLayout,g:ViewingTitle) {
+        val r=g.representative
+        val card=panel(parent)
+        val image=ImageView(this).apply { scaleType=ImageView.ScaleType.CENTER_CROP; setBackgroundColor(0xff343448.toInt()); contentDescription="Featured title artwork" }
+        card.addView(image,LinearLayout.LayoutParams(-1,dp(if(wide) 280 else 190)))
+        if(r.traktId>0) Artwork.load(this,if(r.matchType=="episode") "show" else "movie",if(r.matchType=="episode") r.showId else r.traktId,image)
+        card.addView(txt(r.matchLabel.ifBlank { r.title.ifBlank { "Unidentified video" } },24,ink,true))
+        card.addView(txt(g.platforms.joinToString(" • ") { appLabel(it) },14,muted))
+        if(g.durationMs>0 && g.positionMs>=0) {
+            card.addView(ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal).apply { progress=(g.positionMs.toDouble()/g.durationMs*100).toInt().coerceIn(0,100); progressTintList=android.content.res.ColorStateList.valueOf(violet) })
+            card.addView(txt(durationText(g.remainingMs)+" remaining",14,muted))
+        }
+        card.addView(actionButton("View title and sessions") { showSessions(g) })
     }
     private fun <T> cards(parent:LinearLayout,items:List<T>,render:(LinearLayout,T)->Unit) {
         if(!wide) { items.forEach { render(parent,it) }; return }
