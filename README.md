@@ -179,3 +179,6 @@ Profile-scoped custom smart watchlists automatically recalculate from local hist
 
 ## v0.107.0
 Advanced local library search combines normalized multi-token titles, personal tags, flat collection folders and five sorting options. Existing profile-specific collections act as folders; nested folder hierarchies are not introduced. Tags are normalized and bounded.
+
+## v0.108.0
+Curated franchise timelines include Middle-earth story and release orders, exact title/year catalogue verification, and local synced completion checks. Season views expose missing local episode records by exact ID; absence is not proof of unwatched status and unaired episodes may appear. Guides are curated subsets, not exhaustive timelines.

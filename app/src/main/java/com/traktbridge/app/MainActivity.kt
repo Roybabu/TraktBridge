@@ -1001,19 +1001,24 @@ class MainActivity : ComponentActivity() {
         }.show()
     }
     private fun franchises() {
-        val guides=listOf(
-            "The Lord of the Rings • release order" to listOf("The Fellowship of the Ring (2001)","The Two Towers (2002)","The Return of the King (2003)"),
-            "The Dark Knight trilogy • release order" to listOf("Batman Begins (2005)","The Dark Knight (2008)","The Dark Knight Rises (2012)"),
-            "The Matrix • main films, release order" to listOf("The Matrix (1999)","The Matrix Reloaded (2003)","The Matrix Revolutions (2003)","The Matrix Resurrections (2021)"),
-            "Back to the Future • release order" to listOf("Back to the Future (1985)","Back to the Future Part II (1989)","Back to the Future Part III (1990)")
-        )
-        choose("Curated franchise guides",guides.map { it.first }) { index ->
+        val guides=FranchiseTimeline.guides
+        choose("Curated franchise timelines",guides.map { it.name }) { index ->
             val guide=guides[index]
             val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
-            guide.second.forEachIndexed { i,title -> body.addView(actionButton((i+1).toString()+". "+title) {
-                lookup("Searching Trakt",{ done -> TraktCatalogue.search(title.substringBeforeLast(" ("),"movie",done) }) { rows:List<CatalogueItem> -> choose("Select exact movie",rows.map { it.label() }) { j -> titleDetails("movie",rows[j].id,rows[j].title) } }
-            }) }
-            android.app.AlertDialog.Builder(this).setTitle(guide.first).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
+            body.addView(txt("Curated order of the listed films, not a complete franchise catalogue.",13,muted))
+            guide.entries.forEachIndexed { i,entry ->
+                body.addView(actionButton((i+1).toString()+". "+entry.title+" ("+entry.year+")") {
+                    lookup("Checking catalogue identity",{ done -> TraktCatalogue.search(entry.title,"movie",done) }) { rows:List<CatalogueItem> ->
+                        val exact=FranchiseTimeline.exact(entry,rows)
+                        if(exact==null) choose("Verify exact film manually",rows.map { it.label() }) { j -> titleDetails("movie",rows[j].id,rows[j].title) }
+                        else {
+                            val watched=history.records(0).any { it.matchType=="movie" && it.traktId==exact.id && it.status=="synced" }
+                            android.app.AlertDialog.Builder(this).setTitle(entry.title).setMessage(if(watched) "Synced completion in local history" else "No synced completion in local history").setNegativeButton("Close",null).setPositiveButton("Details") { _,_->titleDetails("movie",exact.id,exact.title) }.show()
+                        }
+                    }
+                })
+            }
+            android.app.AlertDialog.Builder(this).setTitle(guide.name).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
         }
     }
     private fun trackingHealth() {
@@ -1596,6 +1601,8 @@ class MainActivity : ComponentActivity() {
             val rows=SeriesLibrary.seasonRows(series,season,catalogue)
             val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
             val completed=rows.count { it.local?.confirmed==true }
+            val missing=FranchiseTimeline.missing(id,season,catalogue,history.records(0))
+            body.addView(actionButton("Missing local episode records: "+missing.size) { choose("No local record • may include unaired episodes",missing.map { it.label() }) { j -> titleDetails("show",id,missing[j].title.substringBefore(" — ")) } })
             body.addView(txt(completed.toString()+" of "+rows.size+" catalogue episodes synced to Trakt",17,ink,true))
             if(rows.isNotEmpty()) body.addView(ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal).apply { progress=completed*100/rows.size; progressTintList=android.content.res.ColorStateList.valueOf(violet) })
             SeriesLibrary.nextEpisode(rows)?.let { body.addView(txt("Next unconfirmed: S"+it.item.season+" E"+it.item.episode,14,violet,true)) }
