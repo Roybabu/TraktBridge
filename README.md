@@ -212,3 +212,6 @@ Artwork cache bounded by 32 MiB and 100 files, manual artwork cleanup, power-sav
 
 ## v0.118.0
 Dependency audit resolves debug and release runtime Maven coordinates, checks known OSV advisories in batches, and fails on findings or incomplete scanning. Reports are retained. This is advisory matching, not a comprehensive code penetration test; build tooling and non-Maven native dependencies are not covered by this scanner.
+
+## v0.119.0
+Android instrumentation smoke tests cover activity launch/recreation and local database integrity/backup round-trip. CI emulator matrix targets API 26 and 35 and retains reports. Physical-device playback, TV navigation, OEM behavior and prolonged endurance are still manual validation requirements. No test pass is claimed until CI completes.
