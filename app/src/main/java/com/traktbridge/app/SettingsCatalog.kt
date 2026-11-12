@@ -1,0 +1,15 @@
+package com.traktbridge.app
+
+object SettingsCatalog {
+    data class Category(val id:String,val title:String,val description:String)
+    val categories=listOf(
+        Category("account","Account & Sync","Trakt account, downloads and approved uploads"),
+        Category("tracking","Playback & Tracking","Video apps, permissions and background sampling"),
+        Category("devices","Connected Devices","Pairing, sharing, remote controls and relay"),
+        Category("appearance","Appearance","Theme, text, haptics and accessibility"),
+        Category("library","Library & Personalization","Collections, watchlists, goals and shortcuts"),
+        Category("privacy","Privacy & Security","Tracking privacy, app lock and screen protection"),
+        Category("data","Backup & Data","Import, export, backup, restore and caches"),
+        Category("advanced","Advanced & Support","Diagnostics, compatibility, updates and feedback")
+    )
+}

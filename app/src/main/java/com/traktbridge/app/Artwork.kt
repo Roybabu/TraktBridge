@@ -12,13 +12,42 @@ import java.util.concurrent.Executors
 import org.json.JSONObject
 
 object Artwork {
-    private val worker=Executors.newFixedThreadPool(2)
+    private val worker=java.util.concurrent.ThreadPoolExecutor(2,2,30,java.util.concurrent.TimeUnit.SECONDS,java.util.concurrent.ArrayBlockingQueue<Runnable>(64),java.util.concurrent.ThreadPoolExecutor.DiscardOldestPolicy())
     private val main=Handler(Looper.getMainLooper())
     private val attempted=mutableMapOf<String,Long>()
+    private var memory:android.util.LruCache<String,android.graphics.Bitmap>?=null
+    @Synchronized private fun cache(context:Context):android.util.LruCache<String,android.graphics.Bitmap> {
+        memory?.let { return it }
+        val am=context.getSystemService(android.app.ActivityManager::class.java)
+        return object:android.util.LruCache<String,android.graphics.Bitmap>(MemoryPolicy.artworkKiB(am.memoryClass,am.isLowRamDevice)) { override fun sizeOf(key:String,value:android.graphics.Bitmap)=(value.allocationByteCount/1024).coerceAtLeast(1) }.also { memory=it }
+    }
+    @Synchronized fun trimMemory() { memory?.evictAll() }
+    private fun decode(file:File):android.graphics.Bitmap? {
+        val bounds=BitmapFactory.Options().apply { inJustDecodeBounds=true }
+        BitmapFactory.decodeFile(file.path,bounds)
+        val sample=ArtworkSizing.sample(bounds.outWidth,bounds.outHeight)
+        return BitmapFactory.decodeFile(file.path,BitmapFactory.Options().apply { inSampleSize=sample })
+    }
+    @Synchronized private fun prune(dir:File) {
+        val files=dir.listFiles()?.filter { it.extension=="webp" }?.sortedByDescending { it.lastModified() }.orEmpty()
+        val remove=ResourcePolicy.evictions(files.map { it.name to it.length() })
+        files.filter { it.name in remove }.forEach { it.delete() }
+    }
+    fun clear(context:Context) {
+        trimMemory()
+        val dir=File(context.cacheDir,"artwork")
+        worker.execute { synchronized(this) { dir.listFiles()?.filter { it.extension=="webp" }?.forEach { it.delete() } } }
+    }
     fun load(context:Context,type:String,id:Long,view:ImageView) {
-        if(id<=0 || type !in setOf("movie","show")) return
         val key=type+"-"+id
-        val dir=File(context.applicationContext.cacheDir,"artwork")
+        if(view.tag==key) return
+        view.tag=key
+        view.setImageResource(android.R.drawable.ic_media_play)
+        if(id<=0 || type !in setOf("movie","show")) return
+        val app=context.applicationContext
+        val cache=cache(app)
+        cache.get(key)?.let { view.setImageBitmap(it); return }
+        val dir=File(app.cacheDir,"artwork")
         val file=File(dir,key+".webp")
         val target=java.lang.ref.WeakReference(view)
         worker.execute {
@@ -27,16 +56,18 @@ object Artwork {
                 if(!file.exists() || System.currentTimeMillis()-file.lastModified()>7*86400000L) {
                     val fetch=synchronized(attempted) {
                         val now=System.currentTimeMillis()
-                        if(now-(attempted[key] ?: 0)<60000) false else { attempted[key]=now; true }
+                        if(now-(attempted[key] ?: 0)<60000) false else { if(attempted.size>=500) attempted.entries.removeAll { now-it.value>60000 }; if(attempted.size>=500) attempted.clear(); attempted[key]=now; true }
                     }
-                    if(fetch) {
+                    val cm=app.getSystemService(android.net.ConnectivityManager::class.java)
+                    val wifiOnly=app.getSharedPreferences("tracker",Context.MODE_PRIVATE).getBoolean("artwork_unmetered",false)
+                    if(fetch && (!wifiOnly || !cm.isActiveNetworkMetered)) {
                         val endpoint=if(type=="movie") "movies" else "shows"
                         val connection=URL("https://api.trakt.tv/"+endpoint+"/"+id+"?extended=full").openConnection() as HttpsURLConnection
                         val data=try {
                             connection.connectTimeout=10000; connection.readTimeout=10000; connection.instanceFollowRedirects=false
                             connection.setRequestProperty("trakt-api-key",TraktAuth.CLIENT_ID); connection.setRequestProperty("trakt-api-version","2")
                             if(connection.responseCode!=200) error("Artwork metadata unavailable")
-                            JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+                            JSONObject(connection.inputStream.bufferedReader().use { reader -> val out=StringBuilder(); val buf=CharArray(8192); while(true) { val n=reader.read(buf); if(n<0) break; require(out.length+n<=2_000_000); out.append(buf,0,n) }; out.toString() })
                         } finally { connection.disconnect() }
                         val raw=data.optJSONObject("images")?.optJSONArray("poster")?.optString(0).orEmpty()
                         if(raw.isBlank()) error("No poster")
@@ -51,15 +82,19 @@ object Artwork {
                                 val buffer=ByteArray(8192); var total=0
                                 while(true) { val n=input.read(buffer); if(n<0) break; total+=n; require(total<=2*1024*1024); output.write(buffer,0,n) }
                             } }
-                            require(BitmapFactory.decodeFile(temp.path)!=null)
+                            val bounds=BitmapFactory.Options().apply { inJustDecodeBounds=true }; BitmapFactory.decodeFile(temp.path,bounds)
+                            require(bounds.outWidth in 1..4096 && bounds.outHeight in 1..4096 && bounds.outWidth.toLong()*bounds.outHeight<=8000000)
                             check(temp.renameTo(file))
-                            dir.listFiles()?.filter { it.extension=="webp" }?.sortedByDescending { it.lastModified() }?.drop(100)?.forEach { it.delete() }
+                            prune(dir)
                         } finally { image.disconnect(); temp.delete() }
                     }
                 }
-                BitmapFactory.decodeFile(file.path)
-            }.getOrNull() ?: BitmapFactory.decodeFile(file.path)
-            if(bitmap!=null) main.post { target.get()?.setImageBitmap(bitmap) }
+                decode(file)
+            }.getOrNull() ?: runCatching { decode(file) }.getOrNull()
+            if(bitmap!=null) { cache.put(key,bitmap); main.post {
+                val image=target.get()
+                if(image!=null && image.tag==key) image.setImageBitmap(bitmap)
+            } }
         }
     }
 }
