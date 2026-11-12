@@ -25,7 +25,8 @@ class MainActivity : Activity() {
     private var historyLimit=100
     private var analyticsPeriod=30
     private var calendarMonth=java.time.YearMonth.now()
-    private val wide:Boolean get()=resources.configuration.screenWidthDp>=720
+    private val tvMode:Boolean get()=(getSystemService(android.app.UiModeManager::class.java).currentModeType==android.content.res.Configuration.UI_MODE_TYPE_TELEVISION)
+    private val wide:Boolean get()=tvMode || resources.configuration.screenWidthDp>=720
     private val ink:Int get()=if(prefs.getBoolean("high_contrast",false)) 0xffffffff.toInt() else 0xfff1f0f6.toInt()
     private val muted:Int get()=if(prefs.getBoolean("high_contrast",false)) 0xffe3e3ef.toInt() else 0xffa9a8ba.toInt()
     private val violet:Int get()=when(prefs.getString("accent","violet")) { "blue"->0xff80bfff.toInt(); "green"->0xff6ee7b7.toInt(); else->0xffb6a0ff.toInt() }
@@ -326,7 +327,7 @@ class MainActivity : Activity() {
         nav=LinearLayout(this).apply { orientation=if(wide) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL; setPadding(dp(8),dp(8),dp(8),dp(8)); setBackgroundColor(surface) }
         if(wide) { workspace.addView(nav,LinearLayout.LayoutParams(dp(156),-1)); workspace.addView(frame,LinearLayout.LayoutParams(0,-1,1f)) }
         else { workspace.addView(frame,LinearLayout.LayoutParams(-1,0,1f)); workspace.addView(nav,LinearLayout.LayoutParams(-1,-2)) }
-        listOf("Home","Library","Review","Activity","Settings").forEachIndexed { i,name -> nav.addView(TextView(this).apply { text=name; textSize=if(wide) 15f else 12f; gravity=android.view.Gravity.CENTER; minHeight=dp(52); setOnClickListener { showTab(i) } },if(wide) LinearLayout.LayoutParams(-1,dp(58)).apply { bottomMargin=dp(6) } else LinearLayout.LayoutParams(0,-2,1f)) }
+        listOf("Home","Library","Review","Activity","Settings").forEachIndexed { i,name -> nav.addView(TextView(this).apply { text=name; textSize=if(wide) 15f else 12f; gravity=android.view.Gravity.CENTER; minHeight=dp(52); isFocusable=true; setOnFocusChangeListener { view,focused -> view.alpha=if(focused) 1f else 0.82f }; setOnClickListener { showTab(i) } },if(wide) LinearLayout.LayoutParams(-1,dp(58)).apply { bottomMargin=dp(6) } else LinearLayout.LayoutParams(0,-2,1f)) }
         fun label(s: String) { root.addView(txt(s,15,muted)) }
         fun button(s: String, action: () -> Unit) { root.addView(actionButton(s,action)) }
         label("SETTINGS • Account and tracking")
@@ -432,6 +433,7 @@ class MainActivity : Activity() {
         root.addView(output)
         refresh()
         showTab(tab)
+        if(tvMode) nav.getChildAt(tab)?.requestFocus()
         handleCallback(intent)
         handleReview(intent)
         handleShared(intent)
