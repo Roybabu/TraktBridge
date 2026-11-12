@@ -5,6 +5,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -116,6 +121,41 @@ fun BridgeTitleSummary(accent:Int,title:String,metadata:String,rating:Double,rel
             if(release.isNotBlank()) Text("Release: "+release,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
             if(hideSpoilers && !reveal) OutlinedButton(onClick={ reveal=true }) { Text("Reveal synopsis") }
             else Text(overview.ifBlank { "No overview available" },style=MaterialTheme.typography.bodyLarge,color=MaterialTheme.colorScheme.onSurface)
+        }
+    }
+}
+
+@Composable
+fun BridgeLoading(accent:Int) {
+    BridgeTheme(accent) {
+        Column(Modifier.fillMaxWidth().padding(vertical=12.dp).semantics { contentDescription="Loading viewing history" },verticalArrangement=Arrangement.spacedBy(12.dp)) {
+            LinearProgressIndicator(modifier=Modifier.fillMaxWidth())
+            repeat(3) {
+                Card(Modifier.fillMaxWidth(),colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surface)) {
+                    Row(Modifier.padding(16.dp),horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+                        Box(Modifier.width(76.dp).height(108.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha=0.10f),RoundedCornerShape(8.dp)))
+                        Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(12.dp)) {
+                            Box(Modifier.fillMaxWidth(0.85f).height(18.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha=0.12f),RoundedCornerShape(6.dp)))
+                            Box(Modifier.fillMaxWidth(0.55f).height(12.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha=0.08f),RoundedCornerShape(6.dp)))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+@Composable
+fun BridgeEmptyState(accent:Int,title:String,detail:String,actionLabel:String,onAction:()->Unit) {
+    BridgeTheme(accent) {
+        var entered by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+        androidx.compose.runtime.LaunchedEffect(Unit) { entered=true }
+        val opacity by animateFloatAsState(if(entered) 1f else 0.55f,animationSpec=tween(180),label="empty-state")
+        Card(Modifier.fillMaxWidth().padding(vertical=6.dp).alpha(opacity)) {
+            Column(Modifier.padding(20.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+                Text(title,style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.SemiBold)
+                Text(detail,style=MaterialTheme.typography.bodyMedium)
+                if(actionLabel.isNotBlank()) OutlinedButton(onClick=onAction) { Text(actionLabel) }
+            }
         }
     }
 }

@@ -194,3 +194,6 @@ Dashboard sections can be reordered or hidden, startup tab selected, and existin
 
 ## v0.112.0
 Compose title summary with spoiler reveal, poster fallback, related-title navigation and matching local viewing history. Trailer links are restricted to canonical HTTPS YouTube videos. Actual artwork and catalogue coverage depend on Trakt metadata; no embedded video player is introduced.
+
+## v0.113.0
+Compose history loading skeletons, accessible progress indication, contextual empty/error cards, and short animated empty-state transitions. Existing cancellation and request-generation guards remain unchanged. Animation respects the platform Compose motion scale; on-device visual and accessibility checks remain pending.

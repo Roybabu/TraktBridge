@@ -843,13 +843,16 @@ class MainActivity : ComponentActivity() {
         if(tvMode) for(i in 0 until nav.childCount) (nav.getChildAt(i) as TextView).apply { setTextColor(if(i==index) violet else muted); background=rounded(if(i==index) 0xff302a48.toInt() else surface,12) }
         refreshHistory(); contentPage.scrollTo(0,0)
     }
+    private fun emptyState(parent:LinearLayout,title:String,detail:String,label:String,action:()->Unit) {
+        parent.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeEmptyState(violet,title,detail,label,action) } })
+    }
     private fun refreshHistory() {
         if(!::dashboard.isInitialized || tab==4 || isFinishing || isDestroyed) return
         val request=++historyRequest
         val selectedTab=tab
         historyTask?.cancel(true)
         dashboard.removeAllViews()
-        dashboard.addView(txt("Loading viewing history…",15,muted))
+        dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeLoading(violet) } })
         val app=applicationContext
         historyTask=historyExecutor.submit {
             val result=runCatching { WatchHistory(app).use { db -> val rows=db.records(0); rows to ViewingGroups.build(rows) } }
@@ -857,8 +860,7 @@ class MainActivity : ComponentActivity() {
                 if(isDestroyed || isFinishing || request!=historyRequest || tab!=selectedTab) return@runOnUiThread
                 result.fold({ (records,groups) -> renderHistory(records,groups) }, {
                     dashboard.removeAllViews()
-                    dashboard.addView(txt("Viewing history unavailable. Existing data has not been cleared.",15,muted))
-                    dashboard.addView(actionButton("Retry") { refreshHistory() })
+                    emptyState(dashboard,"History unavailable","Existing viewing data has not been cleared.","Retry") { refreshHistory() }
                     dashboard.addView(actionButton("Check database integrity") { checkHistoryIntegrity() })
                 })
             }
@@ -916,14 +918,14 @@ class MainActivity : ComponentActivity() {
                 section(dashboard,"Now watching")
                 dashboard.addView(actionButton("Open live Now Playing") { nowPlaying() })
                 val active=groups.filter { it.active }
-                if(active.isEmpty()) panel(dashboard).addView(txt("No verified active playback. Play a video in a selected app.",15,muted)) else cards(dashboard,active.take(2)) { parent,g -> titleCard(parent,g,false) }
+                if(active.isEmpty()) emptyState(dashboard,"Nothing playing","Play a video in a selected app to see live observations.","Tracking settings") { showTab(4) } else cards(dashboard,active.take(2)) { parent,g -> titleCard(parent,g,false) }
 
                     }
                     "continue" -> {
                 section(dashboard,"Continue watching")
                 SeriesLibrary.continueWatching(groups).firstOrNull()?.let { heroCard(dashboard,it) }
                 val continuing=SeriesLibrary.continueWatching(groups)
-                if(continuing.isEmpty()) panel(dashboard).addView(txt("No unfinished sampled viewing yet.",15,muted)) else cards(dashboard,continuing.drop(1).take(6)) { parent,g -> titleCard(parent,g,false) }
+                if(continuing.isEmpty()) emptyState(dashboard,"Nothing to resume","Unfinished sampled viewing appears here.","Discover") { discover() } else cards(dashboard,continuing.drop(1).take(6)) { parent,g -> titleCard(parent,g,false) }
 
                     }
                     "review" -> {
@@ -942,7 +944,7 @@ class MainActivity : ComponentActivity() {
                     "recent" -> {
                 section(dashboard,"Recently watched")
                 val recent=groups.filter { !it.active }.take(5)
-                if(recent.isEmpty()) panel(dashboard).addView(txt("Your viewing history will appear here.",15,muted)) else cards(dashboard,recent) { parent,g -> titleCard(parent,g,false) }
+                if(recent.isEmpty()) emptyState(dashboard,"Your history starts here","Track a selected player or record a viewing manually.","Log a watch") { manualLog() } else cards(dashboard,recent) { parent,g -> titleCard(parent,g,false) }
                     }
                     }
                 }
