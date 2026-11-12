@@ -1620,7 +1620,7 @@ class MainActivity : ComponentActivity() {
         val ep=RecognitionEngine.episodeOf(r.title+" "+r.subtitle)
         if(ep==null) { selectSeason(r,show); return }
         lookup("Checking detected episode", { done -> TraktCatalogue.episodes(show,ep.season,done) }) { episodes:List<CatalogueItem> ->
-            val exact=episodes.singleOrNull { it.episode==ep.episode }
+            val exact=RecognitionEngine.exactEpisode(show.id,ep,episodes)
             if(exact==null) selectSeason(r,show) else android.app.AlertDialog.Builder(this).setTitle("Detected episode").setMessage(exact.label()+"\nSeason and episode agree with the detected text. Confirm the exact episode.").setNegativeButton("Cancel",null).setNeutralButton("Choose another") { _,_->selectSeason(r,show) }.setPositiveButton("Review match") { _,_->confirmMatch(r,exact) }.show()
         }
     }
