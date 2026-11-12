@@ -88,6 +88,35 @@ class MainActivity : Activity() {
             }.show()
         }
     }
+    private fun armOcr() {
+        if(android.os.Build.VERSION.SDK_INT<34) { Toast.makeText(this,"Window OCR requires Android 14 or later",Toast.LENGTH_LONG).show(); return }
+        if(!prefs.getBoolean("enabled",false) || !prefs.getBoolean("title_optin",false) || !prefs.getBoolean("title_connected",false)) { Toast.makeText(this,"Enable tracking and Accessibility title detection first",Toast.LENGTH_LONG).show(); return }
+        val packages=(prefs.getStringSet("allowed",emptySet()) ?: emptySet()).sortedBy { appLabel(it) }
+        choose("Choose one player to scan",packages.map { appLabel(it) }) { index ->
+            val pkg=packages[index]
+            android.app.AlertDialog.Builder(this).setTitle("One-time on-device OCR").setMessage("TraktBridge will attempt one screenshot of the selected app's window, beginning in 8 seconds and expiring after 45 seconds. Open the video and reveal its controls. Only edge regions are read locally; the image is not saved or uploaded. Protected windows cannot be captured. Review any detected text before using it.").setNegativeButton("Cancel",null).setPositiveButton("Arm scan") { _,_->
+                val now=System.currentTimeMillis()
+                prefs.edit().remove("ocr_choices").remove("ocr_source").remove("ocr_captured").putString("ocr_target",pkg).putLong("ocr_after",now+8000).putLong("ocr_until",now+45000).putString("ocr_status","Armed").apply()
+                Toast.makeText(this,"Open the selected player and reveal controls after 8 seconds",Toast.LENGTH_LONG).show()
+            }.show()
+        }
+    }
+    private fun reviewOcr() {
+        val status=prefs.getString("ocr_status","No OCR scan yet").orEmpty()
+        val source=prefs.getString("ocr_source","").orEmpty()
+        val choices=runCatching { org.json.JSONArray(prefs.getString("ocr_choices","[]")) }.getOrDefault(org.json.JSONArray())
+        if(choices.length()==0) { android.app.AlertDialog.Builder(this).setTitle("OCR result").setMessage(status).setPositiveButton("OK",null).show(); return }
+        val entries=(0 until choices.length()).map { choices.getJSONObject(it) }
+        choose("Review OCR title candidates",entries.map { it.optString("title") }) { index ->
+            val c=entries[index]
+            val detail=c.optString("detail")
+            val pos=c.optLong("position",-1); val dur=c.optLong("duration",0)
+            val timer=if(PlaybackPosition.valid(pos,dur)) "\nVisible timer estimate: "+durationText(pos)+" / "+durationText(dur) else ""
+            android.app.AlertDialog.Builder(this).setTitle("Use this title?").setMessage(c.optString("title")+"\n"+detail+timer+"\nOCR may misread text. Timers are not automatically used as verified progress.").setNegativeButton("Cancel",null).setPositiveButton("Identify") { _,_->
+                presentShared(SharedCandidate(c.optString("title"),detail,source))
+            }.show()
+        }
+    }
     private fun handleShared(i:Intent) {
         if(i.action!=Intent.ACTION_SEND) return
         val type=i.type.orEmpty()
@@ -170,6 +199,9 @@ class MainActivity : Activity() {
         button("Import streaming viewing history (CSV)") { chooseImportProvider() }
         button("Identify local video file") { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("video/*"),57) }
         button("Identify shared movie link") { val field=EditText(this).apply { hint="Paste shared title or link" }; android.app.AlertDialog.Builder(this).setTitle("Identify shared content").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Continue") { _,_-> presentShared(SharedContent.fromText(field.text.toString())) }.show() }
+        button("Scan player title (one-shot OCR)") { armOcr() }
+        button("Review OCR result") { reviewOcr() }
+        button("Clear OCR result") { prefs.edit().remove("ocr_target").remove("ocr_after").remove("ocr_until").remove("ocr_choices").remove("ocr_source").remove("ocr_captured").remove("ocr_status").apply() }
         button("Open diagnostic recorder") { startActivity(Intent(this,DebugActivity::class.java)) }
         auth = TraktAuth(applicationContext)
         account = TextView(this).apply { textSize = 16f }
@@ -204,7 +236,7 @@ class MainActivity : Activity() {
             android.app.AlertDialog.Builder(this).setTitle("Optional title detection").setMessage("Android Accessibility can expose screen content. TraktBridge checks selected video apps for player titles and video detail headings near play actions. Suggestions stay local and are never uploaded automatically. Enable only if you agree.").setNegativeButton("Cancel",null).setPositiveButton("Agree and open settings") { _,_ -> prefs.edit().putBoolean("title_optin",true).apply(); startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }.show()
         }
         button("Disable title detection") {
-            val edit=prefs.edit().putBoolean("title_optin",false)
+            val edit=prefs.edit().putBoolean("title_optin",false).remove("ocr_target").remove("ocr_after").remove("ocr_until").remove("ocr_choices").remove("ocr_source").remove("ocr_captured").remove("ocr_status")
             prefs.all.keys.filter { it.startsWith("title_hint:") || it.startsWith("title_detail:") || it.startsWith("title_time:") }.forEach { edit.remove(it) }
             edit.apply(); startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }
