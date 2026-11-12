@@ -173,3 +173,6 @@ Configurable 75–100% completion review threshold combines valid player positio
 
 ## v0.105.0
 Possible duplicate titles are suggested conservatively from exact normalized titles, provider, episode and compatible runtime. Explicit linking copies a verified catalogue identity into an unapproved record, consolidating the library read model without deleting sessions, adding watch time or approving uploads. It does not merge distinct physical events or rewrite synced records.
+
+## v0.106.0
+Profile-scoped custom smart watchlists automatically recalculate from local history using six rules, optional content type and provider filters. Lists remain local, bounded to 50, and can be deleted without changing history or Trakt watchlists.

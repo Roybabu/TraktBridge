@@ -383,6 +383,7 @@ class MainActivity : ComponentActivity() {
         button("Transfer data to another device") { deviceTransferGuide() }
         button("Share or import collections") { shareCollections() }
         button("Smart collections") { smartCollections() }
+        button("Custom smart watchlists") { smartWatchlists() }
         button("Personal collection profiles") { collectionProfiles() }
         button("Personal collections") { collections() }
         button("Favorite titles") { favorites() }
@@ -595,6 +596,38 @@ class MainActivity : ComponentActivity() {
         card.addView(txt(durationText(total)+" / "+hours+" hours",14,muted))
         card.addView(ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal).apply { progress=(total.toDouble()/(hours*3600000L)*100).toInt().coerceIn(0,100) })
         card.addView(actionButton("Adjust budget") { configureGoal() })
+    }
+    private fun smartWatchlists() {
+        val store=personalStore("smart_watchlists")
+        val lists=store.all.entries.mapNotNull { (key,value) -> runCatching {
+            val o=org.json.JSONObject(value as String)
+            SmartWatchlist(key,o.getString("rule"),o.optString("type"),o.optString("source"))
+        }.getOrNull() }.filter { it.rule in SmartWatchlists.rules }.sortedBy { it.name }
+        choose("Smart watchlists",lists.map { it.name }+listOf("Create automatic watchlist")) { i ->
+            if(i==lists.size) {
+                val field=EditText(this).apply { hint="Watchlist name"; setSingleLine(true) }
+                android.app.AlertDialog.Builder(this).setTitle("New smart watchlist").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Continue") { _,_->
+                    val name=field.text.toString().trim().take(80)
+                    if(name.isBlank() || store.contains(name) || lists.size>=50) { Toast.makeText(this,"Use a unique name; maximum 50 lists",Toast.LENGTH_LONG).show(); return@setPositiveButton }
+                    choose("Automatic categorization",listOf("Unfinished","Under 90 minutes remaining","Needs review","Rewatches","Last 7 days","Completed")) { rule ->
+                        choose("Content type",listOf("All","Movies","Episodes")) { type ->
+                            val sources=listOf("")+history.records(0).map { it.source }.distinct().sorted()
+                            choose("Platform",sources.map { if(it.isBlank()) "All platforms" else appLabel(it) }) { source ->
+                                store.edit().putString(name,org.json.JSONObject().put("rule",SmartWatchlists.rules[rule]).put("type",listOf("","movie","episode")[type]).put("source",sources[source]).toString()).apply()
+                                smartWatchlists()
+                            }
+                        }
+                    }
+                }.show()
+            } else {
+                val list=lists[i]
+                val rows=SmartWatchlists.select(ViewingGroups.build(history.records(0)),list,System.currentTimeMillis())
+                val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
+                body.addView(txt(rows.size.toString()+" matching titles • updated from local history",14,muted))
+                rows.take(100).forEach { titleCard(body,it,false) }
+                android.app.AlertDialog.Builder(this).setTitle(list.name).setView(ScrollView(this).apply { addView(body) }).setNegativeButton("Close",null).setNeutralButton("Delete list") { _,_->store.edit().remove(list.name).apply() }.show()
+            }
+        }
     }
     private fun smartCollections() {
         val groups=ViewingGroups.build(history.records(0))
