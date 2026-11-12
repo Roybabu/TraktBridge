@@ -74,11 +74,13 @@ object HistoryBackup {
         }
     }
     fun merge(history:WatchHistory,rows:List<ContentValues>):Pair<Int,Int> {
+        require(integrity(history)) { "Database integrity check failed; restore cancelled without changing existing records" }
         val db=history.writableDatabase
         var added=0
         db.beginTransaction()
         try {
             rows.forEach { if(db.insertWithOnConflict("viewing",null,it,SQLiteDatabase.CONFLICT_IGNORE)!=-1L) added++ }
+            check(integrity(history)) { "Restore integrity check failed" }
             db.setTransactionSuccessful()
         } finally { db.endTransaction() }
         return added to (rows.size-added)

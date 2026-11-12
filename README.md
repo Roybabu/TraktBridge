@@ -101,3 +101,6 @@ Not implemented: licensed streaming availability, exact provider deep links, aut
 - Test privacy pause during one-shot OCR, rearm/clear during processing, process death during active session, backward wall clock.
 - Validate password backup authentication, restore synced/uncertain events as non-uploadable audit records, corrupted settings import, manual transfer and unmetered artwork behavior.
 - Physical-device, 24/72-hour soak, startup and memory benchmarks and security audit remain pending; not a stable release candidate until verified.
+
+## v0.82.0 development scope
+Unified local library search groups Trakt movies and TV series with separately identified AniList local anime progress and unidentified sessions. IDs are never equated across catalogues. Browse results are capped at 200 per category. SQLite corruption handling fails closed rather than invoking default destructive deletion. Backup generation and merge require integrity checks; a failed database is preserved for manual recovery. Automatic reconstruction of a corrupt database, live device recovery and signed release validation remain outstanding.

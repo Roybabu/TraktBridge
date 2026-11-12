@@ -152,7 +152,7 @@ class MainActivity : ComponentActivity() {
     private fun checkHistoryIntegrity() {
         Thread {
             val ok=runCatching { WatchHistory(applicationContext).use { HistoryBackup.integrity(it) } }.getOrDefault(false)
-            runOnUiThread { if(!isDestroyed && !isFinishing) android.app.AlertDialog.Builder(this).setTitle("Database integrity").setMessage(if(ok) "SQLite quick check passed" else "Integrity check failed or database unavailable").setPositiveButton("OK",null).show() }
+            runOnUiThread { if(!isDestroyed && !isFinishing) android.app.AlertDialog.Builder(this).setTitle("Database integrity").setMessage(if(ok) "SQLite quick check passed" else "Integrity check failed or database unavailable. Existing files are preserved. Do not clear app data. Export or retain your encrypted backup before attempting repair.").setPositiveButton("OK",null).show() }
         }.start()
     }
     private var importSource="com.netflix.mediaclient"
@@ -723,6 +723,7 @@ class MainActivity : ComponentActivity() {
             1,2 -> {
                 if(tab==1) dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeLibraryToolbar(violet,groups.size.toString()+" identified titles and provisional groups",{ universalSearch() },{ editHistoryFilter(records) },{ manualLog() }) } })
                 else { section(dashboard,"Needs your review"); dashboard.addView(actionButton("Log a watch manually") { manualLog() }) }
+                if(tab==1) dashboard.addView(actionButton("Unified movie, TV and anime library") { unifiedLibrary() })
                 dashboard.addView(actionButton("Refresh") { refreshHistory() })
                 if(tab==2) { dashboard.addView(actionButton("Review recent app activity") { reviewUsage() }); dashboard.addView(actionButton("Retry approved sync queue") { HistorySync.schedule(this); refreshHistory() }) }
                 if(tab==1) {
@@ -1116,6 +1117,24 @@ class MainActivity : ComponentActivity() {
         }
         dialog.setOnDismissListener { handler.removeCallbacks(tick) }
         dialog.show(); handler.post(tick)
+    }
+    private fun unifiedLibrary() {
+        val anime=personalStore("anime_progress").all.values.mapNotNull { value ->
+            runCatching { val o=org.json.JSONObject(value.toString()); LocalAnimeEntry(o.optInt("id"),o.optString("title"),o.optInt("progress"),o.optInt("episodes")) }.getOrNull()
+        }
+        val field=EditText(this).apply { hint="Search movies, series and anime"; setSingleLine(true) }
+        android.app.AlertDialog.Builder(this).setTitle("Unified library").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Browse") { _,_->
+            val library=UnifiedLibrary.build(history.records(0),anime,field.text.toString())
+            choose("Library categories",listOf("Movies ("+library.movies.size+")","TV / Trakt series ("+library.series.size+")","AniList local anime ("+library.anime.size+")","Unidentified ("+library.unidentified.size+")")) { category ->
+                when(category) {
+                    0,3 -> { val rows=if(category==0) library.movies else library.unidentified; choose("Viewing titles",rows.take(200).map { it.representative.matchLabel.ifBlank { it.representative.title.ifBlank { "Unidentified" } } }) { showSessions(rows[it]) } }
+                    1 -> choose("Series",library.series.take(200).map { it.title }) { showSeries(library.series[it].id) }
+                    2 -> choose("Local anime",library.anime.take(200).map { it.title+" • "+it.progress+"/"+(if(it.episodes>0) it.episodes.toString() else "?") }+listOf("Find anime")) { index ->
+                        if(index==minOf(200,library.anime.size)) animeSearch() else library.anime[index].let { editAnimeProgress(it.id,it.title,it.episodes) }
+                    }
+                }
+            }
+        }.show()
     }
     private fun animeLocalProgress() {
         val store=personalStore("anime_progress")
