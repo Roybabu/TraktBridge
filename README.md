@@ -140,3 +140,6 @@ Adaptive layouts collapse to one column at large system font scales; actionable 
 
 ## v0.94.0
 Bounded polling backoff after sampling failures, encrypted backup verification before atomic replacement, and bounded recovery reads. Device battery and disaster-recovery testing remain outstanding.
+
+## v0.95.0
+Non-destructive schema 8 migration adds indexes for recent history, pending notifications, source overlap and account matching. Notification selection now uses a bounded SQL query. Weekly dependency inventory workflow produces a resolved dependency graph. Automated vulnerability advisory matching and device database performance measurements remain outstanding.

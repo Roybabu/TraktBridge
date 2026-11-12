@@ -9,7 +9,7 @@ import java.util.UUID
 data class WatchSample(val key: String, val source: String, val title: String, val subtitle: String, val duration: Long, val position: Long, val playing: Boolean, val phase: PlaybackPhase = if(playing) PlaybackPhase.PLAYING else PlaybackPhase.PAUSED, val positionSource:String = if(position>=0) "media" else "unknown", val speed:Float=1f)
 data class WatchRecord(val id: String, val source: String, val title: String, val subtitle: String, val started: Long, val ended: Long, val watched: Long, val duration: Long, val position: Long, val status: String, val matchType: String = "", val traktId: Long = 0, val matchLabel: String = "", val showId: Long = 0, val season: Int = -1, val episode: Int = -1, val catalogueRuntime: Long = 0, val pausedMs:Long=0, val bufferingMs:Long=0, val uncertainMs:Long=0, val seeks:Int=0, val rewinds:Int=0, val positionSource:String="unknown")
 
-class WatchHistory(context: Context): SQLiteOpenHelper(context.applicationContext, "watch_history.db", null, 7, android.database.DatabaseErrorHandler { throw android.database.sqlite.SQLiteDatabaseCorruptException("Viewing database integrity failure; original database preserved") }) {
+class WatchHistory(context: Context): SQLiteOpenHelper(context.applicationContext, "watch_history.db", null, 8, android.database.DatabaseErrorHandler { throw android.database.sqlite.SQLiteDatabaseCorruptException("Viewing database integrity failure; original database preserved") }) {
     companion object {
         private const val MAX_GAP = 12000L
         private const val MIN_WATCH = 15000L
@@ -25,6 +25,13 @@ class WatchHistory(context: Context): SQLiteOpenHelper(context.applicationContex
         createLearning(db)
         db.execSQL("CREATE TABLE viewing (id TEXT PRIMARY KEY, source TEXT NOT NULL, title TEXT NOT NULL, subtitle TEXT NOT NULL, started INTEGER NOT NULL, ended INTEGER NOT NULL, watched INTEGER NOT NULL, duration INTEGER NOT NULL, position INTEGER NOT NULL, status TEXT NOT NULL, match_type TEXT NOT NULL DEFAULT '', trakt_id INTEGER NOT NULL DEFAULT 0, match_label TEXT NOT NULL DEFAULT '', show_id INTEGER NOT NULL DEFAULT 0, season INTEGER NOT NULL DEFAULT -1, episode INTEGER NOT NULL DEFAULT -1, notified INTEGER NOT NULL DEFAULT 0, sync_account TEXT NOT NULL DEFAULT '', sync_message TEXT NOT NULL DEFAULT '', catalogue_runtime INTEGER NOT NULL DEFAULT 0, paused_ms INTEGER NOT NULL DEFAULT 0, buffering_ms INTEGER NOT NULL DEFAULT 0, uncertain_ms INTEGER NOT NULL DEFAULT 0, seeks INTEGER NOT NULL DEFAULT 0, rewinds INTEGER NOT NULL DEFAULT 0, position_source TEXT NOT NULL DEFAULT 'unknown')")
         db.execSQL("CREATE INDEX viewing_status ON viewing(status, ended)")
+        createPerformanceIndexes(db)
+    }
+    private fun createPerformanceIndexes(db:SQLiteDatabase) {
+        db.execSQL("CREATE INDEX IF NOT EXISTS viewing_recent ON viewing(ended DESC)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS viewing_notification ON viewing(status, notified, ended)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS viewing_source_time ON viewing(source, ended, started)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS viewing_account_match ON viewing(sync_account, match_type, trakt_id, status, ended)")
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 2) {
@@ -46,8 +53,13 @@ class WatchHistory(context: Context): SQLiteOpenHelper(context.applicationContex
         }
         if (oldVersion < 6) createLearning(db)
         if (oldVersion < 5) db.execSQL("ALTER TABLE viewing ADD COLUMN catalogue_runtime INTEGER NOT NULL DEFAULT 0")
+        if (oldVersion < 8) createPerformanceIndexes(db)
     }
-    fun pendingNotifications(): List<WatchRecord> = records().filter { it.status == "pending" && !wasNotified(it.id) }
+    fun pendingNotifications(): List<WatchRecord> {
+        val ids=mutableListOf<String>()
+        readableDatabase.rawQuery("SELECT id FROM viewing WHERE status=\u0027pending\u0027 AND notified=0 ORDER BY ended DESC LIMIT 3",null).use { c -> while(c.moveToNext()) ids.add(c.getString(0)) }
+        return ids.mapNotNull { record(it) }
+    }
     private fun wasNotified(id: String): Boolean = readableDatabase.rawQuery("SELECT notified FROM viewing WHERE id=?",arrayOf(id)).use { !it.moveToFirst() || it.getInt(0) != 0 }
     fun markNotified(id: String) { writableDatabase.update("viewing",ContentValues().apply { put("notified",1) },"id=? AND status='pending'",arrayOf(id)) }
     fun record(id: String): WatchRecord? {
