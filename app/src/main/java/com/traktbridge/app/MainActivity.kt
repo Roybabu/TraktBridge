@@ -41,12 +41,12 @@ class MainActivity : ComponentActivity() {
     private val tvMode:Boolean get()=(getSystemService(android.app.UiModeManager::class.java).currentModeType==android.content.res.Configuration.UI_MODE_TYPE_TELEVISION)
     private val adaptiveLayout get()=resources.configuration.let { AdaptiveUi.layout(it.screenWidthDp,it.screenHeightDp,it.fontScale,tvMode) }
     private val wide:Boolean get()=adaptiveLayout.sidebar
-    private val ink:Int get()=if(prefs.getBoolean("high_contrast",false)) 0xffffffff.toInt() else 0xfff1f0f6.toInt()
-    private val muted:Int get()=if(prefs.getBoolean("high_contrast",false)) 0xffe3e3ef.toInt() else 0xffa9a8ba.toInt()
-    private val violet:Int get()=when(prefs.getString("accent","violet")) { "blue"->0xff80bfff.toInt(); "green"->0xff6ee7b7.toInt(); else->0xffb6a0ff.toInt() }
+    private val ink:Int get()=if(prefs.getBoolean("high_contrast",false)) 0xffffffff.toInt() else BridgeDesign.ink
+    private val muted:Int get()=if(prefs.getBoolean("high_contrast",false)) 0xffe3e3ef.toInt() else BridgeDesign.muted
+    private val violet:Int get()=when(prefs.getString("accent","violet")) { "blue"->BridgeDesign.blue; "green"->BridgeDesign.green; else->BridgeDesign.violet }
     private val amoled:Boolean get()=AppearancePolicy.mode(prefs.getString("appearance_mode","dark").orEmpty())=="amoled"
-    private val surface:Int get()=if(amoled) 0xff101010.toInt() else 0xff1b1e2a.toInt()
-    private val bg:Int get()=if(amoled) 0xff000000.toInt() else 0xff0d0f16.toInt()
+    private val surface:Int get()=if(amoled) 0xff101010.toInt() else BridgeDesign.surface
+    private val bg:Int get()=if(amoled) 0xff000000.toInt() else BridgeDesign.background
     private fun showAuth(message: String = auth.status()) { account.text = message }
     private fun handleCallback(i: Intent) {
         val uri = i.data ?: return
@@ -956,7 +956,7 @@ class MainActivity : ComponentActivity() {
         text=value; textSize=size.toFloat()*UiAccessibility.readingScale(prefs.getInt("reading_size",0),tvMode); setTextColor(color); if(bold) setTypeface(null,android.graphics.Typeface.BOLD)
     }
     private fun actionButton(label:String,action:()->Unit)=Button(this).apply {
-        text=label; contentDescription=label; isAllCaps=false; isFocusable=true; if(tvMode) { minWidth=dp(120); setOnFocusChangeListener { view,focused -> view.alpha=if(focused) 1f else 0.85f; view.scaleX=if(focused && !prefs.getBoolean("reduce_motion",false)) 1.03f else 1f; view.scaleY=if(focused && !prefs.getBoolean("reduce_motion",false)) 1.03f else 1f } }; setTextColor(ink); textSize=14f*UiAccessibility.readingScale(prefs.getInt("reading_size",0),tvMode); background=if(tvMode) TvFocus.background(this@MainActivity,0xff302a48.toInt(),violet) else rounded(0xff302a48.toInt(),12); minHeight=dp(adaptiveLayout.touch)
+        text=label; contentDescription=label; isAllCaps=false; isFocusable=true; if(tvMode) { minWidth=dp(120); setOnFocusChangeListener { view,focused -> view.alpha=if(focused) 1f else 0.85f; view.scaleX=if(focused && !prefs.getBoolean("reduce_motion",false)) 1.03f else 1f; view.scaleY=if(focused && !prefs.getBoolean("reduce_motion",false)) 1.03f else 1f } }; setTextColor(ink); textSize=14f*UiAccessibility.readingScale(prefs.getInt("reading_size",0),tvMode); background=if(tvMode) TvFocus.background(this@MainActivity,BridgeDesign.action,violet) else rounded(BridgeDesign.action,12); minHeight=dp(adaptiveLayout.touch)
         layoutParams=LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(6) }; setOnClickListener { action() }
     }
     private fun panel(parent:LinearLayout):LinearLayout=LinearLayout(this).apply {
@@ -980,7 +980,7 @@ class MainActivity : ComponentActivity() {
         if(tab!=index) { restoreContentFocus=false; restoreScrollY=0 }
         tab=index; bridgeModel.select(index); settingsPage.visibility=if(index==4) android.view.View.VISIBLE else android.view.View.GONE
         contentPage.visibility=if(index==4) android.view.View.GONE else android.view.View.VISIBLE
-        if(tvMode) for(i in 0 until nav.childCount) (nav.getChildAt(i) as TextView).apply { setTextColor(if(i==index) violet else muted); background=TvFocus.background(this@MainActivity,if(i==index) 0xff302a48.toInt() else surface,violet,i==index); isSelected=i==index }
+        if(tvMode) for(i in 0 until nav.childCount) (nav.getChildAt(i) as TextView).apply { setTextColor(if(i==index) violet else muted); background=TvFocus.background(this@MainActivity,if(i==index) BridgeDesign.action else surface,violet,i==index); isSelected=i==index }
         refreshHistory(); contentPage.scrollTo(0,0)
         if(index==4 && restoreScrollY>0) { val y=restoreScrollY; restoreScrollY=0; settingsPage.post { if(tab==4) settingsPage.scrollTo(0,y) } }
         if(tvMode && index==4 && (!nav.hasFocus() || restoreContentFocus)) { settingsPage.post { if(tab==4) TvFocus.firstContent(settingsPage) }; restoreContentFocus=false }
@@ -2128,7 +2128,7 @@ class MainActivity : ComponentActivity() {
         if(r.subtitle.isNotBlank()) details.addView(txt(r.subtitle,13,muted))
         details.addView(txt(appLabel(r.source)+" • "+java.text.DateFormat.getDateInstance().format(java.util.Date(r.started)),13,muted))
         val status=when(r.status) { "synced"->"Synced to Trakt"; "active"->"Watching"; "pending"->"Needs review"; "reviewed"->"Ready to confirm"; "restored_audit"->"Restored audit • no upload"; else->r.status.replaceFirstChar { it.uppercase() } }
-        details.addView(txt(status,13,if(r.status=="synced") 0xff6ee7b7.toInt() else 0xfffbbf24.toInt(),true))
+        details.addView(txt(status,13,if(r.status=="synced") BridgeDesign.green else BridgeDesign.warning,true))
         details.addView(txt(if(r.watched<=0) "Watch time unknown" else durationText(r.watched)+" sampled",13,muted))
         if(r.status in setOf("pending","reviewed")) { val assessment=completionAssessment(r); details.addView(txt("Completion evidence: "+(assessment.percent?.let { it.toString()+"% • " } ?: "")+assessment.reason,12,muted)) }
         if(r.seeks>0 || r.bufferingMs>0 || r.pausedMs>0 || r.uncertainMs>0) details.addView(txt("Paused: "+durationText(r.pausedMs)+" • Buffering: "+durationText(r.bufferingMs)+" • Seeks: "+r.seeks+" (rewinds "+r.rewinds+") • Uncertain: "+durationText(r.uncertainMs),12,muted))

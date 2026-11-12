@@ -18,7 +18,7 @@ import androidx.tv.material3.darkColorScheme
 
 @Composable
 fun BridgeTvHome(accent:Int,live:Boolean,pending:Int,weekly:String,onDevices:()->Unit,onReview:()->Unit,onDiscover:()->Unit,onTracking:()->Unit,onPlanner:()->Unit) {
-    MaterialTheme(colorScheme=darkColorScheme(primary=Color(accent),background=Color(0xff0d0f16),surface=Color(0xff1b1e2a),onSurface=Color(0xfff1f0f6))) {
+    MaterialTheme(colorScheme=darkColorScheme(primary=Color(accent),background=Color(BridgeDesign.background),surface=Color(BridgeDesign.surface),onSurface=Color(BridgeDesign.ink))) {
         Column(Modifier.fillMaxWidth().padding(vertical=12.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) {
             Text("Your viewing companion",fontSize=32.sp)
             Text((if(live) "Tracking active" else "Tracking inactive")+"  •  "+weekly+" this week  •  "+pending+" awaiting review",fontSize=20.sp)

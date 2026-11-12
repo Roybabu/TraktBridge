@@ -10,6 +10,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -33,8 +34,8 @@ fun BridgeTheme(accent:Int,content:@Composable ()->Unit) {
     val mode=AppearancePolicy.mode(prefs.getString("appearance_mode","dark").orEmpty())
     val scheme=when {
         mode=="dynamic" && android.os.Build.VERSION.SDK_INT>=31 -> dynamicDarkColorScheme(context)
-        mode=="amoled" -> darkColorScheme(primary=Color(accent),onPrimary=Color(0xff171022),background=Color.Black,surface=Color(0xff101010),onSurface=Color(0xfff1f0f6))
-        else -> darkColorScheme(primary=Color(accent),onPrimary=Color(0xff171022),background=Color(0xff0d0f16),surface=Color(0xff1b1e2a),onSurface=Color(0xfff1f0f6))
+        mode=="amoled" -> darkColorScheme(primary=Color(accent),onPrimary=Color(0xff171022),background=Color.Black,surface=Color(0xff101010),onSurface=Color(BridgeDesign.ink))
+        else -> darkColorScheme(primary=Color(accent),onPrimary=Color(0xff171022),background=Color(BridgeDesign.background),surface=Color(BridgeDesign.surface),onSurface=Color(BridgeDesign.ink))
     }
     val density=LocalDensity.current
     val tv=context.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_TYPE_MASK == android.content.res.Configuration.UI_MODE_TYPE_TELEVISION
@@ -62,7 +63,7 @@ fun BridgeHomeSummary(accent:Int,live:Boolean,pending:Int,weekly:String,onTracki
     BridgeTheme(accent) {
         Card(Modifier.fillMaxWidth().padding(vertical=6.dp),colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surface)) {
             Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-                Text(if(live) "Tracking active" else "Tracking inactive",color=if(live) Color(0xff6ee7b7) else Color(0xfffbbf24),fontWeight=FontWeight.SemiBold)
+                Text(if(live) "Tracking active" else "Tracking inactive",color=if(live) Color(BridgeDesign.green) else Color(BridgeDesign.warning),fontWeight=FontWeight.SemiBold)
                 Text(weekly,style=MaterialTheme.typography.headlineMedium,fontWeight=FontWeight.Bold)
                 Text("Sampled this week",style=MaterialTheme.typography.bodyMedium)
                 Text(pending.toString()+" titles awaiting review or sync",style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
@@ -114,7 +115,7 @@ fun BridgeNavigation(accent:Int,labels:List<String>,selected:Int,wide:Boolean,on
 
 @Composable
 fun BridgeSection(accent:Int,title:String) {
-    BridgeTheme(accent) { Text(title,modifier=Modifier.fillMaxWidth().padding(top=12.dp,bottom=10.dp),style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.SemiBold,color=MaterialTheme.colorScheme.onSurface) }
+    BridgeTheme(accent) { Text(title,modifier=Modifier.fillMaxWidth().padding(top=12.dp,bottom=10.dp).semantics { heading() },style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.SemiBold,color=MaterialTheme.colorScheme.onSurface) }
 }
 
 @Composable
