@@ -185,3 +185,6 @@ Curated franchise timelines include Middle-earth story and release orders, exact
 
 ## v0.109.0
 External history importer accepts an explicitly documented CSV interchange format for Trakt, Simkl, IMDb, MyAnimeList and AniList, plus existing Letterboxd diary support. Cached Trakt watch events can be imported for local review with account-scoped event IDs. No sampled playback time or automatic upload approval is created. Native service-specific exports beyond supported column layouts, authenticated Simkl/IMDb/anime service synchronization, and actual export-file testing remain outstanding.
+
+## v0.110.0
+Material 3 Compose navigation on phones/tablets, reusable Compose section headings and a Compose review summary. Existing TV navigation, native dialogs, settings and history cards are retained to preserve behavior. This is an incremental migration, not a complete Compose rewrite.

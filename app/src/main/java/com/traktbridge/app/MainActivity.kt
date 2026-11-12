@@ -1,6 +1,8 @@
 package com.traktbridge.app
 
 import androidx.activity.ComponentActivity
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import android.os.Bundle
@@ -21,6 +23,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var settingsPage: ScrollView
     private lateinit var contentPage: ScrollView
     private lateinit var nav: LinearLayout
+    private var composeNav:ComposeView?=null
+    private var selectedNav by androidx.compose.runtime.mutableStateOf(0)
     private lateinit var dashboard: LinearLayout
     private var tab=0
     private var privacyPrompt=false
@@ -384,7 +388,16 @@ class MainActivity : ComponentActivity() {
         nav=LinearLayout(this).apply { orientation=if(wide) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL; setPadding(dp(8),dp(8),dp(8),dp(8)); setBackgroundColor(surface) }
         if(wide) { workspace.addView(nav,LinearLayout.LayoutParams(dp(156),-1)); workspace.addView(frame,LinearLayout.LayoutParams(0,-1,1f)) }
         else { workspace.addView(frame,LinearLayout.LayoutParams(-1,0,1f)); workspace.addView(nav,LinearLayout.LayoutParams(-1,-2)) }
-        listOf(getString(R.string.nav_home),getString(R.string.nav_library),getString(R.string.nav_review),getString(R.string.nav_activity),getString(R.string.nav_settings)).forEachIndexed { i,name -> nav.addView(TextView(this).apply { text=name; textSize=if(wide) 15f else 12f; gravity=android.view.Gravity.CENTER; minHeight=dp(52); isFocusable=true; setOnFocusChangeListener { view,focused -> view.alpha=if(focused) 1f else 0.82f; if(tvMode) view.scaleX=if(focused) 1.05f else 1f; if(tvMode) view.scaleY=if(focused) 1.05f else 1f }; setOnClickListener { showTab(i) } },if(wide) LinearLayout.LayoutParams(-1,dp(58)).apply { bottomMargin=dp(6) } else LinearLayout.LayoutParams(0,-2,1f)) }
+        val navLabels=listOf(getString(R.string.nav_home),getString(R.string.nav_library),getString(R.string.nav_review),getString(R.string.nav_activity),getString(R.string.nav_settings))
+        if(tvMode) {
+            navLabels.forEachIndexed { i,name -> nav.addView(TextView(this).apply { text=name; textSize=if(wide) 15f else 12f; gravity=android.view.Gravity.CENTER; minHeight=dp(52); isFocusable=true; setOnFocusChangeListener { view,focused -> view.alpha=if(focused) 1f else 0.82f; if(tvMode) view.scaleX=if(focused) 1.05f else 1f; if(tvMode) view.scaleY=if(focused) 1.05f else 1f }; setOnClickListener { showTab(i) } },if(wide) LinearLayout.LayoutParams(-1,dp(58)).apply { bottomMargin=dp(6) } else LinearLayout.LayoutParams(0,-2,1f)) }
+        } else {
+            composeNav=ComposeView(this).apply {
+                setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
+                setContent { BridgeNavigation(violet,navLabels,selectedNav,wide) { showTab(it) } }
+            }
+            nav.addView(composeNav,LinearLayout.LayoutParams(-1,-2))
+        }
         fun label(s: String) { root.addView(txt(s,15,muted)) }
         fun button(s: String, action: () -> Unit) { root.addView(actionButton(s,action)) }
         label("SETTINGS • Account and tracking")
@@ -814,7 +827,7 @@ class MainActivity : ComponentActivity() {
         orientation=LinearLayout.VERTICAL; background=rounded(surface); setPadding(dp(16),dp(16),dp(16),dp(16))
         parent.addView(this,LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(12) })
     }
-    private fun section(parent:LinearLayout,title:String) { parent.addView(txt(title,20,ink,true),LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(10); bottomMargin=dp(12) }) }
+    private fun section(parent:LinearLayout,title:String) { parent.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeSection(violet,title) } },LinearLayout.LayoutParams(-1,-2)) }
     override fun onKeyDown(keyCode:Int,event:android.view.KeyEvent):Boolean {
         if(tvMode && keyCode==android.view.KeyEvent.KEYCODE_MENU && ::nav.isInitialized) {
             nav.getChildAt(tab)?.requestFocus()
@@ -824,9 +837,9 @@ class MainActivity : ComponentActivity() {
     }
     private fun showTab(index:Int) {
         if(index !in 0..4) return
-        tab=index; settingsPage.visibility=if(index==4) android.view.View.VISIBLE else android.view.View.GONE
+        tab=index; selectedNav=index; settingsPage.visibility=if(index==4) android.view.View.VISIBLE else android.view.View.GONE
         contentPage.visibility=if(index==4) android.view.View.GONE else android.view.View.VISIBLE
-        for(i in 0 until nav.childCount) (nav.getChildAt(i) as TextView).apply { setTextColor(if(i==index) violet else muted); background=rounded(if(i==index) 0xff302a48.toInt() else surface,12) }
+        if(tvMode) for(i in 0 until nav.childCount) (nav.getChildAt(i) as TextView).apply { setTextColor(if(i==index) violet else muted); background=rounded(if(i==index) 0xff302a48.toInt() else surface,12) }
         refreshHistory(); contentPage.scrollTo(0,0)
     }
     private fun refreshHistory() {
@@ -882,7 +895,7 @@ class MainActivity : ComponentActivity() {
             }
             1,2 -> {
                 if(tab==1) dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeLibraryToolbar(violet,groups.size.toString()+" identified titles and provisional groups",{ universalSearch() },{ editHistoryFilter(records) },{ manualLog() }) } })
-                else { section(dashboard,"Needs your review"); dashboard.addView(actionButton("Log a watch manually") { manualLog() }) }
+                else { dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeReviewSummary(violet,pending,{ manualLog() },{ HistorySync.schedule(this@MainActivity); refreshHistory() }) } }) }
                 if(tab==1) { dashboard.addView(actionButton("Unified movie, TV and anime library") { unifiedLibrary() }); dashboard.addView(actionButton("Advanced search • tags and folders") { organizedLibrary() }) }
                 dashboard.addView(actionButton("Refresh") { refreshHistory() })
                 if(tab==2) { dashboard.addView(actionButton("Review recent app activity") { reviewUsage() }); dashboard.addView(actionButton("Retry approved sync queue") { HistorySync.schedule(this); refreshHistory() }) }

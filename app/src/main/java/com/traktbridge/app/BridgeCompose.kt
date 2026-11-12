@@ -63,3 +63,42 @@ fun BridgeLibraryToolbar(accent:Int,summary:String,onSearch:()->Unit,onFilter:()
         }
     }
 }
+
+@Composable
+fun BridgeNavigation(accent:Int,labels:List<String>,selected:Int,wide:Boolean,onSelect:(Int)->Unit) {
+    BridgeTheme(accent) {
+        if(wide) {
+            Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(8.dp),verticalArrangement=Arrangement.spacedBy(6.dp)) {
+                labels.forEachIndexed { index,label ->
+                    if(index==selected) Button(onClick={onSelect(index)},modifier=Modifier.fillMaxWidth().heightIn(min=52.dp)) { Text(label) }
+                    else OutlinedButton(onClick={onSelect(index)},modifier=Modifier.fillMaxWidth().heightIn(min=52.dp)) { Text(label) }
+                }
+            }
+        } else {
+            NavigationBar(containerColor=MaterialTheme.colorScheme.surface) {
+                labels.forEachIndexed { index,label ->
+                    NavigationBarItem(selected=index==selected,onClick={onSelect(index)},icon={ Text(listOf("⌂","▤","✓","▥","⚙")[index],fontSize=20.sp) },label={ Text(label,fontSize=11.sp,maxLines=2) },alwaysShowLabel=true)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun BridgeSection(accent:Int,title:String) {
+    BridgeTheme(accent) { Text(title,modifier=Modifier.fillMaxWidth().padding(top=12.dp,bottom=10.dp),style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.SemiBold,color=MaterialTheme.colorScheme.onSurface) }
+}
+
+@Composable
+fun BridgeReviewSummary(accent:Int,pending:Int,onLog:()->Unit,onSync:()->Unit) {
+    BridgeTheme(accent) {
+        Card(Modifier.fillMaxWidth().padding(vertical=6.dp)) {
+            Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+                Text("Review queue",style=MaterialTheme.typography.headlineSmall)
+                Text("$pending titles awaiting review or synchronization")
+                Button(onClick=onLog,modifier=Modifier.fillMaxWidth()) { Text("Log a watch manually") }
+                OutlinedButton(onClick=onSync,modifier=Modifier.fillMaxWidth()) { Text("Retry approved uploads") }
+            }
+        }
+    }
+}
