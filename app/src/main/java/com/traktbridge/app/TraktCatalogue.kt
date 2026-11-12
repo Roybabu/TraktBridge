@@ -60,6 +60,26 @@ object TraktCatalogue {
             if (n <= 0 || eid <= 0) null else CatalogueItem("episode",eid,show.title + " — " + o.optString("title","Episode " + n),show.year,show.id,season,n,o.optInt("runtime"))
         }.distinctBy { it.id }.sortedBy { it.episode }
     }
+    fun people(query:String,done:(Result<List<Pair<Long,String>>>)->Unit)=request(done) {
+        require(query.isNotBlank() && query.length<=200)
+        objects(get("/search/person?query="+URLEncoder.encode(query,"UTF-8")+"&limit=25")).mapNotNull { row ->
+            val person=row.optJSONObject("person") ?: return@mapNotNull null
+            val key=id(person); val name=person.optString("name")
+            if(key<=0 || name.isBlank()) null else key to name
+        }.distinctBy { it.first }
+    }
+    fun filmography(person:Long,done:(Result<List<CatalogueItem>>)->Unit)=request(done) {
+        require(person>0)
+        val c=URL("https://api.trakt.tv/people/"+person+"/movies?extended=full").openConnection() as HttpsURLConnection
+        try {
+            c.connectTimeout=15000; c.readTimeout=15000; c.instanceFollowRedirects=false
+            c.setRequestProperty("trakt-api-key",TraktAuth.CLIENT_ID); c.setRequestProperty("trakt-api-version","2")
+            require(c.responseCode in 200..299)
+            val o=JSONObject(c.inputStream.bufferedReader().use { reader -> val out=StringBuilder(); val buf=CharArray(8192); while(true) { val n=reader.read(buf); if(n<0) break; require(out.length+n<=8_000_000); out.append(buf,0,n) }; out.toString() })
+            val rows=objects(o.optJSONArray("cast") ?: JSONArray())+objects(o.optJSONObject("crew")?.optJSONArray("directing") ?: JSONArray())
+            rows.mapNotNull { row -> val movie=row.optJSONObject("movie") ?: return@mapNotNull null; val key=id(movie); if(key<=0) null else CatalogueItem("movie",key,movie.optString("title"),movie.optInt("year"),runtimeMinutes=movie.optInt("runtime")) }.distinctBy { it.id }.sortedByDescending { it.year }
+        } finally { c.disconnect() }
+    }
     fun searchExternal(id:String,namespace:String,done:(Result<List<CatalogueItem>>)->Unit)=request(done) {
         require(namespace in setOf("imdb","tmdb") && id.matches(if(namespace=="imdb") Regex("tt[0-9]{5,12}") else Regex("[0-9]{1,12}")))
         objects(get("/search/"+namespace+"/"+id+"?type=movie,show&extended=full")).mapNotNull { row ->

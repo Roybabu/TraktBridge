@@ -687,6 +687,16 @@ class MainActivity : Activity() {
             android.app.AlertDialog.Builder(this).setTitle(guide.first).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
         }
     }
+    private fun peopleSearch(q:String) {
+        lookup("Searching people",{ done -> TraktCatalogue.people(q,done) }) { rows:List<Pair<Long,String>> ->
+            choose("Actors and directors",rows.map { it.second }) { index ->
+                val p=rows[index]
+                lookup("Loading movie credits",{ done -> TraktCatalogue.filmography(p.first,done) }) { movies:List<CatalogueItem> ->
+                    choose(p.second+" • Movie credits",movies.map { it.label() }) { i -> titleDetails("movie",movies[i].id,movies[i].title) }
+                }
+            }
+        }
+    }
     private fun viewingPlanner() {
         val budgets=listOf(30,60,90,120,180)
         choose("Available viewing time",budgets.map { it.toString()+" minutes" }) { index ->
@@ -776,6 +786,7 @@ class MainActivity : Activity() {
                     choose("Trakt "+type+"s",rows.map { it.label() }) { index -> titleDetails(type,rows[index].id,rows[index].title) }
                 }
             })
+            body.addView(actionButton("Search actors and directors") { peopleSearch(q) })
             body.addView(actionButton("Search AniList anime") {
                 lookup("Searching AniList",{ done -> AnimeCatalogue.search(q,done) }) { rows:List<AnimeResult> ->
                     choose("Anime matches",rows.map { it.english.ifBlank { it.romaji } }) { index -> startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://anilist.co/anime/"+rows[index].id))) }
