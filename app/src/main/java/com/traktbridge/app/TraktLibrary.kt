@@ -144,14 +144,14 @@ object TraktLibrary {
         var count=0
         for(item in page.items) {
             if(item.eventId<=0 || item.watchedAt.isBlank() || runCatching { Instant.parse(item.watchedAt) }.isFailure) continue
-            val key=RemoteRules.historyKey(page.account,item.eventId)
+            val key=AccountScope.cacheKey(page.account,item.eventId)
             edit.putString(key,JSONObject().put("type",item.type).put("id",item.id).put("title",item.title).put("show",item.showId).put("season",item.season).put("episode",item.episode).put("watched",item.watchedAt).put("event",item.eventId).toString()); count++
         }
         check(edit.commit())
         return count
     }
     fun cachedHistory(context:Context,account:String):List<RemoteItem> {
-        val prefix=account+":"
+        val prefix=AccountScope.key(account)+":"
         return context.getSharedPreferences("trakt_remote_history",Context.MODE_PRIVATE).all.filterKeys { it.startsWith(prefix) }.values.mapNotNull { value ->
             runCatching { val o=JSONObject(value as String); RemoteItem(o.getString("type"),o.getLong("id"),o.getString("title"),o.getLong("show"),o.getInt("season"),o.getInt("episode"),o.getString("watched"),o.getLong("event")) }.getOrNull()
         }.sortedByDescending { it.watchedAt }

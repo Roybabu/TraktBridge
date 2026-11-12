@@ -125,3 +125,6 @@ TV focus indicators, menu-key navigation access, and seven-day cached title deta
 
 ## v0.89.0
 Read-only catalogue GET retries are bounded, including short Retry-After values. A local companion status summary is available on the phone. This is groundwork, not a Wear OS application or paired-device transport; those remain outstanding. Writes are never retried by this policy.
+
+## v0.90.0
+Remote history cache keys use isolated hashed account namespaces. Legacy cache entries are not reused; refresh from the verified Trakt account to repopulate. Trakt-backed history remains the cross-device source; independent device-to-device transport and shared collection editing are not implemented.
