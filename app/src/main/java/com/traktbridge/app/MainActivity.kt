@@ -464,6 +464,7 @@ class MainActivity : ComponentActivity() {
         fun label(s: String) { root.addView(txt(s,15,muted)) }
         fun button(s: String, action: () -> Unit) { root.addView(actionButton(s,action)) }
         label("SETTINGS • Account and tracking")
+        button("Connected devices • Pair and manage") { deviceCenter() }
         button("Manage paired devices and revoke access") { managePairedDevices() }
         button("Cross-device history sharing") {
             val enabled=prefs.getBoolean("device_history",false)
@@ -1475,22 +1476,38 @@ class MainActivity : ComponentActivity() {
             android.app.AlertDialog.Builder(this).setTitle("Viewing journal").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
         }
     }
+    private fun deviceCenter() {
+        val identity=runCatching { DeviceIdentity.register(this) }.getOrNull()
+        val peers=DevicePairing.peers(this).sortedBy { it.label }
+        val live=RemotePlayback.visible(this).map { it.device.id }.toSet()
+        val view=ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow) }
+        val dialog=android.app.AlertDialog.Builder(this).setTitle("Connected devices").setView(ScrollView(this).apply { addView(view) }).setPositiveButton("Close",null).create()
+        view.setContent {
+            BridgeDevices(violet,identity?.label ?: "This device",peers.map { PairedUiDevice(it.id,it.label,it.id in live) },prefs.getBoolean("device_sharing",false),prefs.getBoolean("device_history",false),prefs.getBoolean("device_controls",false),
+                { dialog.dismiss(); showPairingInvitation() },
+                { dialog.dismiss(); approvePairingInvitation() },
+                { dialog.dismiss(); startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("image/*"),97) },
+                { id -> dialog.dismiss(); val peer=peers.firstOrNull { it.id==id }; if(peer!=null) confirmDeviceRevocation(peer) },
+                { dialog.dismiss(); showTab(4) })
+        }
+        dialog.show()
+        if(wide) dialog.window?.setLayout((resources.displayMetrics.widthPixels*0.76).toInt(),-2)
+    }
+    private fun confirmDeviceRevocation(peer:DevicePairing.Peer?) {
+        android.app.AlertDialog.Builder(this).setTitle(if(peer==null) "Revoke all devices?" else "Revoke "+peer.label+"?")
+            .setMessage("Remove playback, history and control access. Local viewing history and Trakt approvals remain unchanged. Pair again with a fresh invitation to restore access.")
+            .setNegativeButton("Cancel",null).setPositiveButton("Revoke") { _,_->
+                runCatching {
+                    if(peer==null) DevicePairing.revokeAll(this) else DevicePairing.revoke(this,peer.id)
+                    if(prefs.getBoolean("enabled",false)) startTracking()
+                    Thread { runCatching { DeviceHistory.clear(applicationContext,peer?.id) } }.start()
+                }.fold({ Toast.makeText(this,"Device access revoked",Toast.LENGTH_LONG).show() },{ Toast.makeText(this,"Unable to revoke device",Toast.LENGTH_LONG).show() })
+            }.show()
+    }
     private fun managePairedDevices() {
         val peers=DevicePairing.peers(this).sortedBy { it.label }
-        if(peers.isEmpty()) { Toast.makeText(this,"No authorized devices",Toast.LENGTH_SHORT).show(); return }
-        val labels=peers.map { it.label+" • "+it.id.take(12) }+"Revoke all devices"
-        choose("Manage paired devices",labels) { i ->
-            val peer=peers.getOrNull(i)
-            android.app.AlertDialog.Builder(this).setTitle(if(peer==null) "Revoke all devices?" else "Revoke "+peer.label+"?")
-                .setMessage("Access to playback, history and remote controls will be removed. Received history from revoked devices will be deleted locally. Pair again with a fresh invitation to restore access. Local viewing history and Trakt approvals remain unchanged.")
-                .setNegativeButton("Cancel",null).setPositiveButton("Revoke") { _,_->
-                    runCatching {
-                        if(peer==null) DevicePairing.revokeAll(this) else DevicePairing.revoke(this,peer.id)
-                        if(prefs.getBoolean("enabled",false)) startTracking()
-                        Thread { runCatching { DeviceHistory.clear(applicationContext,peer?.id) } }.start()
-                    }.fold({ Toast.makeText(this,"Device access revoked",Toast.LENGTH_LONG).show() },{ Toast.makeText(this,"Unable to revoke device",Toast.LENGTH_LONG).show() })
-                }.show()
-        }
+        if(peers.isEmpty()) { deviceCenter(); return }
+        choose("Manage paired devices",peers.map { it.label+" • "+it.id.take(12) }+"Revoke all devices") { i -> confirmDeviceRevocation(peers.getOrNull(i)) }
     }
     private fun showDeviceHistory() {
         val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(12),dp(16),dp(12)) }
