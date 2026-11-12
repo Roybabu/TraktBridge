@@ -200,3 +200,6 @@ Compose history loading skeletons, accessible progress indication, contextual em
 
 ## v0.114.0
 Classic dark and AMOLED surfaces, Android 12+ dynamic dark colors for Compose components, high-contrast Compose text, and adaptive one/two/three-column library layouts. Native dialogs and dynamic native colors remain unchanged. Also fixes the external CSV Watched At header alias discovered by CI; regression test retained. Physical visual and device validation remain outstanding.
+
+## v0.115.0
+Encryption migration readiness checks and encrypted recovery export entry point. Active and outstanding sync records block readiness. Full live SQLite encryption is NOT implemented: migration requires a compatible encrypted database driver, transactional schema/data verification and device upgrade tests. The existing database is not replaced or deleted.

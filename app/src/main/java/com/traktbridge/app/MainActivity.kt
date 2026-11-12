@@ -88,6 +88,18 @@ class MainActivity : ComponentActivity() {
             }.start()
         }.show()
     }
+    private fun encryptionReadiness() {
+        val app=applicationContext
+        Thread {
+            val result=runCatching { WatchHistory(app).use { db ->
+                val rows=db.records(0)
+                MigrationReadiness.message(rows.count { it.status=="active" },rows.count { it.status=="queued" },rows.count { it.status=="uncertain" },rows.count { it.status=="blocked" },HistoryBackup.integrity(db))
+            } }
+            runOnUiThread {
+                if(!isDestroyed && !isFinishing) android.app.AlertDialog.Builder(this).setTitle("Encryption migration readiness").setMessage(result.getOrDefault("Unable to validate database. No changes made.")+"\n\nThe live database remains plaintext. Export an encrypted recovery backup before future migration.").setNegativeButton("Close",null).setPositiveButton("Export encrypted backup") { _,_->startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/octet-stream").putExtra(Intent.EXTRA_TITLE,"traktbridge-history.tbenc"),63) }.show()
+            }
+        }.start()
+    }
     private fun restoreDailyBackup() {
         if(!LocalBackupVault.exists(this)) { Toast.makeText(this,"No daily backup yet",Toast.LENGTH_LONG).show(); return }
         android.app.AlertDialog.Builder(this).setTitle("Restore daily device backup?").setMessage("Existing IDs are skipped. No sync approval is restored.").setNegativeButton("Cancel",null).setPositiveButton("Merge") { _,_->
@@ -445,6 +457,7 @@ class MainActivity : ComponentActivity() {
         button("Export viewing history (CSV)") { pickBackup(61) }
         button("Restore viewing history (JSON)") { pickBackup(62) }
         button("Check history database integrity") { checkHistoryIntegrity() }
+        button("Encryption migration readiness") { encryptionReadiness() }
         button("Import Letterboxd diary (CSV)") { importSource="letterboxd"; startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*"),58) }
         button("Import streaming viewing history (CSV)") { chooseImportProvider() }
         button("Import external history (Trakt, IMDb, Simkl, anime)") { externalHistoryImport() }

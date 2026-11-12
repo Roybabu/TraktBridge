@@ -46,6 +46,7 @@ object LocalBackupVault {
             while(true) { val n=input.read(buffer); if(n<0) break; require(out.size()+n<=EncryptedBackup.MAX_BYTES); out.write(buffer,0,n) }; out.toByteArray()
         }
         require(data.size>=29)
+        require(data.size<=EncryptedBackup.MAX_BYTES)
         val cipher=Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.DECRYPT_MODE,key(),GCMParameterSpec(128,data.copyOfRange(0,12))) }
         return String(cipher.doFinal(data.copyOfRange(12,data.size)),Charsets.UTF_8)
     }
