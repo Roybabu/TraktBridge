@@ -287,6 +287,7 @@ class MainActivity : Activity() {
         fun label(s: String) { root.addView(txt(s,15,muted)) }
         fun button(s: String, action: () -> Unit) { root.addView(actionButton(s,action)) }
         label("SETTINGS • Account and tracking")
+        button("Check for app updates") { checkUpdates() }
         button("Appearance accent") { choose("Accent color",listOf("Violet","Blue","Green")) { prefs.edit().putString("accent",listOf("violet","blue","green")[it]).apply(); recreate() } }
         button("Favorite titles") { favorites() }
         button("Guided tracking setup") { setupGuide() }
@@ -374,6 +375,13 @@ class MainActivity : Activity() {
         handleShared(intent)
         handleTrackingShortcut(intent)
         if(!prefs.getBoolean("setup_seen",false)) { prefs.edit().putBoolean("setup_seen",true).apply(); setupGuide() }
+    }
+    private fun checkUpdates() {
+        lookup("Checking GitHub",{ done -> UpdateCheck.check(done) }) { latest:String ->
+            val current=packageManager.getPackageInfo(packageName,0).versionName.orEmpty()
+            val newer=runCatching { UpdateCheck.compare(latest,current)>0 }.getOrDefault(false)
+            android.app.AlertDialog.Builder(this).setTitle("App updates").setMessage("Installed: "+current+"\nRepository: "+latest+"\n"+if(newer) "Newer source version available. Download only a successful permanently signed build." else "No newer repository version detected.").setNegativeButton("Close",null).setPositiveButton("GitHub builds") { _,_->startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://github.com/Roybabu/TraktBridge/actions"))) }.show()
+        }
     }
     private fun isFavorite(type:String,id:Long)=getSharedPreferences("favorites",MODE_PRIVATE).contains(type+":"+id)
     private fun toggleFavorite(type:String,id:Long,label:String) {
