@@ -38,7 +38,8 @@ class MainActivity : ComponentActivity() {
     private var historyTask:java.util.concurrent.Future<*>?=null
     private var calendarMonth=java.time.YearMonth.now()
     private val tvMode:Boolean get()=(getSystemService(android.app.UiModeManager::class.java).currentModeType==android.content.res.Configuration.UI_MODE_TYPE_TELEVISION)
-    private val wide:Boolean get()=tvMode || resources.configuration.screenWidthDp>=720
+    private val layoutMode get()=resources.configuration.let { AdaptiveUi.layout(it.screenWidthDp,it.screenHeightDp,it.fontScale,tvMode) }
+    private val wide:Boolean get()=layoutMode.sidebar
     private val ink:Int get()=if(prefs.getBoolean("high_contrast",false)) 0xffffffff.toInt() else 0xfff1f0f6.toInt()
     private val muted:Int get()=if(prefs.getBoolean("high_contrast",false)) 0xffe3e3ef.toInt() else 0xffa9a8ba.toInt()
     private val violet:Int get()=when(prefs.getString("accent","violet")) { "blue"->0xff80bfff.toInt(); "green"->0xff6ee7b7.toInt(); else->0xffb6a0ff.toInt() }
@@ -443,12 +444,12 @@ class MainActivity : ComponentActivity() {
         val frame=android.widget.FrameLayout(this)
         val workspace=LinearLayout(this).apply { orientation=if(wide) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL }
         shell.addView(workspace,LinearLayout.LayoutParams(-1,0,1f))
-        val root=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(20),dp(8),dp(20),dp(24)) }
+        val root=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(layoutMode.padding),dp(8),dp(layoutMode.padding),dp(24)) }
         settingsPage=ScrollView(this).apply { addView(root) }; frame.addView(settingsPage)
-        dashboard=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(20),dp(8),dp(20),dp(24)) }
+        dashboard=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(layoutMode.padding),dp(8),dp(layoutMode.padding),dp(24)) }
         contentPage=ScrollView(this).apply { addView(dashboard) }; frame.addView(contentPage)
         nav=LinearLayout(this).apply { orientation=if(wide) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL; setPadding(dp(8),dp(8),dp(8),dp(8)); setBackgroundColor(surface) }
-        if(wide) { workspace.addView(nav,LinearLayout.LayoutParams(dp(156),-1)); workspace.addView(frame,LinearLayout.LayoutParams(0,-1,1f)) }
+        if(wide) { workspace.addView(nav,LinearLayout.LayoutParams(dp(layoutMode.rail),-1)); workspace.addView(frame,LinearLayout.LayoutParams(0,-1,1f)) }
         else { workspace.addView(frame,LinearLayout.LayoutParams(-1,0,1f)); workspace.addView(nav,LinearLayout.LayoutParams(-1,-2)) }
         val navLabels=listOf(getString(R.string.nav_home),getString(R.string.nav_library),getString(R.string.nav_review),getString(R.string.nav_activity),getString(R.string.nav_settings))
         if(tvMode) {
@@ -1831,7 +1832,7 @@ class MainActivity : ComponentActivity() {
         card.addView(actionButton("View title and sessions") { showSessions(g) })
     }
     private fun <T> cards(parent:LinearLayout,items:List<T>,render:(LinearLayout,T)->Unit) {
-        val columns=AppearancePolicy.columns(resources.configuration.screenWidthDp,resources.configuration.fontScale,tvMode)
+        val columns=layoutMode.columns
         if(columns==1) { items.forEach { render(parent,it) }; return }
         items.chunked(columns).forEach { pair ->
             val row=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=android.view.Gravity.TOP }
