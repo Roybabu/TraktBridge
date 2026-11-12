@@ -15,6 +15,13 @@ object Artwork {
     private val worker=java.util.concurrent.ThreadPoolExecutor(2,2,30,java.util.concurrent.TimeUnit.SECONDS,java.util.concurrent.ArrayBlockingQueue<Runnable>(64),java.util.concurrent.ThreadPoolExecutor.DiscardOldestPolicy())
     private val main=Handler(Looper.getMainLooper())
     private val attempted=mutableMapOf<String,Long>()
+    private var memory:android.util.LruCache<String,android.graphics.Bitmap>?=null
+    @Synchronized private fun cache(context:Context):android.util.LruCache<String,android.graphics.Bitmap> {
+        memory?.let { return it }
+        val am=context.getSystemService(android.app.ActivityManager::class.java)
+        return object:android.util.LruCache<String,android.graphics.Bitmap>(MemoryPolicy.artworkKiB(am.memoryClass,am.isLowRamDevice)) { override fun sizeOf(key:String,value:android.graphics.Bitmap)=(value.allocationByteCount/1024).coerceAtLeast(1) }.also { memory=it }
+    }
+    @Synchronized fun trimMemory() { memory?.evictAll() }
     private fun decode(file:File):android.graphics.Bitmap? {
         val bounds=BitmapFactory.Options().apply { inJustDecodeBounds=true }
         BitmapFactory.decodeFile(file.path,bounds)
@@ -27,6 +34,7 @@ object Artwork {
         files.filter { it.name in remove }.forEach { it.delete() }
     }
     fun clear(context:Context) {
+        trimMemory()
         val dir=File(context.cacheDir,"artwork")
         worker.execute { synchronized(this) { dir.listFiles()?.filter { it.extension=="webp" }?.forEach { it.delete() } } }
     }
@@ -34,6 +42,8 @@ object Artwork {
         if(id<=0 || type !in setOf("movie","show")) return
         val key=type+"-"+id
         val app=context.applicationContext
+        val cache=cache(app)
+        cache.get(key)?.let { view.setImageBitmap(it); return }
         val dir=File(app.cacheDir,"artwork")
         val file=File(dir,key+".webp")
         val target=java.lang.ref.WeakReference(view)
@@ -78,10 +88,10 @@ object Artwork {
                 }
                 decode(file)
             }.getOrNull() ?: runCatching { decode(file) }.getOrNull()
-            if(bitmap!=null) main.post {
+            if(bitmap!=null) { cache.put(key,bitmap); main.post {
                 val image=target.get()
                 if(image!=null && image.isAttachedToWindow) image.setImageBitmap(bitmap)
-            }
+            } }
         }
     }
 }

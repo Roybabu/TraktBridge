@@ -31,6 +31,7 @@ class MainActivity : ComponentActivity() {
     private var privacyPrompt=false
     private var unlocked=false
     private var historyFilter=HistoryFilter()
+    private val lowRam get()=getSystemService(android.app.ActivityManager::class.java).isLowRamDevice
     private var historyLimit=100
     private var librarySelection=""
     private var restoreContentFocus=false
@@ -435,6 +436,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         val startup=android.os.SystemClock.elapsedRealtime()
         super.onCreate(savedInstanceState)
+        historyLimit=MemoryPolicy.pageSize(lowRam)
         applyScreenProtection()
         DebugTrace.init(this)
         DebugTrace.event("activity","main opened")
@@ -1107,12 +1109,12 @@ class MainActivity : ComponentActivity() {
                 if(tab==2) { dashboard.addView(actionButton("Review recent app activity") { reviewUsage() }); dashboard.addView(actionButton("Retry approved sync queue") { HistorySync.schedule(this); refreshHistory() }) }
                 if(tab==1) {
                     dashboard.addView(txt("Filters: "+listOfNotNull(historyFilter.query.takeIf { it.isNotBlank() }?.let { "Search: "+it },historyFilter.source.takeIf { it.isNotBlank() }?.let { appLabel(it) },historyFilter.period.takeIf { it>0 }?.let { "Last "+it+" days" },historyFilter.type.takeIf { it.isNotBlank() },historyFilter.status.takeIf { it.isNotBlank() } ).joinToString(" • ").ifBlank { "All viewing" },13,muted))
-                    if(historyFilter!=HistoryFilter()) dashboard.addView(actionButton("Reset filters") { historyFilter=HistoryFilter(); historyLimit=100; refreshHistory() })
+                    if(historyFilter!=HistoryFilter()) dashboard.addView(actionButton("Reset filters") { historyFilter=HistoryFilter(); historyLimit=MemoryPolicy.pageSize(lowRam); refreshHistory() })
                 }
                 val items=if(tab==1) ViewingAnalytics.sort(ViewingGroups.build(ViewingAnalytics.filter(records,historyFilter)),historyFilter.sort) else groups.filter { it.queued || it.pending }
                 if(items.isEmpty()) panel(dashboard).addView(txt(if(tab==1) "No viewing records yet." else "You're all caught up.",16,muted))
                 val visible=items.take(historyLimit)
-                if(items.size>visible.size && historyLimit<1000) dashboard.addView(actionButton("Show more ("+visible.size+" of "+items.size+")") { historyLimit=ResourcePolicy.nextPage(historyLimit); refreshHistory() })
+                if(items.size>visible.size && historyLimit<1000) dashboard.addView(actionButton("Show more ("+visible.size+" of "+items.size+")") { historyLimit=MemoryPolicy.nextPage(historyLimit,MemoryPolicy.pageSize(lowRam)); refreshHistory() })
                 else if(items.size>visible.size) dashboard.addView(txt("Showing first 1000 titles. Use filters to narrow the remaining history.",13,muted))
                 if(tab==1 && tvMode && visible.isNotEmpty()) {
                     val shelf=visible.map { g -> val r=g.representative; TvLibraryItem(r.id,r.matchLabel.ifBlank { r.title },g.platforms.joinToString(" • ") { appLabel(it) },if(r.matchType=="episode") "show" else "movie",if(r.matchType=="episode") r.showId else r.traktId) { showSessions(g) } }
@@ -1911,7 +1913,7 @@ class MainActivity : ComponentActivity() {
         val sorts=listOf("recent","title","watchtime")
         val sort=spinner("Sort",listOf("Most recent","Title A–Z","Most sampled watch time"),sorts.indexOf(historyFilter.sort))
         android.app.AlertDialog.Builder(this).setTitle("History filters").setView(ScrollView(this).apply { addView(box) }).setNegativeButton("Cancel",null).setPositiveButton("Apply") { _,_->
-            historyFilter=HistoryFilter(q.text.toString(),sources[source.selectedItemPosition],periods[period.selectedItemPosition],types[type.selectedItemPosition],statuses[status.selectedItemPosition],sorts[sort.selectedItemPosition]); historyLimit=100; refreshHistory()
+            historyFilter=HistoryFilter(q.text.toString(),sources[source.selectedItemPosition],periods[period.selectedItemPosition],types[type.selectedItemPosition],statuses[status.selectedItemPosition],sorts[sort.selectedItemPosition]); historyLimit=MemoryPolicy.pageSize(lowRam); refreshHistory()
         }.show()
     }
     private fun calendarView(parent:LinearLayout,records:List<WatchRecord>) {
