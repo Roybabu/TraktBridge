@@ -658,6 +658,18 @@ class MainActivity : Activity() {
             }.show()
         }
     }
+    private fun editTitleNotes(type:String,id:Long,label:String) {
+        val store=getSharedPreferences("title_notes",MODE_PRIVATE)
+        val key=type+":"+id
+        val current=runCatching { org.json.JSONObject(store.getString(key,"{}")) }.getOrDefault(org.json.JSONObject())
+        val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(8),dp(16),dp(8)) }
+        val notes=EditText(this).apply { hint="Your review or notes"; minLines=4; setText(current.optString("notes")) }
+        val tags=EditText(this).apply { hint="Tags separated by commas"; setText(current.optString("tags")) }
+        body.addView(notes); body.addView(tags)
+        android.app.AlertDialog.Builder(this).setTitle(label).setView(body).setNegativeButton("Cancel",null).setPositiveButton("Save privately") { _,_->
+            store.edit().putString(key,org.json.JSONObject().put("label",label).put("notes",notes.text.toString().take(10000)).put("tags",tags.text.toString().take(1000)).toString()).apply()
+        }.show()
+    }
     private fun franchises() {
         val guides=listOf(
             "The Lord of the Rings • release order" to listOf("The Fellowship of the Ring (2001)","The Two Towers (2002)","The Return of the King (2003)"),
@@ -1119,6 +1131,7 @@ class MainActivity : Activity() {
         if(!g.confirmed) card.addView(actionButton("Open playback app") { openPlaybackApp(g.platforms) })
         if(r.traktId>0) card.addView(actionButton("Personal status: "+libraryStatus(r.matchType,r.traktId).ifBlank { "Not set" }) { setLibraryStatus(r.matchType,r.traktId,r.matchLabel) })
         if(r.traktId>0) card.addView(actionButton(if(isFavorite(r.matchType,r.traktId)) "Remove favorite" else "Add favorite") { toggleFavorite(r.matchType,r.traktId,r.matchLabel); refreshHistory() })
+        if(r.traktId>0) card.addView(actionButton("My notes and tags") { editTitleNotes(r.matchType,r.traktId,r.matchLabel) })
         if(r.traktId>0) card.addView(actionButton("Add to collection") { addCollection(r.matchType,r.traktId,r.matchLabel) })
         if(expanded || g.pending || g.queued) card.addView(actionButton(if(g.confirmed) "View sessions" else "Review / view sessions") { showSessions(g) })
         else card.addView(actionButton("View sessions") { showSessions(g) })
