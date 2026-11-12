@@ -22,6 +22,7 @@ class MainActivity : Activity() {
     private lateinit var dashboard: LinearLayout
     private var tab=0
     private var historyFilter=HistoryFilter()
+    private var historyLimit=100
     private var analyticsPeriod=30
     private var calendarMonth=java.time.YearMonth.now()
     private val wide:Boolean get()=resources.configuration.screenWidthDp>=720
@@ -447,7 +448,7 @@ class MainActivity : Activity() {
         refreshHistory(); contentPage.scrollTo(0,0)
     }
     private fun refreshHistory() {
-        if(!::dashboard.isInitialized || tab==4) return
+        if(!::dashboard.isInitialized || tab==4 || isFinishing || isDestroyed) return
         dashboard.removeAllViews()
         val records=history.records(0)
         val groups=ViewingGroups.build(records)
@@ -486,18 +487,20 @@ class MainActivity : Activity() {
                 if(tab==1) {
                     dashboard.addView(actionButton("Search and filter history") { editHistoryFilter(records) })
                     dashboard.addView(txt("Filters: "+listOfNotNull(historyFilter.query.takeIf { it.isNotBlank() }?.let { "Search: "+it },historyFilter.source.takeIf { it.isNotBlank() }?.let { appLabel(it) },historyFilter.period.takeIf { it>0 }?.let { "Last "+it+" days" },historyFilter.type.takeIf { it.isNotBlank() },historyFilter.status.takeIf { it.isNotBlank() } ).joinToString(" • ").ifBlank { "All viewing" },13,muted))
-                    if(historyFilter!=HistoryFilter()) dashboard.addView(actionButton("Reset filters") { historyFilter=HistoryFilter(); refreshHistory() })
+                    if(historyFilter!=HistoryFilter()) dashboard.addView(actionButton("Reset filters") { historyFilter=HistoryFilter(); historyLimit=100; refreshHistory() })
                 }
                 val items=if(tab==1) ViewingAnalytics.sort(ViewingGroups.build(ViewingAnalytics.filter(records,historyFilter)),historyFilter.sort) else groups.filter { it.queued || (it.pending && !it.confirmed) }
                 if(items.isEmpty()) panel(dashboard).addView(txt(if(tab==1) "No viewing records yet." else "You're all caught up.",16,muted))
+                val visible=items.take(historyLimit)
+                if(items.size>visible.size) dashboard.addView(actionButton("Show more ("+visible.size+" of "+items.size+")") { historyLimit+=100; refreshHistory() })
                 if(tab==1) {
-                    val series=SeriesLibrary.build(items)
+                    val series=SeriesLibrary.build(visible)
                     if(series.isNotEmpty()) { section(dashboard,"Series and anime"); cards(dashboard,series) { parent,item -> seriesCard(parent,item) } }
-                    val movies=items.filter { it.representative.matchType=="movie" }
+                    val movies=visible.filter { it.representative.matchType=="movie" }
                     if(movies.isNotEmpty()) { section(dashboard,"Movies"); cards(dashboard,movies) { parent,item -> titleCard(parent,item,true) } }
-                    val other=items.filter { it.representative.matchType!="movie" && !(it.representative.matchType=="episode" && it.representative.showId>0 && it.representative.season>=0 && it.representative.episode>0) }
+                    val other=visible.filter { it.representative.matchType!="movie" && !(it.representative.matchType=="episode" && it.representative.showId>0 && it.representative.season>=0 && it.representative.episode>0) }
                     if(other.isNotEmpty()) { section(dashboard,"Unidentified viewing"); cards(dashboard,other) { parent,item -> titleCard(parent,item,true) } }
-                } else cards(dashboard,items) { parent,item -> titleCard(parent,item,true) }
+                } else cards(dashboard,visible) { parent,item -> titleCard(parent,item,true) }
             }
             3 -> {
                 section(dashboard,"Viewing activity")
@@ -630,7 +633,7 @@ class MainActivity : Activity() {
         val sorts=listOf("recent","title","watchtime")
         val sort=spinner("Sort",listOf("Most recent","Title A–Z","Most sampled watch time"),sorts.indexOf(historyFilter.sort))
         android.app.AlertDialog.Builder(this).setTitle("History filters").setView(ScrollView(this).apply { addView(box) }).setNegativeButton("Cancel",null).setPositiveButton("Apply") { _,_->
-            historyFilter=HistoryFilter(q.text.toString(),sources[source.selectedItemPosition],periods[period.selectedItemPosition],types[type.selectedItemPosition],statuses[status.selectedItemPosition],sorts[sort.selectedItemPosition]); refreshHistory()
+            historyFilter=HistoryFilter(q.text.toString(),sources[source.selectedItemPosition],periods[period.selectedItemPosition],types[type.selectedItemPosition],statuses[status.selectedItemPosition],sorts[sort.selectedItemPosition]); historyLimit=100; refreshHistory()
         }.show()
     }
     private fun calendarView(parent:LinearLayout,records:List<WatchRecord>) {

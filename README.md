@@ -75,3 +75,6 @@ Browse paginated authenticated history, watchlist, ratings and saved playback pr
 
 ## Dashboard and analytics (0.13.0)
 Adaptive sidebar navigation and two-column content cards on wide screens, compact navigation on phones. Home metrics, searchable history with provider/type/status/date filters and sorting, selectable analytics periods, playback-state metrics and interactive monthly activity calendar. Calendar and date filters attribute aggregate session time to the session end date; remote account history is excluded from measured time. Filter and calendar state survive activity recreation.
+
+## Pre-1.0 validation (0.25.0)
+Bound rendered history cards to increments of 100, retain filters and add release-readiness regression tests. See [device validation checklist](docs/DEVICE_VALIDATION.md) for physical-device cases and known limitations.
