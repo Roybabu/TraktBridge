@@ -833,6 +833,17 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+    private fun multiWatchPlan(budget:Long,candidates:List<ViewingTitle>) {
+        var remaining=budget
+        val chosen=mutableListOf<ViewingTitle>()
+        for(g in candidates.sortedBy { it.remainingMs }) if(g.remainingMs in 1..remaining) { chosen.add(g); remaining-=g.remainingMs }
+        val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
+        body.addView(txt("Estimated plan: "+durationText(budget-remaining)+" • time left "+durationText(remaining),16,ink,true))
+        if(chosen.isEmpty()) body.addView(txt("No known remaining times fit.",14,muted))
+        chosen.forEachIndexed { i,g -> body.addView(txt((i+1).toString()+". "+g.representative.matchLabel.ifBlank { g.representative.title }+" • "+durationText(g.remainingMs),15)) }
+        body.addView(txt("Based on last reported positions, not guaranteed runtime. No playback or uploads start automatically.",13,muted))
+        android.app.AlertDialog.Builder(this).setTitle("Viewing plan").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
+    }
     private fun viewingPlanner() {
         val budgets=listOf(30,60,90,120,180)
         choose("Available viewing time",budgets.map { it.toString()+" minutes" }) { index ->
@@ -842,6 +853,7 @@ class MainActivity : ComponentActivity() {
             body.addView(txt("Fits your time based on last reported position.",14,muted))
             if(candidates.isEmpty()) body.addView(txt("No unfinished titles with known remaining time fit this budget.",14))
             candidates.take(20).forEach { titleCard(body,it,false) }
+            body.addView(actionButton("Build a multi-title viewing plan") { multiWatchPlan(budget,candidates) })
             body.addView(actionButton("Random movie from Trakt watchlist") {
                 lookup("Loading watchlist",{ done -> TraktLibrary.page(this,"watchlist",1,done) }) { page:RemotePage ->
                     val movie=page.items.filter { it.type=="movie" }.randomOrNull()
