@@ -484,6 +484,7 @@ class MainActivity : Activity() {
                 val q=panel(dashboard); q.addView(txt("$pending awaiting action",22,ink,true)); q.addView(actionButton("Open review queue") { showTab(2) }); q.addView(actionButton("Review app activity") { reviewUsage() })
                 dashboard.addView(actionButton("Upcoming episodes") { upcomingEpisodes() })
                 dashboard.addView(actionButton("Recommendations from your history") { recommendFromHistory() })
+                dashboard.addView(actionButton("Anime catalogue (AniList)") { animeSearch() })
                 dashboard.addView(actionButton("Discover movies and shows") { discover() })
                 dashboard.addView(actionButton("Open Trakt account library") { openTraktLibrary() })
                 section(dashboard,"Recently watched")
@@ -561,6 +562,19 @@ class MainActivity : Activity() {
             }
             android.app.AlertDialog.Builder(this).setTitle("Upcoming episodes").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
         }
+    }
+    private fun animeSearch() {
+        val field=EditText(this).apply { hint="English, Japanese or romaji title"; setSingleLine(true) }
+        android.app.AlertDialog.Builder(this).setTitle("Search AniList").setMessage("Your search text is sent to AniList. No account access or history upload.").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Search") { _,_->
+            val q=field.text.toString().trim()
+            if(q.isBlank()) return@setPositiveButton
+            lookup("Searching anime",{ done -> AnimeCatalogue.search(q,done) }) { rows:List<AnimeResult> ->
+                choose("Anime matches",rows.map { it.english.ifBlank { it.romaji }+" • "+it.romaji }) { i ->
+                    val a=rows[i]
+                    android.app.AlertDialog.Builder(this).setTitle(a.english.ifBlank { a.romaji }).setMessage(a.romaji+"\n"+a.native+"\nEpisodes: "+if(a.episodes>0) a.episodes.toString()+"\n\n"+a.description else "Unknown\n\n"+a.description).setNegativeButton("Close",null).setNeutralButton("MyAnimeList search") { _,_->startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://myanimelist.net/anime.php?q="+android.net.Uri.encode(a.romaji)))) }.setPositiveButton("AniList details") { _,_->startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://anilist.co/anime/"+a.id))) }.show()
+                }
+            }
+        }.show()
     }
     private fun recommendFromHistory() {
         val rows=history.records(0).filter { it.status=="synced" && it.traktId>0 }.distinctBy { if(it.matchType=="episode") "show:"+it.showId else "movie:"+it.traktId }.take(30)
