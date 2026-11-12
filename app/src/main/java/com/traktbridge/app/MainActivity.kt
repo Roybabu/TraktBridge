@@ -39,7 +39,7 @@ class MainActivity : Activity() {
         showAuth("Connecting to Trakt…")
         auth.complete(uri) { showAuth(it) }
     }
-    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); handleCallback(intent); handleReview(intent); handleShared(intent); handleTrackingShortcut(intent) }
+    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); handleCallback(intent); handleReview(intent); handleShared(intent); handleTrackingShortcut(intent); handleAutomation(intent) }
     override fun onActivityResult(requestCode:Int,resultCode:Int,data:Intent?) {
         super.onActivityResult(requestCode,resultCode,data)
         if(requestCode==57 && resultCode==RESULT_OK) data?.data?.let { inspectVideo(it) }
@@ -340,6 +340,7 @@ class MainActivity : Activity() {
         button("Recently deleted viewing") { recentlyDeleted() }
         button("Personal collections") { collections() }
         button("Favorite titles") { favorites() }
+        button("Automation shortcuts") { automationShortcuts() }
         button("Guided tracking setup") { setupGuide() }
         root.addView(Switch(this).apply { text="Daily encrypted on-device history backup"; isChecked=prefs.getBoolean("daily_backup",false); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("daily_backup",checked).apply(); LocalBackupVault.schedule(this@MainActivity,checked) } })
         button("Restore daily device backup") { restoreDailyBackup() }
@@ -435,6 +436,7 @@ class MainActivity : Activity() {
         handleReview(intent)
         handleShared(intent)
         handleTrackingShortcut(intent)
+        handleAutomation(intent)
         if(!prefs.getBoolean("setup_seen",false)) { prefs.edit().putBoolean("setup_seen",true).apply(); setupGuide() }
     }
     private fun checkUpdates() {
@@ -804,6 +806,29 @@ class MainActivity : Activity() {
             section(body,"Continue watching")
             SeriesLibrary.continueWatching(groups).take(8).forEach { titleCard(body,it,false) }
             android.app.AlertDialog.Builder(this).setTitle(appLabel(pkg)).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
+        }
+    }
+    private fun automationShortcuts() {
+        val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
+        body.addView(txt("Use Tasker or a supported Android automation tool to open these app links. Tracking changes and Trakt uploads require your confirmation.",15,muted))
+        for(action in listOf("home","review","manual","tracking")) {
+            val link="traktbridge://shortcut/"+action
+            body.addView(txt(link,14,ink))
+            body.addView(actionButton("Copy "+action+" link") {
+                getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(android.content.ClipData.newPlainText("TraktBridge shortcut",link))
+            })
+        }
+        android.app.AlertDialog.Builder(this).setTitle("Automation shortcuts").setView(body).setPositiveButton("Close",null).show()
+    }
+    private fun handleAutomation(i:Intent) {
+        val uri=i.data ?: return
+        if(i.action!=Intent.ACTION_VIEW || uri.scheme!="traktbridge" || uri.host!="shortcut") return
+        i.data=null
+        when(uri.lastPathSegment) {
+            "home" -> showTab(0)
+            "review" -> showTab(2)
+            "manual" -> manualLog()
+            "tracking" -> showTab(4)
         }
     }
     private fun universalSearch() {
