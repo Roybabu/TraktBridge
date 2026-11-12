@@ -527,7 +527,7 @@ class MainActivity : ComponentActivity() {
                 isClickable=true
                 contentDescription=category.title+". "+category.description
                 background=if(tvMode) TvFocus.background(this@MainActivity,surface,violet) else rounded(surface)
-                minHeight=dp(adaptiveLayout.touch)
+                minimumHeight=dp(adaptiveLayout.touch)
                 setOnClickListener { BridgeHaptics.tap(this); showSettingsCategory(category.id) }
             }
             card.addView(txt(category.title+"  ›",19,ink,true))
