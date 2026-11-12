@@ -1482,7 +1482,10 @@ class MainActivity : ComponentActivity() {
     private fun showSessions(g:ViewingTitle) {
         val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
         body.addView(txt("Original viewing sessions are retained. Synced viewing events: "+g.sessions.count { it.status=="synced" },14,muted))
-        g.sessions.forEach { recordCard(body,it,true,g.confirmed || g.queued) }
+        g.sessions.forEach { session ->
+            if(session.id in g.possibleRewatchIds) body.addView(txt("Possible rewatch — review before approving",14,muted))
+            recordCard(body,session,true,g.confirmed || g.queued)
+        }
         android.app.AlertDialog.Builder(this).setTitle(g.representative.matchLabel.ifBlank { g.representative.title.ifBlank { "Viewing sessions" } }).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close") { _,_->refreshHistory() }.show()
     }
     private fun recordCard(parent:LinearLayout,r:WatchRecord,expanded:Boolean,completionAlreadyRecorded:Boolean=false) {
