@@ -131,3 +131,6 @@ Remote history cache keys use isolated hashed account namespaces. Legacy cache e
 
 ## v0.91.0
 New remote history downloads use Android Keystore AES-GCM encryption with account/event key binding. Legacy downloads are not migrated automatically; refresh the cache and use Clear cache to remove old copies. Local viewing SQLite remains unencrypted; full offline-first storage and safe SQLite encryption migration are outstanding.
+
+## v0.92.0
+Navigation labels are translated in Hindi and Spanish using Android locale resources. Optional device-credential gate conceals the dashboard when returning to the app; it is not an independent cryptographic vault. Complete UI localization and dedicated biometric flow/device testing remain outstanding.

@@ -23,6 +23,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var nav: LinearLayout
     private lateinit var dashboard: LinearLayout
     private var tab=0
+    private var privacyPrompt=false
+    private var unlocked=false
     private var historyFilter=HistoryFilter()
     private var historyLimit=100
     private var analyticsPeriod=30
@@ -49,6 +51,7 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); handleCallback(intent); handleReview(intent); handleShared(intent); handleTrackingShortcut(intent); handleAutomation(intent) }
     override fun onActivityResult(requestCode:Int,resultCode:Int,data:Intent?) {
         super.onActivityResult(requestCode,resultCode,data)
+        if(requestCode==96) { privacyPrompt=false; unlocked=resultCode==RESULT_OK; if(unlocked) shell.visibility=android.view.View.VISIBLE else finish(); return }
         if(requestCode==57 && resultCode==RESULT_OK) data?.data?.let { inspectVideo(it) }
         if(requestCode==58 && resultCode==RESULT_OK) data?.data?.let { inspectImport(it) }
         if(resultCode==RESULT_OK && requestCode in 65..66) data?.data?.let { settingsTransfer(requestCode,it) }
@@ -361,7 +364,7 @@ class MainActivity : ComponentActivity() {
         nav=LinearLayout(this).apply { orientation=if(wide) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL; setPadding(dp(8),dp(8),dp(8),dp(8)); setBackgroundColor(surface) }
         if(wide) { workspace.addView(nav,LinearLayout.LayoutParams(dp(156),-1)); workspace.addView(frame,LinearLayout.LayoutParams(0,-1,1f)) }
         else { workspace.addView(frame,LinearLayout.LayoutParams(-1,0,1f)); workspace.addView(nav,LinearLayout.LayoutParams(-1,-2)) }
-        listOf("Home","Library","Review","Activity","Settings").forEachIndexed { i,name -> nav.addView(TextView(this).apply { text=name; textSize=if(wide) 15f else 12f; gravity=android.view.Gravity.CENTER; minHeight=dp(52); isFocusable=true; setOnFocusChangeListener { view,focused -> view.alpha=if(focused) 1f else 0.82f; if(tvMode) view.scaleX=if(focused) 1.05f else 1f; if(tvMode) view.scaleY=if(focused) 1.05f else 1f }; setOnClickListener { showTab(i) } },if(wide) LinearLayout.LayoutParams(-1,dp(58)).apply { bottomMargin=dp(6) } else LinearLayout.LayoutParams(0,-2,1f)) }
+        listOf(getString(R.string.nav_home),getString(R.string.nav_library),getString(R.string.nav_review),getString(R.string.nav_activity),getString(R.string.nav_settings)).forEachIndexed { i,name -> nav.addView(TextView(this).apply { text=name; textSize=if(wide) 15f else 12f; gravity=android.view.Gravity.CENTER; minHeight=dp(52); isFocusable=true; setOnFocusChangeListener { view,focused -> view.alpha=if(focused) 1f else 0.82f; if(tvMode) view.scaleX=if(focused) 1.05f else 1f; if(tvMode) view.scaleY=if(focused) 1.05f else 1f }; setOnClickListener { showTab(i) } },if(wide) LinearLayout.LayoutParams(-1,dp(58)).apply { bottomMargin=dp(6) } else LinearLayout.LayoutParams(0,-2,1f)) }
         fun label(s: String) { root.addView(txt(s,15,muted)) }
         fun button(s: String, action: () -> Unit) { root.addView(actionButton(s,action)) }
         label("SETTINGS • Account and tracking")
@@ -386,6 +389,7 @@ class MainActivity : ComponentActivity() {
         button("Companion status") { val summary=CompanionStatus.summarize(history.records(0)); android.app.AlertDialog.Builder(this).setTitle("Companion status").setMessage("Active sessions: "+summary.active+"\nAwaiting review: "+summary.pending+"\nSampled time: "+durationText(summary.watchedMs)).setPositiveButton("Close",null).show() }
         button("Cancel all episode reminders") { prefs.edit().putBoolean("episode_reminders",false).apply(); EpisodeReminders.cancelAll(this); Toast.makeText(this,"Reminders cancelled",Toast.LENGTH_SHORT).show() }
         button("Privacy mode • stop tracking now") { privacyMode() }
+        root.addView(Switch(this).apply { text="Require biometric or device credential on app resume"; isChecked=prefs.getBoolean("privacy_lock",false); setOnCheckedChangeListener { _,checked -> if(checked && !getSystemService(android.app.KeyguardManager::class.java).isDeviceSecure) { isChecked=false; Toast.makeText(this@MainActivity,"Set a device screen lock first",Toast.LENGTH_LONG).show() } else { prefs.edit().putBoolean("privacy_lock",checked).apply(); if(checked) { unlocked=false; requirePrivacyUnlock() } } } })
         root.addView(Switch(this).apply { text="Protect app screen from screenshots and recent-app previews"; isChecked=prefs.getBoolean("secure_screen",false); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("secure_screen",checked).apply(); applyScreenProtection() } })
         button("Guided tracking setup") { setupGuide() }
         root.addView(Switch(this).apply { text="Daily encrypted on-device history backup"; isChecked=prefs.getBoolean("daily_backup",false); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("daily_backup",checked).apply(); LocalBackupVault.schedule(this@MainActivity,checked) } })
@@ -671,7 +675,19 @@ class MainActivity : ComponentActivity() {
             android.service.notification.NotificationListenerService.requestRebind(android.content.ComponentName(this,PlaybackListener::class.java))
         }.onFailure { DebugTrace.failure("foreground",it); Toast.makeText(this,"Unable to start tracking",Toast.LENGTH_LONG).show() }
     }
-    override fun onResume() { super.onResume(); if (::output.isInitialized) refresh(); if (::historyList.isInitialized) refreshHistory() }
+    override fun onPause() { super.onPause(); if(prefs.getBoolean("privacy_lock",false) && !privacyPrompt) { unlocked=false; if(::shell.isInitialized) shell.visibility=android.view.View.INVISIBLE } }
+    override fun onResume() { super.onResume(); if (::output.isInitialized) refresh(); if (::historyList.isInitialized) refreshHistory(); requirePrivacyUnlock() }
+    private fun requirePrivacyUnlock() {
+        if(!::shell.isInitialized) return
+        if(!prefs.getBoolean("privacy_lock",false) || unlocked) { shell.visibility=android.view.View.VISIBLE; return }
+        shell.visibility=android.view.View.INVISIBLE
+        if(privacyPrompt || isFinishing) return
+        val manager=getSystemService(android.app.KeyguardManager::class.java)
+        val intent=manager.createConfirmDeviceCredentialIntent("Unlock TraktBridge","Verify your device credential to view personal history")
+        if(intent==null) { finish(); return }
+        privacyPrompt=true
+        runCatching { startActivityForResult(intent,96) }.onFailure { privacyPrompt=false; finish() }
+    }
     override fun onDestroy() { historyRequest++; historyTask?.cancel(true); historyExecutor.shutdownNow(); if (::history.isInitialized) history.close(); super.onDestroy() }
     override fun onSaveInstanceState(outState: Bundle) { outState.putInt("tab",tab); outState.putString("import_source",importSource); outState.putString("filter_q",historyFilter.query); outState.putString("filter_source",historyFilter.source); outState.putInt("filter_period",historyFilter.period); outState.putString("filter_type",historyFilter.type); outState.putString("filter_status",historyFilter.status); outState.putString("filter_sort",historyFilter.sort); outState.putInt("analytics_period",analyticsPeriod); outState.putString("analytics_source",analyticsSource); outState.putString("calendar_month",calendarMonth.toString()); super.onSaveInstanceState(outState) }
     private fun dp(n:Int)= (n*resources.displayMetrics.density+0.5f).toInt()
