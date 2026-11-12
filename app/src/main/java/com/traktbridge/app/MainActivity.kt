@@ -445,9 +445,9 @@ class MainActivity : ComponentActivity() {
         val workspace=LinearLayout(this).apply { orientation=if(wide) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL }
         shell.addView(workspace,LinearLayout.LayoutParams(-1,0,1f))
         val root=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(layoutMode.padding),dp(8),dp(layoutMode.padding),dp(24)) }
-        settingsPage=ScrollView(this).apply { addView(root) }; frame.addView(settingsPage)
+        settingsPage=ScrollView(this).apply { isFillViewport=true; addView(root) }; frame.addView(settingsPage)
         dashboard=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(layoutMode.padding),dp(8),dp(layoutMode.padding),dp(24)) }
-        contentPage=ScrollView(this).apply { addView(dashboard) }; frame.addView(contentPage)
+        contentPage=ScrollView(this).apply { isFillViewport=true; addView(dashboard) }; frame.addView(contentPage)
         nav=LinearLayout(this).apply { orientation=if(wide) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL; setPadding(dp(8),dp(8),dp(8),dp(8)); setBackgroundColor(surface) }
         if(wide) { workspace.addView(nav,LinearLayout.LayoutParams(dp(layoutMode.rail),-1)); workspace.addView(frame,LinearLayout.LayoutParams(0,-1,1f)) }
         else { workspace.addView(frame,LinearLayout.LayoutParams(-1,0,1f)); workspace.addView(nav,LinearLayout.LayoutParams(-1,-2)) }
@@ -939,7 +939,7 @@ class MainActivity : ComponentActivity() {
         text=value; textSize=size.toFloat()*when(prefs.getInt("reading_size",0)) { 1->1.15f; 2->1.3f; else->1f }; setTextColor(color); if(bold) setTypeface(null,android.graphics.Typeface.BOLD)
     }
     private fun actionButton(label:String,action:()->Unit)=Button(this).apply {
-        text=label; contentDescription=label; isAllCaps=false; isFocusable=true; if(tvMode) { minWidth=dp(120); setOnFocusChangeListener { view,focused -> view.alpha=if(focused) 1f else 0.85f; view.scaleX=if(focused) 1.03f else 1f; view.scaleY=if(focused) 1.03f else 1f } }; setTextColor(ink); textSize=14f*when(prefs.getInt("reading_size",0)) { 1->1.15f; 2->1.3f; else->1f }; background=rounded(0xff302a48.toInt(),12); minHeight=dp(48)
+        text=label; contentDescription=label; isAllCaps=false; isFocusable=true; if(tvMode) { minWidth=dp(120); setOnFocusChangeListener { view,focused -> view.alpha=if(focused) 1f else 0.85f; view.scaleX=if(focused) 1.03f else 1f; view.scaleY=if(focused) 1.03f else 1f } }; setTextColor(ink); textSize=14f*when(prefs.getInt("reading_size",0)) { 1->1.15f; 2->1.3f; else->1f }; background=rounded(0xff302a48.toInt(),12); minHeight=dp(layoutMode.touch)
         layoutParams=LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(6) }; setOnClickListener { action() }
     }
     private fun panel(parent:LinearLayout):LinearLayout=LinearLayout(this).apply {

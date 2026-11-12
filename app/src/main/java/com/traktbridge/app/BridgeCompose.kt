@@ -39,9 +39,9 @@ fun BridgeHeader(accent:Int,onSearch:()->Unit) {
         Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background).padding(horizontal=20.dp,vertical=12.dp),verticalAlignment=Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("TRAKTBRIDGE",color=MaterialTheme.colorScheme.primary,fontSize=11.sp,fontWeight=FontWeight.Bold)
-                Text("Your viewing companion",color=MaterialTheme.colorScheme.onSurface,fontSize=20.sp,fontWeight=FontWeight.SemiBold)
+                Text("Your viewing companion",color=MaterialTheme.colorScheme.onSurface,fontSize=20.sp,fontWeight=FontWeight.SemiBold,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)
             }
-            TextButton(onClick=onSearch) { Text("Search") }
+            OutlinedButton(onClick=onSearch,modifier=Modifier.heightIn(min=48.dp)) { Text("Search") }
         }
     }
 }
@@ -52,14 +52,15 @@ fun BridgeHomeSummary(accent:Int,live:Boolean,pending:Int,weekly:String,onTracki
         Card(Modifier.fillMaxWidth().padding(vertical=6.dp),colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surface)) {
             Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
                 Text(if(live) "Tracking active" else "Tracking inactive",color=if(live) Color(0xff6ee7b7) else Color(0xfffbbf24),fontWeight=FontWeight.SemiBold)
-                Text(weekly+" sampled this week",style=MaterialTheme.typography.headlineSmall)
-                Text(pending.toString()+" titles awaiting review or sync",style=MaterialTheme.typography.bodyMedium)
+                Text(weekly,style=MaterialTheme.typography.headlineMedium,fontWeight=FontWeight.Bold)
+                Text("Sampled this week",style=MaterialTheme.typography.bodyMedium)
+                Text(pending.toString()+" titles awaiting review or sync",style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
                 Button(onClick=onTracking,modifier=Modifier.fillMaxWidth()) { Text("Tracking settings") }
                 Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(onClick=onReview,modifier=Modifier.weight(1f)) { Text("Review") }
                     OutlinedButton(onClick=onDiscover,modifier=Modifier.weight(1f)) { Text("Discover") }
                 }
-                TextButton(onClick=onPlanner) { Text("Plan a watch") }
+                OutlinedButton(onClick=onPlanner,modifier=Modifier.fillMaxWidth().heightIn(min=48.dp)) { Text("Plan a watch") }
             }
         }
     }
@@ -93,7 +94,7 @@ fun BridgeNavigation(accent:Int,labels:List<String>,selected:Int,wide:Boolean,on
         } else {
             NavigationBar(containerColor=MaterialTheme.colorScheme.surface) {
                 labels.forEachIndexed { index,label ->
-                    NavigationBarItem(selected=index==selected,onClick={onSelect(index)},icon={ Text(listOf("⌂","▤","✓","▥","⚙")[index],fontSize=20.sp) },label={ Text(label,fontSize=11.sp,maxLines=2) },alwaysShowLabel=true)
+                    NavigationBarItem(selected=index==selected,onClick={onSelect(index)},icon={ Text(listOf("⌂","▤","✓","▥","⚙")[index],fontSize=20.sp) },label={ Text(label,fontSize=11.sp,maxLines=2,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis) },alwaysShowLabel=true)
                 }
             }
         }
