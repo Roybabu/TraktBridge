@@ -1054,8 +1054,9 @@ class MainActivity : ComponentActivity() {
             val year=years[index]
             val records=rows.filter { ViewingAnalytics.day(it.ended).year==year }
             val groups=ViewingGroups.build(records)
-            val total=records.sumOf { it.watched }
-            val report="TraktBridge • "+year+" viewing recap\nSampled time: "+durationText(total)+"\nMovies synced: "+groups.count { it.confirmed && it.representative.matchType=="movie" }+"\nEpisodes synced: "+groups.count { it.confirmed && it.representative.matchType=="episode" }+"\nSessions: "+records.size
+            val recap=ViewingAnalytics.recap(records,year)
+            val total=recap.sampledMs
+            val report="TraktBridge • "+year+" viewing recap\nSampled time: "+durationText(total)+"\nMovies synced: "+groups.count { it.confirmed && it.representative.matchType=="movie" }+"\nEpisodes synced: "+groups.count { it.confirmed && it.representative.matchType=="episode" }+"\nSessions: "+records.size+"\nActive viewing days: "+recap.activeDays+"\nLongest streak: "+recap.longestStreak+" days"+"\nBusiest month: "+(recap.busiestMonth?.let { java.time.Month.of(it).name } ?: "None")+"\nTop service: "+(recap.topSource?.let { appLabel(it) } ?: "None")
             val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
             body.addView(txt(report,18,ink,true))
             body.addView(actionButton("Share recap") { startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT,report),"Share viewing recap")) })
@@ -1161,7 +1162,7 @@ class MainActivity : ComponentActivity() {
         }.show()
     }
     private fun recommendFromHistory() {
-        val rows=history.records(0).filter { it.status=="synced" && it.traktId>0 }.distinctBy { if(it.matchType=="episode") "show:"+it.showId else "movie:"+it.traktId }.take(30)
+        val rows=history.records(0).filter { it.status=="synced" && it.traktId>0 && (it.matchType=="movie" || (it.matchType=="episode" && it.showId>0)) }.groupBy { if(it.matchType=="episode") "show:"+it.showId else "movie:"+it.traktId }.values.sortedWith(compareByDescending<List<WatchRecord>> { it.sumOf { r -> r.watched.coerceAtLeast(0) } }.thenByDescending { it.maxOf { r -> r.ended } }).map { it.maxBy { r -> r.ended } }.take(30)
         choose("Find similar content",rows.map { it.matchLabel }) { i ->
             val r=rows[i]; val type=if(r.matchType=="episode") "show" else "movie"; val id=if(type=="show") r.showId else r.traktId
             val watched=rows.map { if(type=="show" && it.matchType=="episode") it.showId else if(type=="movie" && it.matchType=="movie") it.traktId else -1L }.toSet()
