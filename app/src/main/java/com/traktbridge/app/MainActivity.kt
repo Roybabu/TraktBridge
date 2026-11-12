@@ -414,6 +414,15 @@ class MainActivity : ComponentActivity() {
         fun label(s: String) { root.addView(txt(s,15,muted)) }
         fun button(s: String, action: () -> Unit) { root.addView(actionButton(s,action)) }
         label("SETTINGS • Account and tracking")
+        button("Discover nearby devices") {
+            val status=TextView(this).apply { text="Searching local network…"; setPadding(dp(20),dp(12),dp(20),dp(12)) }
+            val scanner=DeviceDiscovery(this) { names -> status.text=if(names.isEmpty()) "No nearby devices found. Open discovery on another device." else names.joinToString("\n") }
+            val dialog=android.app.AlertDialog.Builder(this).setTitle("Nearby devices (unverified)").setView(status).setPositiveButton("Close",null).create()
+            dialog.setOnDismissListener { scanner.close() }
+            dialog.show()
+            runCatching { scanner.start() }.onFailure { status.text="Local discovery unavailable" }
+            status.postDelayed({ dialog.dismiss() },60000)
+        }
         button("Device identity") {
             runCatching { DeviceIdentity.register(this) }.fold({ device ->
                 val field=EditText(this).apply { setText(device.label); filters=arrayOf(android.text.InputFilter.LengthFilter(80)) }
