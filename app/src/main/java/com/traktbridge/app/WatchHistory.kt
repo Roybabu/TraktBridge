@@ -58,8 +58,12 @@ class WatchHistory(context: Context): SQLiteOpenHelper(context.applicationContex
     }
     @Synchronized fun recover() {
         val db = writableDatabase
-        db.execSQL("DELETE FROM viewing WHERE status='active' AND watched < ?", arrayOf(MIN_WATCH))
-        db.execSQL("UPDATE viewing SET status='pending' WHERE status='active'")
+        db.beginTransaction()
+        try {
+            db.execSQL("DELETE FROM viewing WHERE status='active' AND watched < ?", arrayOf(MIN_WATCH))
+            db.execSQL("UPDATE viewing SET status='pending' WHERE status='active'")
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
         active.clear()
     }
     private fun save(a: Active, status: String) {
@@ -97,7 +101,7 @@ class WatchHistory(context: Context): SQLiteOpenHelper(context.applicationContex
                 val merged=PlaybackAccuracy.mergeIdentity(old.sample,s)
                 val valid=PlaybackPosition.valid(s.position,s.duration)
                 val a = old.copy(sample = merged, lastTick = elapsed, lastPlaying = if (s.playing) elapsed else old.lastPlaying,
-                    watched = old.watched + interval.watched, lastWall = if (s.playing) wall else old.lastWall,
+                    watched = old.watched + interval.watched, lastWall = if (s.playing) maxOf(old.lastWall,wall,old.started) else old.lastWall,
                     paused=old.paused+interval.paused,buffering=old.buffering+interval.buffering,uncertain=old.uncertain+interval.uncertain,seeks=old.seeks+interval.seeks,rewinds=old.rewinds+interval.replay,
                     resumePosition=if(valid) s.position else old.resumePosition,resumeDuration=if(valid) s.duration else old.resumeDuration.takeIf { it>0 } ?: s.duration.coerceAtLeast(0),resumeSource=if(valid) s.positionSource else old.resumeSource)
                 if(interval.seeks>0) DebugTrace.event("progress","seek detected rewind="+(interval.replay>0))

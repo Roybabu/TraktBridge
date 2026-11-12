@@ -20,21 +20,25 @@ class TitleAccessibility: AccessibilityService() {
         if(Build.VERSION.SDK_INT<34 || prefs.getString("ocr_target","")!=pkg || now !in prefs.getLong("ocr_after",Long.MAX_VALUE)..prefs.getLong("ocr_until",0)) return
         // Consume the one-shot request before taking the image. Never retry a secure window.
         prefs.edit().remove("ocr_target").remove("ocr_after").remove("ocr_until").putString("ocr_status","Scanning selected player").apply()
+        val generation=prefs.getLong("ocr_generation",0)
+        fun validRequest()=prefs.getBoolean("enabled",false) && prefs.getBoolean("title_optin",false) && prefs.getLong("ocr_generation",0)==generation && pkg in (prefs.getStringSet("allowed",emptySet()) ?: emptySet())
         takeScreenshotOfWindow(root.windowId,mainExecutor,object:TakeScreenshotCallback {
             override fun onFailure(errorCode:Int) {
+                if(!validRequest()) return
                 val status=if(errorCode==ERROR_TAKE_SCREENSHOT_SECURE_WINDOW) "Screen capture blocked by the player" else "Screen capture unavailable ("+errorCode+")"
                 prefs.edit().putString("ocr_status",status).apply()
                 DebugTrace.event("ocr","capture unavailable code="+errorCode)
             }
             override fun onSuccess(result:ScreenshotResult) {
                 val buffer=result.hardwareBuffer
+                if(!validRequest()) { buffer.close(); return }
                 val bitmap=try {
                     val hardware=Bitmap.wrapHardwareBuffer(buffer,result.colorSpace)
                     try { hardware?.copy(Bitmap.Config.ARGB_8888,false) } finally { hardware?.recycle() }
                 } finally { buffer.close() }
                 if(bitmap==null) { prefs.edit().putString("ocr_status","Image unavailable").apply(); return }
                 PlayerOcr.scan(bitmap) { outcome ->
-                    if(!prefs.getBoolean("title_optin",false) || pkg !in (prefs.getStringSet("allowed",emptySet()) ?: emptySet())) return@scan
+                    if(!validRequest()) return@scan
                     outcome.fold({ choices ->
                         val array=org.json.JSONArray()
                         choices.forEach { c -> array.put(org.json.JSONObject().put("title",c.title).put("detail",c.detail).put("position",c.position).put("duration",c.duration)) }

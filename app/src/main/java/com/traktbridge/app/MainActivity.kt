@@ -398,7 +398,7 @@ class MainActivity : ComponentActivity() {
         button("Identify shared movie link") { val field=EditText(this).apply { hint="Paste shared title or link" }; android.app.AlertDialog.Builder(this).setTitle("Identify shared content").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Continue") { _,_-> presentShared(SharedContent.fromText(field.text.toString())) }.show() }
         button("Scan player title (one-shot OCR)") { armOcr() }
         button("Review OCR result") { reviewOcr() }
-        button("Clear OCR result") { prefs.edit().remove("ocr_target").remove("ocr_after").remove("ocr_until").remove("ocr_choices").remove("ocr_source").remove("ocr_captured").remove("ocr_status").apply() }
+        button("Clear OCR result") { prefs.edit().putLong("ocr_generation",prefs.getLong("ocr_generation",0)+1).remove("ocr_target").remove("ocr_after").remove("ocr_until").remove("ocr_choices").remove("ocr_source").remove("ocr_captured").remove("ocr_status").apply() }
         button("Connect media servers") { serverSettings() }
         root.addView(Switch(this).apply { text="Automatically reuse confirmed local title mappings"; isChecked=prefs.getBoolean("learned_auto",false); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("learned_auto",checked).apply() } })
         button("Clear learned title mappings") { android.app.AlertDialog.Builder(this).setTitle("Clear learned mappings?").setMessage("Existing viewing history and Trakt matches stay unchanged.").setNegativeButton("Cancel",null).setPositiveButton("Clear") { _,_->history.clearLearning() }.show() }
@@ -445,7 +445,7 @@ class MainActivity : ComponentActivity() {
             android.app.AlertDialog.Builder(this).setTitle("Optional title detection").setMessage("Android Accessibility can expose screen content. TraktBridge checks selected video apps for player titles and video detail headings near play actions. Suggestions stay local and are never uploaded automatically. Enable only if you agree.").setNegativeButton("Cancel",null).setPositiveButton("Agree and open settings") { _,_ -> prefs.edit().putBoolean("title_optin",true).apply(); startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }.show()
         }
         button("Disable title detection") {
-            val edit=prefs.edit().putBoolean("title_optin",false).remove("ocr_target").remove("ocr_after").remove("ocr_until").remove("ocr_choices").remove("ocr_source").remove("ocr_captured").remove("ocr_status")
+            val edit=prefs.edit().putLong("ocr_generation",prefs.getLong("ocr_generation",0)+1).putBoolean("title_optin",false).remove("ocr_target").remove("ocr_after").remove("ocr_until").remove("ocr_choices").remove("ocr_source").remove("ocr_captured").remove("ocr_status")
             prefs.all.keys.filter { it.startsWith("title_hint:") || it.startsWith("title_detail:") || it.startsWith("title_time:") }.forEach { edit.remove(it) }
             edit.apply(); startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }
