@@ -305,7 +305,7 @@ class MainActivity : Activity() {
         shell=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(bg) }
         shell.setOnApplyWindowInsetsListener { v,insets -> v.setPadding(insets.systemWindowInsetLeft,insets.systemWindowInsetTop,insets.systemWindowInsetRight,insets.systemWindowInsetBottom); insets }
         setContentView(shell)
-        val header=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(24),dp(16),dp(24),dp(12)); addView(txt("TRAKTBRIDGE",12,violet)); addView(txt("Your viewing companion",24,ink,true)); addView(actionButton("Search library") { showTab(1); editHistoryFilter(history.records(0)) }) }
+        val header=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(24),dp(16),dp(24),dp(12)); addView(txt("TRAKTBRIDGE",12,violet)); addView(txt("Your viewing companion",24,ink,true)); addView(actionButton("Search everything") { universalSearch() }) }
         shell.addView(header)
         val frame=android.widget.FrameLayout(this)
         val workspace=LinearLayout(this).apply { orientation=if(wide) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL }
@@ -639,6 +639,33 @@ class MainActivity : Activity() {
             }
             android.app.AlertDialog.Builder(this).setTitle("Upcoming episodes").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
         }
+    }
+    private fun universalSearch() {
+        val field=EditText(this).apply { hint="Movie, show or anime title"; setSingleLine(true) }
+        android.app.AlertDialog.Builder(this).setTitle("Universal search").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Search") { _,_->
+            val q=field.text.toString().trim().take(200)
+            if(q.isBlank()) return@setPositiveButton
+            val local=ViewingGroups.build(ViewingAnalytics.filter(history.records(0),HistoryFilter(query=q)))
+            val favorites=getSharedPreferences("favorites",MODE_PRIVATE).all.values.map { it.toString() }.filter { it.contains(q,true) }
+            val collections=getSharedPreferences("collections",MODE_PRIVATE).all.filter { (name,value) -> name.contains(q,true) || value.toString().contains(q,true) }.keys.sorted()
+            val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
+            section(body,"Local library • "+local.size)
+            local.take(20).forEach { titleCard(body,it,true) }
+            if(local.isEmpty()) body.addView(txt("No matching viewing history.",14,muted))
+            if(favorites.isNotEmpty()) { section(body,"Favorites"); favorites.take(20).forEach { body.addView(txt(it,14)) } }
+            if(collections.isNotEmpty()) { section(body,"Matching collections"); collections.forEach { body.addView(txt(it,14)) }; body.addView(actionButton("Open collections") { collections() }) }
+            for(type in listOf("movie","show")) body.addView(actionButton("Search Trakt "+type+"s") {
+                lookup("Searching Trakt",{ done -> TraktCatalogue.search(q,type,done) }) { rows:List<CatalogueItem> ->
+                    choose("Trakt "+type+"s",rows.map { it.label() }) { index -> titleDetails(type,rows[index].id,rows[index].title) }
+                }
+            })
+            body.addView(actionButton("Search AniList anime") {
+                lookup("Searching AniList",{ done -> AnimeCatalogue.search(q,done) }) { rows:List<AnimeResult> ->
+                    choose("Anime matches",rows.map { it.english.ifBlank { it.romaji } }) { index -> startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://anilist.co/anime/"+rows[index].id))) }
+                }
+            })
+            android.app.AlertDialog.Builder(this).setTitle("Search: "+q).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
+        }.show()
     }
     private fun manualLog() {
         val field=EditText(this).apply { hint="Movie or episode title"; setSingleLine(true) }
