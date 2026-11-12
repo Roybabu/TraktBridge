@@ -305,6 +305,7 @@ class MainActivity : Activity() {
         button("Connect media servers") { serverSettings() }
         root.addView(Switch(this).apply { text="Automatically reuse confirmed local title mappings"; isChecked=prefs.getBoolean("learned_auto",false); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("learned_auto",checked).apply() } })
         button("Clear learned title mappings") { android.app.AlertDialog.Builder(this).setTitle("Clear learned mappings?").setMessage("Existing viewing history and Trakt matches stay unchanged.").setNegativeButton("Cancel",null).setPositiveButton("Clear") { _,_->history.clearLearning() }.show() }
+        button("Live recognition inspector") { liveInspector() }
         button("Open diagnostic recorder") { startActivity(Intent(this,DebugActivity::class.java)) }
         auth = TraktAuth(applicationContext)
         account = TextView(this).apply { textSize = 16f }
@@ -562,6 +563,22 @@ class MainActivity : Activity() {
             }
             android.app.AlertDialog.Builder(this).setTitle("Upcoming episodes").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
         }
+    }
+    private fun liveInspector() {
+        val body=TextView(this).apply { setPadding(dp(16),dp(12),dp(16),dp(12)); setTextIsSelectable(true) }
+        val dialog=android.app.AlertDialog.Builder(this).setTitle("Live recognition inspector").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).create()
+        val handler=android.os.Handler(android.os.Looper.getMainLooper())
+        val tick=object:Runnable {
+            override fun run() {
+                if(!dialog.isShowing || isDestroyed || isFinishing) return
+                val last=prefs.getLong("last_sample",0)
+                val age=if(last>0) ((System.currentTimeMillis()-last)/1000).coerceAtLeast(0).toString()+" seconds" else "Never"
+                body.text="Last sample: "+age+"\nListener connected: "+prefs.getBoolean("listener_connected",false)+"\n\nCurrent sessions:\n"+runCatching { JSONArray(prefs.getString("sessions","[]")).toString(2) }.getOrDefault("[]")
+                handler.postDelayed(this,2000)
+            }
+        }
+        dialog.setOnDismissListener { handler.removeCallbacks(tick) }
+        dialog.show(); handler.post(tick)
     }
     private fun animeSearch() {
         val field=EditText(this).apply { hint="English, Japanese or romaji title"; setSingleLine(true) }
