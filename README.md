@@ -119,3 +119,6 @@ Regional where-to-watch lookup opens exact Trakt IDs or a user-selected country/
 
 ## v0.87.0
 Validated internal navigation shortcuts, exact Netflix/YouTube ID launch links and adaptive polling when inactive. Provider links require user action; no autoplay or availability guarantee.
+
+## v0.88.0
+TV focus indicators, menu-key navigation access, and seven-day cached title details fallback. Cached metadata is not current streaming availability. Physical TV and offline network testing remain pending.

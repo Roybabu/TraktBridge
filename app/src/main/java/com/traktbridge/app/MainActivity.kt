@@ -361,7 +361,7 @@ class MainActivity : ComponentActivity() {
         nav=LinearLayout(this).apply { orientation=if(wide) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL; setPadding(dp(8),dp(8),dp(8),dp(8)); setBackgroundColor(surface) }
         if(wide) { workspace.addView(nav,LinearLayout.LayoutParams(dp(156),-1)); workspace.addView(frame,LinearLayout.LayoutParams(0,-1,1f)) }
         else { workspace.addView(frame,LinearLayout.LayoutParams(-1,0,1f)); workspace.addView(nav,LinearLayout.LayoutParams(-1,-2)) }
-        listOf("Home","Library","Review","Activity","Settings").forEachIndexed { i,name -> nav.addView(TextView(this).apply { text=name; textSize=if(wide) 15f else 12f; gravity=android.view.Gravity.CENTER; minHeight=dp(52); isFocusable=true; setOnFocusChangeListener { view,focused -> view.alpha=if(focused) 1f else 0.82f }; setOnClickListener { showTab(i) } },if(wide) LinearLayout.LayoutParams(-1,dp(58)).apply { bottomMargin=dp(6) } else LinearLayout.LayoutParams(0,-2,1f)) }
+        listOf("Home","Library","Review","Activity","Settings").forEachIndexed { i,name -> nav.addView(TextView(this).apply { text=name; textSize=if(wide) 15f else 12f; gravity=android.view.Gravity.CENTER; minHeight=dp(52); isFocusable=true; setOnFocusChangeListener { view,focused -> view.alpha=if(focused) 1f else 0.82f; if(tvMode) view.scaleX=if(focused) 1.05f else 1f; if(tvMode) view.scaleY=if(focused) 1.05f else 1f }; setOnClickListener { showTab(i) } },if(wide) LinearLayout.LayoutParams(-1,dp(58)).apply { bottomMargin=dp(6) } else LinearLayout.LayoutParams(0,-2,1f)) }
         fun label(s: String) { root.addView(txt(s,15,muted)) }
         fun button(s: String, action: () -> Unit) { root.addView(actionButton(s,action)) }
         label("SETTINGS • Account and tracking")
@@ -679,7 +679,7 @@ class MainActivity : ComponentActivity() {
         text=value; textSize=size.toFloat()*when(prefs.getInt("reading_size",0)) { 1->1.15f; 2->1.3f; else->1f }; setTextColor(color); if(bold) setTypeface(null,android.graphics.Typeface.BOLD)
     }
     private fun actionButton(label:String,action:()->Unit)=Button(this).apply {
-        text=label; isAllCaps=false; setTextColor(ink); textSize=14f*when(prefs.getInt("reading_size",0)) { 1->1.15f; 2->1.3f; else->1f }; background=rounded(0xff302a48.toInt(),12); minHeight=dp(48)
+        text=label; isAllCaps=false; isFocusable=true; if(tvMode) { minWidth=dp(120); setOnFocusChangeListener { view,focused -> view.alpha=if(focused) 1f else 0.85f; view.scaleX=if(focused) 1.03f else 1f; view.scaleY=if(focused) 1.03f else 1f } }; setTextColor(ink); textSize=14f*when(prefs.getInt("reading_size",0)) { 1->1.15f; 2->1.3f; else->1f }; background=rounded(0xff302a48.toInt(),12); minHeight=dp(48)
         layoutParams=LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(6) }; setOnClickListener { action() }
     }
     private fun panel(parent:LinearLayout):LinearLayout=LinearLayout(this).apply {
@@ -687,6 +687,10 @@ class MainActivity : ComponentActivity() {
         parent.addView(this,LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(12) })
     }
     private fun section(parent:LinearLayout,title:String) { parent.addView(txt(title,20,ink,true),LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(10); bottomMargin=dp(12) }) }
+    override fun dispatchKeyEvent(event:android.view.KeyEvent):Boolean {
+        if(tvMode && event.action==android.view.KeyEvent.ACTION_DOWN && event.keyCode==android.view.KeyEvent.KEYCODE_MENU && ::nav.isInitialized) { nav.getChildAt(tab)?.requestFocus(); return true }
+        return super.dispatchKeyEvent(event)
+    }
     private fun showTab(index:Int) {
         tab=index; settingsPage.visibility=if(index==4) android.view.View.VISIBLE else android.view.View.GONE
         contentPage.visibility=if(index==4) android.view.View.GONE else android.view.View.VISIBLE
@@ -1314,9 +1318,9 @@ class MainActivity : ComponentActivity() {
         val cache=getSharedPreferences("offline_catalogue",MODE_PRIVATE)
         val key=type+":"+id
         lookup("Loading title details",{ done -> TraktCatalogue.details(type,id) { result ->
-            val cached=runCatching { org.json.JSONObject(cache.getString(key,"")) }.getOrNull()
+            val cached=runCatching { org.json.JSONObject(cache.getString(key,"")) }.getOrNull()?.takeIf { TvNavigation.validCache(it.optLong("savedAt"),System.currentTimeMillis()) }
             if(result.isSuccess) {
-                val d=result.getOrThrow(); if(cache.all.size>=200 && !cache.contains(key)) cache.edit().clear().apply(); cache.edit().putString(key,org.json.JSONObject().put("title",d.title).put("overview",d.overview).put("year",d.year).put("runtime",d.runtime).put("rating",d.rating).put("genres",d.genres).put("trailer",d.trailer).put("released",d.released).toString()).apply(); done(result)
+                val d=result.getOrThrow(); if(cache.all.size>=200 && !cache.contains(key)) cache.edit().clear().apply(); cache.edit().putString(key,org.json.JSONObject().put("savedAt",System.currentTimeMillis()).put("title",d.title).put("overview",d.overview).put("year",d.year).put("runtime",d.runtime).put("rating",d.rating).put("genres",d.genres).put("trailer",d.trailer).put("released",d.released).toString()).apply(); done(result)
             } else if(cached!=null) done(Result.success(TitleDetails(cached.optString("title"),cached.optString("overview"),cached.optInt("year"),cached.optInt("runtime"),cached.optDouble("rating",0.0),cached.optString("genres"),cached.optString("trailer"),cached.optString("released")))) else done(result)
         } }) { d:TitleDetails ->
             val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(12),dp(16),dp(12)) }
