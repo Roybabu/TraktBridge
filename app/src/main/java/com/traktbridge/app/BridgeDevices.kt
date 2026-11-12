@@ -17,9 +17,9 @@ fun BridgeDevices(accent:Int,name:String,devices:List<PairedUiDevice>,sharing:Bo
             Text("Playback: "+if(sharing) "enabled" else "disabled")
             Text("History: "+(if(history) "enabled" else "disabled")+" • Remote controls: "+(if(controls) "enabled" else "disabled"))
             Text("On both devices, exchange an invitation and compare the 8-digit verification PIN. Approval is required on each device.")
-            Button(onClick=onShowQr,modifier=Modifier.fillMaxWidth()) { Text("1. Show my QR and PIN") }
-            OutlinedButton(onClick=onEnter,modifier=Modifier.fillMaxWidth()) { Text("2. Verify other device") }
-            OutlinedButton(onClick=onImport,modifier=Modifier.fillMaxWidth()) { Text("Read QR from image") }
+            Button(onClick=hapticClick(onShowQr),modifier=Modifier.fillMaxWidth()) { Text("1. Show my QR and PIN") }
+            OutlinedButton(onClick=hapticClick(onEnter),modifier=Modifier.fillMaxWidth()) { Text("2. Verify other device") }
+            OutlinedButton(onClick=hapticClick(onImport),modifier=Modifier.fillMaxWidth()) { Text("Read QR from image") }
             Text("Approved devices",style=MaterialTheme.typography.titleLarge)
             if(devices.isEmpty()) Text("No devices paired")
             LazyColumn(Modifier.fillMaxWidth().heightIn(max=220.dp),verticalArrangement=Arrangement.spacedBy(6.dp)) {
@@ -31,12 +31,12 @@ fun BridgeDevices(accent:Int,name:String,devices:List<PairedUiDevice>,sharing:Bo
                                 Text(if(device.online) "Fresh connection" else "Not currently connected")
                                 Text(device.id.take(12),style=MaterialTheme.typography.bodySmall)
                             }
-                            TextButton(onClick={onRevoke(device.id)}) { Text("Revoke") }
+                            TextButton(onClick=hapticClick { onRevoke(device.id) }) { Text("Revoke") }
                         }
                     }
                 }
             }
-            OutlinedButton(onClick=onSettings,modifier=Modifier.fillMaxWidth()) { Text("Sharing and privacy settings") }
+            OutlinedButton(onClick=hapticClick(onSettings),modifier=Modifier.fillMaxWidth()) { Text("Sharing and privacy settings") }
         }
     }
 }

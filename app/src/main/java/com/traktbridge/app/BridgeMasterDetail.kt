@@ -17,7 +17,7 @@ fun BridgeMasterDetail(accent:Int,entries:List<LibraryEntry>,initialKey:String,o
         Row(Modifier.fillMaxWidth().heightIn(min=260.dp,max=560.dp),horizontalArrangement=Arrangement.spacedBy(12.dp)) {
             LazyColumn(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(6.dp)) {
                 itemsIndexed(entries,key={_,item->item.key}) { _,item ->
-                    OutlinedButton(onClick={ selected=item.key; onSelection(item.key) },modifier=Modifier.fillMaxWidth().heightIn(min=56.dp),
+                    OutlinedButton(onClick=hapticClick { selected=item.key; onSelection(item.key) },modifier=Modifier.fillMaxWidth().heightIn(min=56.dp),
                         colors=ButtonDefaults.outlinedButtonColors(containerColor=if(current?.key==item.key) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface)) {
                         Column(Modifier.fillMaxWidth()) { Text(item.title,maxLines=2); Text(item.subtitle,style=MaterialTheme.typography.bodySmall,maxLines=2) }
                     }
@@ -29,7 +29,7 @@ fun BridgeMasterDetail(accent:Int,entries:List<LibraryEntry>,initialKey:String,o
                     if(current!=null) {
                         Text(current.subtitle)
                         Text(current.detail)
-                        Button(onClick=current.open,modifier=Modifier.fillMaxWidth()) { Text("Open sessions and actions") }
+                        Button(onClick=hapticClick(current.open),modifier=Modifier.fillMaxWidth()) { Text("Open sessions and actions") }
                     }
                 }
             }

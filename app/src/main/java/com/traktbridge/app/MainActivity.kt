@@ -542,6 +542,7 @@ class MainActivity : ComponentActivity() {
         button("Beta feedback and diagnostics") { betaFeedback() }
         root.addView(Switch(this).apply { text="Hide catalogue spoilers"; isChecked=prefs.getBoolean("hide_spoilers",true); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("hide_spoilers",checked).apply() } })
         root.addView(Switch(this).apply { text="High contrast text"; isChecked=prefs.getBoolean("high_contrast",false); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("high_contrast",checked).apply(); recreate() } })
+        if(!tvMode) root.addView(Switch(this).apply { text="Haptic feedback"; isChecked=prefs.getBoolean(BridgeHaptics.PREF,true); setOnCheckedChangeListener { view,checked -> prefs.edit().putBoolean(BridgeHaptics.PREF,checked).apply(); if(checked) BridgeHaptics.tap(view) } })
         root.addView(Switch(this).apply { text="Reduce interface motion"; isChecked=prefs.getBoolean("reduce_motion",false); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("reduce_motion",checked).apply(); recreate() } })
         button("Text size") { choose("Reading size",listOf("System default","Large","Extra large")) { prefs.edit().putInt("reading_size",it).apply(); recreate() } }
         button("Monthly viewing goal and dashboard") { configureGoal() }
@@ -971,7 +972,7 @@ class MainActivity : ComponentActivity() {
     }
     private fun actionButton(label:String,action:()->Unit)=Button(this).apply {
         text=label; contentDescription=label; isAllCaps=false; isFocusable=true; if(tvMode) { minWidth=dp(120); setOnFocusChangeListener { view,focused -> view.alpha=if(focused) 1f else 0.85f; view.scaleX=if(focused && !prefs.getBoolean("reduce_motion",false)) 1.03f else 1f; view.scaleY=if(focused && !prefs.getBoolean("reduce_motion",false)) 1.03f else 1f } }; setTextColor(ink); textSize=14f*UiAccessibility.readingScale(prefs.getInt("reading_size",0),tvMode); background=if(tvMode) TvFocus.background(this@MainActivity,BridgeDesign.action,violet) else rounded(BridgeDesign.action,12); minHeight=dp(adaptiveLayout.touch)
-        layoutParams=LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(6) }; setOnClickListener { action() }
+        layoutParams=LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(6) }; setOnClickListener { BridgeHaptics.tap(this); action() }
     }
     private fun panel(parent:LinearLayout):LinearLayout=LinearLayout(this).apply {
         orientation=LinearLayout.VERTICAL; background=rounded(surface); setPadding(dp(16),dp(16),dp(16),dp(16))
@@ -2275,7 +2276,7 @@ class MainActivity : ComponentActivity() {
     }
     private fun choose(title: String, labels: List<String>, selected: (Int) -> Unit) {
         if (labels.isEmpty()) { android.app.AlertDialog.Builder(this).setTitle(title).setMessage("No results. Try another title or spelling.").setPositiveButton("OK",null).show(); return }
-        android.app.AlertDialog.Builder(this).setTitle(title).setItems(labels.toTypedArray()) { _, index -> selected(index) }.setNegativeButton("Cancel",null).show()
+        android.app.AlertDialog.Builder(this).setTitle(title).setItems(labels.toTypedArray()) { _, index -> BridgeHaptics.tap(window.decorView); selected(index) }.setNegativeButton("Cancel",null).show()
     }
     private fun selectSuggestedEpisode(r:WatchRecord,show:CatalogueItem) {
         val evidence=r.title+" "+r.subtitle

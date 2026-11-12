@@ -32,7 +32,7 @@ fun BridgeTitleCard(accent:Int,row:TitleUi,actions:List<UiAction>) {
                 if(row.position.isNotBlank()) Text(row.position,style=MaterialTheme.typography.bodySmall)
                 row.progress?.let { LinearProgressIndicator(progress={it/100f},modifier=Modifier.fillMaxWidth()) }
                 if(row.diagnostics.isNotBlank()) Text(row.diagnostics,style=MaterialTheme.typography.bodySmall)
-                for(action in actions) OutlinedButton(onClick=action.run,modifier=Modifier.fillMaxWidth().heightIn(min=48.dp)) { Text(action.label) }
+                for(action in actions) OutlinedButton(onClick=hapticClick(action.run),modifier=Modifier.fillMaxWidth().heightIn(min=48.dp)) { Text(action.label) }
             }
         }
     }

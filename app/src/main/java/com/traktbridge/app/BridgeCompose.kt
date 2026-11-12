@@ -2,6 +2,8 @@ package com.traktbridge.app
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -49,11 +51,13 @@ fun BridgeTheme(accent:Int,content:@Composable ()->Unit) {
 fun BridgeHeader(accent:Int,onSearch:()->Unit) {
     BridgeTheme(accent) {
         Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background).padding(horizontal=20.dp,vertical=12.dp),verticalAlignment=Alignment.CenterVertically) {
+            Image(painterResource(R.drawable.bridge_logo),contentDescription=null,modifier=Modifier.size(46.dp))
+            Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Text("TRAKTBRIDGE",color=MaterialTheme.colorScheme.primary,fontSize=11.sp,fontWeight=FontWeight.Bold)
                 Text("Your viewing companion",color=MaterialTheme.colorScheme.onSurface,fontSize=20.sp,fontWeight=FontWeight.SemiBold,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)
             }
-            OutlinedButton(onClick=onSearch,modifier=Modifier.heightIn(min=48.dp)) { Text("Search") }
+            OutlinedButton(onClick=hapticClick(onSearch),modifier=Modifier.heightIn(min=48.dp)) { Text("Search") }
         }
     }
 }
@@ -67,12 +71,12 @@ fun BridgeHomeSummary(accent:Int,live:Boolean,pending:Int,weekly:String,onTracki
                 Text(weekly,style=MaterialTheme.typography.headlineMedium,fontWeight=FontWeight.Bold)
                 Text("Sampled this week",style=MaterialTheme.typography.bodyMedium)
                 Text(pending.toString()+" titles awaiting review or sync",style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
-                Button(onClick=onTracking,modifier=Modifier.fillMaxWidth()) { Text("Tracking settings") }
+                Button(onClick=hapticClick(onTracking),modifier=Modifier.fillMaxWidth()) { Text("Tracking settings") }
                 Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick=onReview,modifier=Modifier.weight(1f)) { Text("Review") }
-                    OutlinedButton(onClick=onDiscover,modifier=Modifier.weight(1f)) { Text("Discover") }
+                    OutlinedButton(onClick=hapticClick(onReview),modifier=Modifier.weight(1f)) { Text("Review") }
+                    OutlinedButton(onClick=hapticClick(onDiscover),modifier=Modifier.weight(1f)) { Text("Discover") }
                 }
-                OutlinedButton(onClick=onPlanner,modifier=Modifier.fillMaxWidth().heightIn(min=48.dp)) { Text("Plan a watch") }
+                OutlinedButton(onClick=hapticClick(onPlanner),modifier=Modifier.fillMaxWidth().heightIn(min=48.dp)) { Text("Plan a watch") }
             }
         }
     }
@@ -85,10 +89,10 @@ fun BridgeLibraryToolbar(accent:Int,summary:String,onSearch:()->Unit,onFilter:()
             Text("Your library",style=MaterialTheme.typography.headlineSmall,color=MaterialTheme.colorScheme.onSurface)
             Text(summary,color=MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.bodySmall)
             Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(6.dp)) {
-                Button(onClick=onSearch,modifier=Modifier.weight(1f)) { Text("Search") }
-                OutlinedButton(onClick=onFilter,modifier=Modifier.weight(1f)) { Text("Filters") }
+                Button(onClick=hapticClick(onSearch),modifier=Modifier.weight(1f)) { Text("Search") }
+                OutlinedButton(onClick=hapticClick(onFilter),modifier=Modifier.weight(1f)) { Text("Filters") }
             }
-            TextButton(onClick=onManual) { Text("Log a watch") }
+            TextButton(onClick=hapticClick(onManual)) { Text("Log a watch") }
         }
     }
 }
@@ -99,14 +103,14 @@ fun BridgeNavigation(accent:Int,labels:List<String>,selected:Int,wide:Boolean,on
         if(wide) {
             Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(8.dp),verticalArrangement=Arrangement.spacedBy(6.dp)) {
                 labels.forEachIndexed { index,label ->
-                    if(index==selected) Button(onClick={onSelect(index)},modifier=Modifier.fillMaxWidth().heightIn(min=52.dp)) { Text(label) }
-                    else OutlinedButton(onClick={onSelect(index)},modifier=Modifier.fillMaxWidth().heightIn(min=52.dp)) { Text(label) }
+                    if(index==selected) Button(onClick=hapticClick { onSelect(index) },modifier=Modifier.fillMaxWidth().heightIn(min=52.dp)) { Text(label) }
+                    else OutlinedButton(onClick=hapticClick { onSelect(index) },modifier=Modifier.fillMaxWidth().heightIn(min=52.dp)) { Text(label) }
                 }
             }
         } else {
             NavigationBar(containerColor=MaterialTheme.colorScheme.surface) {
                 labels.forEachIndexed { index,label ->
-                    NavigationBarItem(selected=index==selected,onClick={onSelect(index)},icon={ Text(listOf("⌂","▤","✓","▥","⚙")[index],fontSize=20.sp) },label={ Text(label,fontSize=11.sp,maxLines=2,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis) },alwaysShowLabel=true)
+                    NavigationBarItem(selected=index==selected,onClick=hapticClick { onSelect(index) },icon={ Text(listOf("⌂","▤","✓","▥","⚙")[index],fontSize=20.sp) },label={ Text(label,fontSize=11.sp,maxLines=2,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis) },alwaysShowLabel=true)
                 }
             }
         }
@@ -125,8 +129,8 @@ fun BridgeReviewSummary(accent:Int,pending:Int,onLog:()->Unit,onSync:()->Unit) {
             Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
                 Text("Review queue",style=MaterialTheme.typography.headlineSmall)
                 Text("$pending titles awaiting review or synchronization")
-                Button(onClick=onLog,modifier=Modifier.fillMaxWidth()) { Text("Log a watch manually") }
-                OutlinedButton(onClick=onSync,modifier=Modifier.fillMaxWidth()) { Text("Retry approved uploads") }
+                Button(onClick=hapticClick(onLog),modifier=Modifier.fillMaxWidth()) { Text("Log a watch manually") }
+                OutlinedButton(onClick=hapticClick(onSync),modifier=Modifier.fillMaxWidth()) { Text("Retry approved uploads") }
             }
         }
     }
@@ -141,7 +145,7 @@ fun BridgeTitleSummary(accent:Int,title:String,metadata:String,rating:Double,rel
             if(metadata.isNotBlank()) Text(metadata,style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
             if(rating in 0.1..10.0) AssistChip(onClick={},label={ Text("Trakt "+String.format(java.util.Locale.US,"%.1f",rating)+"/10") },enabled=false)
             if(release.isNotBlank()) Text("Release: "+release,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
-            if(hideSpoilers && !reveal) OutlinedButton(onClick={ reveal=true }) { Text("Reveal synopsis") }
+            if(hideSpoilers && !reveal) OutlinedButton(onClick=hapticClick { reveal=true }) { Text("Reveal synopsis") }
             else Text(overview.ifBlank { "No overview available" },style=MaterialTheme.typography.bodyLarge,color=MaterialTheme.colorScheme.onSurface)
         }
     }
@@ -178,7 +182,7 @@ fun BridgeEmptyState(accent:Int,title:String,detail:String,actionLabel:String,on
             Column(Modifier.padding(20.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
                 Text(title,style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.SemiBold)
                 Text(detail,style=MaterialTheme.typography.bodyMedium)
-                if(actionLabel.isNotBlank()) OutlinedButton(onClick=onAction) { Text(actionLabel) }
+                if(actionLabel.isNotBlank()) OutlinedButton(onClick=hapticClick(onAction)) { Text(actionLabel) }
             }
         }
     }
@@ -193,8 +197,8 @@ fun BridgeExpandedHome(accent:Int,live:Boolean,pending:Int,weekly:String,onTrack
                 Column(Modifier.padding(20.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
                     Text("Connected devices",style=MaterialTheme.typography.headlineSmall)
                     Text("See live playback across your paired phone, tablet and TV.",style=MaterialTheme.typography.bodyLarge)
-                    Button(onClick=onDevices,modifier=Modifier.fillMaxWidth()) { Text("Now Playing") }
-                    OutlinedButton(onClick=onTracking,modifier=Modifier.fillMaxWidth()) { Text("Device settings") }
+                    Button(onClick=hapticClick(onDevices),modifier=Modifier.fillMaxWidth()) { Text("Now Playing") }
+                    OutlinedButton(onClick=hapticClick(onTracking),modifier=Modifier.fillMaxWidth()) { Text("Device settings") }
                 }
             }
         }

@@ -15,12 +15,12 @@ fun BridgeLiveDashboard(accent:Int,rows:List<LiveUiSession>,status:String,onCont
         Column(Modifier.fillMaxWidth().padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
             Text(status,style=MaterialTheme.typography.titleMedium)
             Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick=onControls,modifier=Modifier.weight(1f).heightIn(min=48.dp)) { Text("Controls") }
-                Button(onClick=onContinue,modifier=Modifier.weight(1f).heightIn(min=48.dp)) { Text("Continue here") }
+                OutlinedButton(onClick=hapticClick(onControls),modifier=Modifier.weight(1f).heightIn(min=48.dp)) { Text("Controls") }
+                Button(onClick=hapticClick(onContinue),modifier=Modifier.weight(1f).heightIn(min=48.dp)) { Text("Continue here") }
             }
             if(rows.isEmpty()) {
                 Text("No fresh playback sessions. Start tracking on each paired device.")
-                OutlinedButton(onClick=onSettings) { Text("Device settings") }
+                OutlinedButton(onClick=hapticClick(onSettings)) { Text("Device settings") }
             }
             LazyColumn(Modifier.fillMaxWidth().heightIn(max=520.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
                 items(rows,key={it.key}) { row ->
