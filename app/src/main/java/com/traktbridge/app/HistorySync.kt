@@ -52,20 +52,24 @@ object HistorySync {
         return ids.optString("uuid").takeIf { it.isNotBlank() } ?: ids.optString("slug").takeIf { it.isNotBlank() } ?: error("No stable Trakt account identifier")
     }
     fun accountForApproval(context: Context): String = TraktAuth(context).authorized { account(it) }
-    private fun exists(token: String,r: WatchRecord): Boolean {
+    private enum class Reconciliation { ABSENT, EXACT, CONFLICT }
+    private fun exists(token: String,r: WatchRecord): Reconciliation {
         val target=utc(r.ended)
         val plural=if(r.matchType=="movie") "movies" else "episodes"
         val start=encode(target.minusSeconds(2).toString()); val end=encode(target.plusSeconds(2).toString())
         for(page in 1..100) {
             val response=call(token,"/sync/history/"+plural+"/"+r.traktId+"?start_at="+start+"&end_at="+end+"&page="+page+"&limit=100")
             val rows=JSONArray(response.text)
+            var malformed=false
             for(i in 0 until rows.length()) {
                 val o=rows.getJSONObject(i)
                 val id=o.optJSONObject(r.matchType)?.optJSONObject("ids")?.optLong("trakt") ?: 0
                 val watched=runCatching { Instant.parse(o.getString("watched_at")).truncatedTo(ChronoUnit.SECONDS) }.getOrNull()
-                if(id==r.traktId && watched==target) return true
+                if(id==r.traktId && watched==target) return Reconciliation.EXACT
+                if(id<=0 || watched==null) malformed=true
             }
-            if(rows.length()==0 || (response.pages!=null && page>=response.pages)) return false
+            if(malformed) return Reconciliation.CONFLICT
+            if(rows.length()==0 || (response.pages!=null && page>=response.pages)) return Reconciliation.ABSENT
         }
         error("History reconciliation exceeded page limit")
     }
@@ -83,7 +87,11 @@ object HistorySync {
                     state(if(expected=="uncertain") "uncertain" else "blocked","Different Trakt account. Reconnect original account.")
                     return@authorized true
                 }
-                if(exists(token,r)) { state("synced","Already present in Trakt history"); return@authorized true }
+                when(exists(token,r)) {
+                    Reconciliation.EXACT -> { state("synced","Already present in Trakt history"); return@authorized true }
+                    Reconciliation.CONFLICT -> { state(expected,"Remote history response could not be verified; no upload sent"); return@authorized false }
+                    Reconciliation.ABSENT -> Unit
+                }
                 if(expected=="uncertain") {
                     state("uncertain","Previous upload outcome unknown. No duplicate POST sent. Check Trakt and reconcile again.")
                     return@authorized true
