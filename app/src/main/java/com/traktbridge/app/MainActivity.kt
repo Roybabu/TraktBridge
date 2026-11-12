@@ -409,6 +409,7 @@ class MainActivity : ComponentActivity() {
         button("Check Trakt connection") { showAuth("Checking…"); auth.check { showAuth(it) } }
         button("Daily account history refresh") { configureAccountRefresh() }
         button("Refresh downloaded Trakt history") { lookup("Refreshing up to 2,000 remote watches",{ done -> TraktLibrary.refreshHistory(this,20,done) }) { n:Int -> Toast.makeText(this,n.toString()+" entries downloaded or updated",Toast.LENGTH_LONG).show() } }
+        button("My anime progress (local)") { animeLocalProgress() }
         button("Browse public AniList account") { publicAnimeList() }
         button("Trakt account library") { openTraktLibrary() }
         button("Clear downloaded Trakt history") { android.app.AlertDialog.Builder(this).setTitle("Clear remote history cache?").setMessage("Local viewing records and Trakt account history are unchanged.").setNegativeButton("Cancel",null).setPositiveButton("Clear") { _,_->TraktLibrary.clearCache(this) }.show() }
@@ -1109,6 +1110,28 @@ class MainActivity : ComponentActivity() {
         dialog.setOnDismissListener { handler.removeCallbacks(tick) }
         dialog.show(); handler.post(tick)
     }
+    private fun animeLocalProgress() {
+        val store=personalStore("anime_progress")
+        val rows=store.all.values.mapNotNull { runCatching { org.json.JSONObject(it.toString()) }.getOrNull() }.sortedBy { it.optString("title") }
+        choose("Local anime progress",rows.map { it.optString("title")+" • "+it.optInt("progress")+" episodes" }+listOf("Find anime to track")) { index ->
+            if(index==rows.size) animeSearch()
+            else {
+                val row=rows[index]
+                editAnimeProgress(row.optInt("id"),row.optString("title"),row.optInt("episodes"))
+            }
+        }
+    }
+    private fun editAnimeProgress(id:Int,title:String,episodes:Int) {
+        if(id<=0) return
+        val store=personalStore("anime_progress")
+        val old=runCatching { org.json.JSONObject(store.getString(id.toString(),"{}")) }.getOrDefault(org.json.JSONObject())
+        val field=EditText(this).apply { hint="Episodes completed"; inputType=android.text.InputType.TYPE_CLASS_NUMBER; setText(old.optInt("progress",0).toString()) }
+        android.app.AlertDialog.Builder(this).setTitle(title).setMessage("Local personal progress only. No anime account synchronization.").setView(field).setNegativeButton("Cancel",null).setNeutralButton("Remove") { _,_->store.edit().remove(id.toString()).apply() }.setPositiveButton("Save") { _,_->
+            val n=field.text.toString().toIntOrNull()
+            if(n!=null && n in 0..(if(episodes>0) episodes else 10000)) store.edit().putString(id.toString(),org.json.JSONObject().put("id",id).put("title",title).put("episodes",episodes).put("progress",n).toString()).apply()
+            else Toast.makeText(this,"Invalid episode count",Toast.LENGTH_LONG).show()
+        }.show()
+    }
     private fun publicAnimeList() {
         val field=EditText(this).apply { hint="AniList username"; setSingleLine(true) }
         android.app.AlertDialog.Builder(this).setTitle("Public AniList library").setMessage("Read-only public list. Private accounts require authentication; no viewing history is uploaded.").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Load") { _,_->
@@ -1126,7 +1149,7 @@ class MainActivity : ComponentActivity() {
             lookup("Searching anime",{ done -> AnimeCatalogue.search(q,done) }) { rows:List<AnimeResult> ->
                 choose("Anime matches",rows.map { it.english.ifBlank { it.romaji }+" • "+it.romaji }) { i ->
                     val a=rows[i]
-                    android.app.AlertDialog.Builder(this).setTitle(a.english.ifBlank { a.romaji }).setMessage(a.romaji+"\n"+a.native+"\nEpisodes: "+if(a.episodes>0) a.episodes.toString()+"\n\n"+a.description else "Unknown\n\n"+a.description).setNegativeButton("Close",null).setNeutralButton("MyAnimeList search") { _,_->startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://myanimelist.net/anime.php?q="+android.net.Uri.encode(a.romaji)))) }.setPositiveButton("AniList details") { _,_->startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://anilist.co/anime/"+a.id))) }.show()
+                    android.app.AlertDialog.Builder(this).setTitle(a.english.ifBlank { a.romaji }).setMessage(a.romaji+"\n"+a.native+"\nEpisodes: "+if(a.episodes>0) a.episodes.toString()+"\n\n"+a.description else "Unknown\n\n"+a.description).setNegativeButton("Close",null).setNeutralButton("Track locally") { _,_->editAnimeProgress(a.id,a.english.ifBlank { a.romaji },a.episodes) }.setPositiveButton("AniList details") { _,_->startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://anilist.co/anime/"+a.id))) }.show()
                 }
             }
         }.show()
