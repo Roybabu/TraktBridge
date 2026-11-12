@@ -494,6 +494,7 @@ class MainActivity : Activity() {
             }
             1,2 -> {
                 section(dashboard,if(tab==1) "Viewing history" else "Needs your review")
+                dashboard.addView(actionButton("Log a watch manually") { manualLog() })
                 dashboard.addView(actionButton("Refresh") { refreshHistory() })
                 if(tab==2) { dashboard.addView(actionButton("Review recent app activity") { reviewUsage() }); dashboard.addView(actionButton("Retry approved sync queue") { HistorySync.schedule(this); refreshHistory() }) }
                 if(tab==1) {
@@ -563,6 +564,22 @@ class MainActivity : Activity() {
             }
             android.app.AlertDialog.Builder(this).setTitle("Upcoming episodes").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
         }
+    }
+    private fun manualLog() {
+        val field=EditText(this).apply { hint="Movie or episode title"; setSingleLine(true) }
+        val box=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(8),dp(16),dp(8)); addView(field); addView(txt("Choose the date and time you finished. No measured watch time will be added.",13,muted)) }
+        android.app.AlertDialog.Builder(this).setTitle("Manual watch log").setView(box).setNegativeButton("Cancel",null).setPositiveButton("Choose date") { _,_->
+            val title=field.text.toString().trim()
+            if(title.isBlank()) return@setPositiveButton
+            val now=java.time.LocalDateTime.now()
+            android.app.DatePickerDialog(this,{ _,y,month,day ->
+                android.app.TimePickerDialog(this,{ _,hour,minute ->
+                    val timestamp=java.time.LocalDateTime.of(y,month+1,day,hour,minute).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+                    if(timestamp>System.currentTimeMillis()) Toast.makeText(this,"Choose a past time",Toast.LENGTH_LONG).show()
+                    else { val id=history.addManualLog("manual",title,timestamp); showTab(2); history.record(id)?.let { identify(it) } }
+                },now.hour,now.minute,true).show()
+            },now.year,now.monthValue-1,now.dayOfMonth).show()
+        }.show()
     }
     private fun liveInspector() {
         val body=TextView(this).apply { setPadding(dp(16),dp(12),dp(16),dp(12)); setTextIsSelectable(true) }

@@ -199,6 +199,16 @@ class WatchHistory(context: Context): SQLiteOpenHelper(context.applicationContex
     fun cancelQueued(id: String) {
         writableDatabase.update("viewing",ContentValues().apply { put("status","reviewed"); put("sync_account",""); put("sync_message","") },"id=? AND status IN ('queued','blocked')",arrayOf(id))
     }
+    fun addManualLog(source:String,title:String,ended:Long):String {
+        require(title.isNotBlank() && ended>0 && ended<=System.currentTimeMillis())
+        val id="manual:"+UUID.randomUUID()
+        val values=ContentValues().apply {
+            put("id",id); put("source",source); put("title",title); put("subtitle","Manual watch log; sampled time unknown")
+            put("started",ended); put("ended",ended); put("watched",0L); put("duration",0L); put("position",-1L); put("status","pending"); put("notified",1)
+        }
+        check(writableDatabase.insertWithOnConflict("viewing",null,values,SQLiteDatabase.CONFLICT_ABORT)!=-1L)
+        return id
+    }
     fun addManualActivity(source: String,title: String,started: Long,ended: Long): String {
         require(title.isNotBlank() && ended>=started && started>0)
         val id="usage:"+source+":"+started+":"+ended
