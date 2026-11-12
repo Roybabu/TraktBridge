@@ -116,3 +116,6 @@ Interactive platform filters, monthly annual recap bars and calendar drill-downs
 
 ## v0.86.0 development scope
 Regional where-to-watch lookup opens exact Trakt IDs or a user-selected country/title search on JustWatch; it does not assert live availability or subscription entitlement. Foreground startup failures and listener lifecycle cleanup are handled without deleting history. Device background-service soak testing and live provider validation remain pending.
+
+## v0.87.0
+Validated internal navigation shortcuts, exact Netflix/YouTube ID launch links and adaptive polling when inactive. Provider links require user action; no autoplay or availability guarantee.

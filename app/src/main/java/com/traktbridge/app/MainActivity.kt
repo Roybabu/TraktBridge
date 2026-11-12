@@ -382,6 +382,7 @@ class MainActivity : ComponentActivity() {
         button("Personal collections") { collections() }
         button("Favorite titles") { favorites() }
         button("Automation shortcuts") { automationShortcuts() }
+        button("Universal playback shortcuts") { playbackShortcut() }
         button("Cancel all episode reminders") { prefs.edit().putBoolean("episode_reminders",false).apply(); EpisodeReminders.cancelAll(this); Toast.makeText(this,"Reminders cancelled",Toast.LENGTH_SHORT).show() }
         button("Privacy mode • stop tracking now") { privacyMode() }
         root.addView(Switch(this).apply { text="Protect app screen from screenshots and recent-app previews"; isChecked=prefs.getBoolean("secure_screen",false); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("secure_screen",checked).apply(); applyScreenProtection() } })
@@ -816,6 +817,18 @@ class MainActivity : ComponentActivity() {
         val url="https://trakt.tv/search/trakt/"+id+"?id_type="+type
         runCatching { startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse(url))) }.onFailure { Toast.makeText(this,"No browser available",Toast.LENGTH_LONG).show() }
     }
+    private fun playbackShortcut() {
+        val field=EditText(this).apply { hint="Netflix title ID or YouTube video ID"; setSingleLine(true) }
+        choose("Playback shortcut",listOf("Netflix","YouTube","Open installed player")) { i ->
+            if(i==2) { openPlaybackApp(PlayerRules.apps.values.toList()); return@choose }
+            val source=if(i==0) "com.netflix.mediaclient" else "com.google.android.youtube"
+            android.app.AlertDialog.Builder(this).setTitle("Open exact provider title").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Open") { _,_->
+                val url=PlaybackShortcuts.providerLink(source,field.text.toString().trim())
+                if(url==null) Toast.makeText(this,"Invalid provider ID",Toast.LENGTH_LONG).show()
+                else runCatching { startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse(url))) }.onFailure { Toast.makeText(this,"No compatible app",Toast.LENGTH_LONG).show() }
+            }.show()
+        }
+    }
     private fun openPlaybackApp(sources:List<String>) {
         val installed=sources.distinct().mapNotNull { pkg -> packageManager.getLaunchIntentForPackage(pkg)?.let { pkg to it } }
         if(installed.isEmpty()) { Toast.makeText(this,"No recorded playback app is installed or launchable",Toast.LENGTH_LONG).show(); return }
@@ -1018,11 +1031,13 @@ class MainActivity : ComponentActivity() {
         val uri=i.data ?: return
         if(i.action!=Intent.ACTION_VIEW || uri.scheme!="traktbridge" || uri.host!="shortcut") return
         i.data=null
-        when(uri.lastPathSegment) {
+        when(PlaybackShortcuts.shortcut(uri.toString())) {
             "home" -> showTab(0)
             "review" -> showTab(2)
             "manual" -> manualLog()
             "tracking" -> showTab(4)
+            "library" -> showTab(1)
+            "activity" -> showTab(3)
         }
     }
     private fun localAssistant() {
