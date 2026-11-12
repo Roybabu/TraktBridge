@@ -18,7 +18,8 @@ class PlaybackListener : NotificationListenerService() {
     private var lastLearningCheck=0L
     private var lastTick=0L
     private val serverSampler by lazy { ServerSampler(applicationContext) }
-    private val retained=mutableMapOf<String,Pair<String,String>>()
+    private data class RetainedTitle(val title:String,val detail:String,val observed:Long)
+    private val retained=mutableMapOf<String,RetainedTitle>()
     private val mediaTitles=mutableMapOf<String,Pair<Long,String>>()
     override fun onNotificationPosted(sbn: android.service.notification.StatusBarNotification?) {
         val n=sbn ?: return
@@ -102,27 +103,27 @@ class PlaybackListener : NotificationListenerService() {
             }
             val playing=phase==PlaybackPhase.PLAYING
             val hint=if(playing) TitleAccessibility.hint(this,c.packageName,now-120000,now) else null
-            val prior=retained[key]
+            val prior=retained[key]?.takeIf { tick-it.observed in 0..30000 }
             val metaDetail=m?.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE).orEmpty()
             val recognition=RecognitionEngine.fuse(listOfNotNull(
                 Evidence(direct,metaDetail,"media",85),
-                Evidence(note,"","notification",70),
-                hint?.let { Evidence(it.first,it.second,"accessibility",65) }
+                Evidence(note.takeIf { selected.count { other -> other.packageName==c.packageName }==1 }.orEmpty(),"","notification",70),
+                hint?.takeIf { selected.count { other -> other.packageName==c.packageName }==1 }?.let { Evidence(it.first,it.second,"accessibility",65) }
             ))
             val safeRecognition=recognition?.takeIf { !it.conflict && it.score>=65 }
             if(recognition?.conflict==true) retained.remove(key)
-            val title=if(recognition?.conflict==true) "" else safeRecognition?.title ?: prior?.first.orEmpty()
-            val subtitle=if(recognition?.conflict==true) "" else safeRecognition?.detail?.takeIf { it.isNotBlank() } ?: prior?.takeIf { it.first==title }?.second.orEmpty()
+            val title=if(recognition?.conflict==true) "" else safeRecognition?.title ?: prior?.title.orEmpty()
+            val subtitle=if(recognition?.conflict==true) "" else safeRecognition?.detail?.takeIf { it.isNotBlank() } ?: prior?.takeIf { it.title==title }?.detail.orEmpty()
             if(playing && recognition!=null) DebugTrace.event("recognition","package="+c.packageName+" score="+recognition.score+" sources="+recognition.sources.joinToString(",")+" conflict="+recognition.conflict)
-            if(playing && title.isNotBlank()) retained[key]=title to subtitle
+            if(playing && safeRecognition!=null) retained[key]=RetainedTitle(title,subtitle,tick)
             if(p?.state in setOf(PlaybackState.STATE_STOPPED,PlaybackState.STATE_NONE,PlaybackState.STATE_ERROR)) retained.remove(key)
             val mediaDuration=m?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L
             val mediaPosition=PlaybackPosition.sanitize(p?.position ?: -1L,mediaDuration)
-            val screen=if(playing && mediaPosition<0) TitleAccessibility.timing(this,c.packageName,title,now) else null
+            val screen=if(playing && mediaPosition<0 && title.isNotBlank() && selected.count { it.packageName==c.packageName }==1) TitleAccessibility.timing(this,c.packageName,title,now) else null
             val duration=screen?.duration ?: mediaDuration
             val position=screen?.position ?: mediaPosition
             if(playing && p!=null && p.position>=0 && position<0) DebugTrace.event("progress","package="+c.packageName+" rejected position without valid runtime")
-            samples.add(WatchSample(key,c.packageName,title,subtitle,duration,position,playing,phase,if(screen!=null) "screen" else if(mediaPosition>=0) "media" else "unknown",p?.playbackSpeed?.takeIf { it>0 } ?: 1f))
+            if(recognition?.conflict!=true) samples.add(WatchSample(key,c.packageName,title,subtitle,duration,position,playing,phase,if(screen!=null) "screen" else if(mediaPosition>=0) "media" else "unknown",p?.playbackSpeed?.takeIf { it>0 } ?: 1f))
             rows.put(JSONObject().apply {
                 put("package", c.packageName)
                 put("title", title)
@@ -143,7 +144,7 @@ class PlaybackListener : NotificationListenerService() {
         val remotePackages=remote.map { when(it.source) { "server.plex"->"com.plexapp.android"; "server.jellyfin"->"org.jellyfin.mobile"; "server.emby"->"com.mb.android"; "server.kodi"->"org.xbmc.kodi"; else->"" } }.toSet()
         val local=samples.filterNot { it.source in remotePackages }.groupBy { it.source }.flatMap { (_,group) ->
             val playingRows=group.filter { it.playing }
-            if(playingRows.size>1) listOf(playingRows.maxBy { (if(it.title.isNotBlank()) 4 else 0)+(if(it.position>=0) 2 else 0) }) else group
+            if(playingRows.size>1) emptyList() else group
         }
         history.ingest(local+remote, SystemClock.elapsedRealtime(), System.currentTimeMillis())
         prefs.edit().putString("sessions", rows.toString()).putInt("session_count",sessions.size).apply {
