@@ -21,7 +21,9 @@ object RecognitionEngine {
     fun normalized(value:String):String=Normalizer.normalize(value,Normalizer.Form.NFKC).lowercase(Locale.ROOT).replace(Regex("[^\\p{L}\\p{N}]+")," ").trim()
     fun query(value:String):String=TitleNormalizer.suggestedQuery(value).replace(Regex("\\s*\\((19\\d{2}|20\\d{2})\\)\\s*$"),"").trim()
     fun fuse(input:List<Evidence>):Recognition? {
-        val usable=input.filter { it.source.isNotBlank() && it.weight in 1..100 && it.title.length<=512 && ContentRecognition.usable(it.title) && normalized(query(it.title)).isNotBlank() }.groupBy { it.source }.values.map { rows -> rows.maxBy { it.weight } }
+        val candidates=input.filter { it.source.isNotBlank() && it.weight in 1..100 && it.title.length<=512 && ContentRecognition.usable(it.title) && normalized(query(it.title)).isNotBlank() }.take(32)
+        val duplicateConflict=candidates.groupBy { it.source }.values.any { rows -> rows.map { normalized(query(it.title)) }.distinct().size>1 || rows.mapNotNull { episodeOf(it.title+" "+it.detail) }.distinct().size>1 }
+        val usable=candidates.groupBy { it.source }.values.map { rows -> rows.maxBy { it.weight } }
         if(usable.isEmpty()) return null
         val groups=usable.groupBy { normalized(query(it.title)) }.values.sortedByDescending { rows -> rows.maxOf { it.weight }+((rows.size-1)*12) }
         val top=groups.first()
@@ -29,7 +31,8 @@ object RecognitionEngine {
         val evidenceText=top.map { it.title+" "+it.detail }
         val ambiguous=evidenceText.any { episode.containsMatchIn(it) && episodeOf(it)==null }
         val episodes=evidenceText.mapNotNull { episodeOf(it) }.distinct()
-        val conflict=groups.size>1 || episodes.size>1 || ambiguous
+        val years=top.mapNotNull { year.find(it.title)?.value }.distinct()
+        val conflict=duplicateConflict || groups.size>1 || episodes.size>1 || ambiguous || years.size>1
         val detail=if(episodes.size==1 && !ambiguous) "S"+episodes.single().season+" E"+episodes.single().episode else best.detail.takeIf { episodes.size<2 && !ambiguous }.orEmpty()
         val score=(top.maxOf { it.weight }+(top.size-1)*12-(if(conflict) 25 else 0)).coerceIn(0,if(conflict) 49 else 100)
         return Recognition(best.title,detail,score,top.map { it.source },conflict)
