@@ -171,14 +171,17 @@ class WatchHistory(context: Context): SQLiteOpenHelper(context.applicationContex
         }
         return count
     }
-    fun enqueue(id: String, account: String): Boolean {
+    fun enqueue(id: String, account: String, rewatch:Boolean=false, expectedTitle:Long=0, expectedType:String="", expectedEnd:Long=0): Boolean {
         require(account.isNotBlank())
         val db=writableDatabase
         db.beginTransaction()
         try {
             val r=record(id) ?: return false
             if(r.status!="reviewed" || r.traktId<=0 || r.matchType !in setOf("movie","episode")) return false
-            val exists=db.rawQuery("SELECT 1 FROM viewing WHERE id<>? AND match_type=? AND trakt_id=? AND status IN ('queued','uncertain','blocked','synced') AND sync_account=? LIMIT 1",arrayOf(id,r.matchType,r.traktId.toString(),account)).use { it.moveToFirst() }
+            if(expectedTitle>0 && (r.traktId!=expectedTitle || r.matchType!=expectedType || r.ended!=expectedEnd)) return false
+            val sql="SELECT 1 FROM viewing WHERE id<>? AND match_type=? AND trakt_id=? AND sync_account=? AND "+if(rewatch) "(status IN ('queued','uncertain','blocked') OR (status='synced' AND ABS(ended-?)<120000)) LIMIT 1" else "status IN ('queued','uncertain','blocked','synced') LIMIT 1"
+            val args=if(rewatch) arrayOf(id,r.matchType,r.traktId.toString(),account,r.ended.toString()) else arrayOf(id,r.matchType,r.traktId.toString(),account)
+            val exists=db.rawQuery(sql,args).use { it.moveToFirst() }
             if(exists) return false
             val ok=db.update("viewing",ContentValues().apply { put("status","queued"); put("sync_account",account); put("sync_message","Approved; waiting for network") },"id=? AND status='reviewed'",arrayOf(id))==1
             db.setTransactionSuccessful()

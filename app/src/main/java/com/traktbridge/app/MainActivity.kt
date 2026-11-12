@@ -1329,7 +1329,7 @@ class MainActivity : ComponentActivity() {
     }
     private fun showSessions(g:ViewingTitle) {
         val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
-        body.addView(txt("Original viewing sessions are retained. One confirmed title appears once in history.",14,muted))
+        body.addView(txt("Original viewing sessions are retained. Synced viewing events: "+g.sessions.count { it.status=="synced" },14,muted))
         g.sessions.forEach { recordCard(body,it,true,g.confirmed || g.queued) }
         android.app.AlertDialog.Builder(this).setTitle(g.representative.matchLabel.ifBlank { g.representative.title.ifBlank { "Viewing sessions" } }).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close") { _,_->refreshHistory() }.show()
     }
@@ -1356,7 +1356,7 @@ class MainActivity : ComponentActivity() {
             if(r.id.startsWith("import:") && r.status=="pending") card.addView(actionButton("Reconcile with local history") { reconcileImported(r) })
             if (r.status in setOf("pending","reviewed")) card.addView(Button(this).apply { text = if (r.traktId > 0) "Change Trakt match" else "Identify on Trakt"; setOnClickListener { identify(r) } })
             if (r.traktId > 0 && r.status in setOf("pending","reviewed")) card.addView(Button(this).apply { text = "Remove Trakt match"; setOnClickListener { history.clearMatch(r.id); refreshHistory() } })
-            if (r.status == "reviewed" && r.traktId > 0 && !completionAlreadyRecorded) card.addView(Button(this).apply { text = "Mark watched on Trakt"; setOnClickListener { approveUpload(r) } })
+            if (r.status == "reviewed" && r.traktId > 0) card.addView(Button(this).apply { text = if(completionAlreadyRecorded) "Confirm separate rewatch" else "Mark watched on Trakt"; setOnClickListener { approveUpload(r,completionAlreadyRecorded) } })
             if (r.status in setOf("queued","uncertain","blocked","synced")) card.addView(TextView(this).apply { text = "Sync: " + r.status + " — " + history.syncMessage(r.id) })
             if (r.status == "blocked") card.addView(Button(this).apply { text = "Retry blocked upload"; setOnClickListener { history.retryBlocked(r.id); HistorySync.schedule(this@MainActivity); refreshHistory() } })
             if (r.status in setOf("queued","blocked")) card.addView(Button(this).apply { text = "Cancel queued upload"; setOnClickListener { history.cancelQueued(r.id); refreshHistory() } })
@@ -1407,8 +1407,8 @@ class MainActivity : ComponentActivity() {
             dialog.show()
         }
     }
-    private fun approveUpload(r: WatchRecord) {
-        android.app.AlertDialog.Builder(this).setTitle("Mark as fully watched?")
+    private fun approveUpload(r: WatchRecord,rewatch:Boolean=false) {
+        android.app.AlertDialog.Builder(this).setTitle(if(rewatch) "Confirm a separate completed rewatch?" else "Mark as fully watched?")
             .setMessage(r.matchLabel + "\nThis adds a completed watch to Trakt at the recorded end time. Only confirm if you finished the movie or episode. Partial viewing stays local. For app-activity records the end time is only the app exit time.")
             .setNegativeButton("Cancel",null).setPositiveButton("Verify account") { _,_ ->
                 Thread {
@@ -1418,7 +1418,7 @@ class MainActivity : ComponentActivity() {
                             android.app.AlertDialog.Builder(this).setTitle("Approve upload to connected Trakt account?")
                                 .setMessage(r.matchLabel + "\nAccount ID: " + accountId + "\nApproved records will retry when online.")
                                 .setNegativeButton("Cancel",null).setPositiveButton("Approve and sync") { _,_ ->
-                                    if(history.enqueue(r.id,accountId)) HistorySync.schedule(this) else Toast.makeText(this,"This title already has a completion or pending upload for this account.",Toast.LENGTH_LONG).show()
+                                    if(history.enqueue(r.id,accountId,rewatch,r.traktId,r.matchType,r.ended)) HistorySync.schedule(this) else Toast.makeText(this,"This title already has a completion or pending upload for this account.",Toast.LENGTH_LONG).show()
                                     refreshHistory()
                                 }.show()
                         },{ android.app.AlertDialog.Builder(this).setTitle("Account verification required").setMessage("Connect to Trakt and verify the account online before approving uploads.").setPositiveButton("OK",null).show() })
