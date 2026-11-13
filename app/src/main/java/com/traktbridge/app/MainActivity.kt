@@ -672,6 +672,8 @@ class MainActivity : ComponentActivity() {
                 }
             }
             "tracking" -> {
+                heading("YouTube testing")
+                settingRow(group ?: root,"YouTube detection tester","Start a test and compare video title sources") { youtubeDetectionTester() }
                 heading("Tracking preferences")
                 settingRow(group ?: root,"Guided tracking setup","Walk through app selection and Android permissions") { setupGuide() }
                 button("Completion review threshold") { configureCompletionThreshold() }
@@ -985,7 +987,6 @@ class MainActivity : ComponentActivity() {
                 }
                 supportRow("Diagnostics","Live recognition, recording, technical status and cleanup") {
                     supportMenu("Diagnostics",listOf(
-                        Triple("YouTube detection tester","Compare title sources on this device") { youtubeDetectionTester() },
                         Triple("Live recognition","Inspect current playback detection") { liveInspector() },
                         Triple("Diagnostic recorder","Open the diagnostic recording tool") { startActivity(Intent(this,DebugActivity::class.java)) },
                         Triple("Technical status","Refresh and view detailed diagnostic information") {
