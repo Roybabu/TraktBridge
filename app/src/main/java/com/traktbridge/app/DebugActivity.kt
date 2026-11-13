@@ -24,7 +24,6 @@ class DebugActivity: Activity() {
             text="Record diagnostic events"; isChecked=DebugTrace.enabled(this@DebugActivity)
             setOnCheckedChangeListener { _,checked -> DebugTrace.setEnabled(this@DebugActivity,checked); refresh() }
         })
-        root.addView(Switch(this).apply { text="Player Inspector (control IDs only)"; isChecked=prefs.getBoolean("player_inspector",false); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("player_inspector",checked).apply(); refresh() } })
         button("Refresh diagnostic report") { refresh() }
         button("Recover playback sampling") {
             if(!prefs.getBoolean("enabled",false) || !TrackingRecovery.listenerGranted(this)) { Toast.makeText(this,"Enable tracking and grant notification access first",Toast.LENGTH_LONG).show(); return@button }
