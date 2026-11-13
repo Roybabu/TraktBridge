@@ -91,6 +91,7 @@ class TitleAccessibility: AccessibilityService() {
         }
         walk(root,0)
         player=ContentRecognition.playerContext(labels,player)
+        if(pkg==YouTubeTitleProbe.PACKAGE) YouTubeProbeState.observeScreen(now,labels,player)
         val segment=SegmentDetection.screen(labels,player)
         prefs.edit().putString("segment:"+pkg,segment.name).putLong("segment_time:"+pkg,now).apply()
         val hint=ContentRecognition.detect(pkg,labels,player)
