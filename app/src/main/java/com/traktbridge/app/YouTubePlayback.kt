@@ -2,6 +2,13 @@ package com.traktbridge.app
 
 /** YouTube-only policy: fail closed when regular playback cannot be established. */
 object YouTubePlayback {
+    const val PACKAGE="com.google.android.youtube"
+    private val chrome=setOf("youtube","youtube premium","home","shorts","subscriptions","you","library","search","share","subscribe","comments","description","more","show more","skip ad","sponsored","advertisement","like","dislike","next","previous")
+    fun clean(raw:String):String? {
+        val title=raw.trim()
+        return title.takeIf { DetectionProfiles.validMetadata(it) && it.lowercase(java.util.Locale.ROOT) !in chrome && !it.contains('\n') }
+    }
+
     enum class Mode { REGULAR, SHORTS, ADVERTISEMENT, UNKNOWN }
     fun mode(ids:Collection<String>,segment:PlaybackSegment):Mode {
         if(segment==PlaybackSegment.ADVERTISEMENT || ids.any { it in setOf("ad_label","ad_badge","skip_ad_button","ad_skip_button","ad_countdown","ad_pod_text") }) return Mode.ADVERTISEMENT
@@ -14,7 +21,7 @@ object YouTubePlayback {
         if(uri.scheme!="https" || uri.host !in setOf("youtube.com","www.youtube.com","m.youtube.com")) return Mode.UNKNOWN
         return when {
             uri.path.orEmpty().startsWith("/shorts/") -> Mode.SHORTS
-            uri.path=="/watch" && PlaybackHandoff.extract(YouTubeTitleProbe.PACKAGE,raw).isNotEmpty() -> Mode.REGULAR
+            uri.path=="/watch" && PlaybackHandoff.extract(PACKAGE,raw).isNotEmpty() -> Mode.REGULAR
             else -> Mode.UNKNOWN
         }
     }
@@ -38,9 +45,9 @@ object YouTubePlayback {
     fun allowContinuation(screen:Mode,uri:Mode,previousIdentity:String?,identity:String):Boolean =
         permitted(screen,uri) || (screen==Mode.UNKNOWN && uri==Mode.UNKNOWN && identity.isNotBlank() && previousIdentity==identity)
     fun recognition(direct:String,notes:List<String>,detail:String):Recognition? {
-        val title=YouTubeTitleProbe.clean(direct)
+        val title=clean(direct)
         if(title!=null) return Recognition(title,detail,85,listOf("media"),false)
-        val note=notes.mapNotNull(YouTubeTitleProbe::clean).distinct().singleOrNull() ?: return null
+        val note=notes.mapNotNull(::clean).distinct().singleOrNull() ?: return null
         return Recognition(note,"",65,listOf("notification"),false)
     }
 }
