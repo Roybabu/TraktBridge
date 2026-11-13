@@ -451,12 +451,54 @@ class MainActivity : ComponentActivity() {
         })
     }
 
+    private lateinit var settingsStatus:TextView
+    private fun settingsIcon(name:String):android.view.View {
+        return object:android.view.View(this@MainActivity) {
+            private val paint=android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color=violet; style=android.graphics.Paint.Style.STROKE; strokeWidth=1.8f; strokeCap=android.graphics.Paint.Cap.ROUND; strokeJoin=android.graphics.Paint.Join.ROUND }
+            override fun onDraw(canvas:android.graphics.Canvas) {
+                super.onDraw(canvas)
+                canvas.save()
+                canvas.translate(width/2f,height/2f)
+                canvas.scale(dp(22)/24f,dp(22)/24f)
+                canvas.translate(-12f,-12f)
+                fun line(x:Float,y:Float,u:Float,v:Float)=canvas.drawLine(x,y,u,v,paint)
+                fun rect(l:Float,t:Float,r:Float,b:Float)=canvas.drawRoundRect(l,t,r,b,2f,2f,paint)
+                fun circle(x:Float,y:Float,r:Float)=canvas.drawCircle(x,y,r,paint)
+                fun path(vararg points:Float) { val p=android.graphics.Path();p.moveTo(points[0],points[1]);for(i in 2 until points.size step 2)p.lineTo(points[i],points[i+1]);canvas.drawPath(p,paint) }
+                when(name) {
+                    "account"->{circle(12f,8f,4f);canvas.drawArc(4f,13f,20f,25f,180f,180f,false,paint)}
+                    "tracking"->{rect(3f,4f,21f,20f);path(10f,8f,16f,12f,10f,16f,10f,8f)}
+                    "devices"->{rect(2f,4f,16f,15f);line(9f,15f,9f,20f);line(5f,20f,13f,20f);rect(15f,9f,22f,22f)}
+                    "appearance"->{circle(12f,12f,9f);path(12f,3f,12f,21f);line(12f,7f,18f,7f);line(12f,12f,21f,12f);line(12f,17f,18f,17f)}
+                    "library"->{rect(3f,4f,7f,20f);rect(9f,4f,13f,20f);path(15f,5f,19f,4f,22f,19f,18f,20f,15f,5f)}
+                    "privacy"->{path(12f,2f,21f,6f,20f,15f,16f,20f,12f,22f,8f,20f,4f,15f,3f,6f,12f,2f);path(8f,12f,11f,15f,16f,9f)}
+                    "data"->{rect(3f,4f,21f,20f);line(3f,9f,21f,9f);line(9f,15f,15f,15f)}
+                    "advanced"->{circle(12f,12f,9f);line(12f,11f,12f,17f);circle(12f,7f,0.6f)}
+                    else->{circle(12f,12f,8f);path(9f,12f,12f,15f,16f,9f)}
+                }
+                canvas.restore()
+            }
+        }.apply { background=rounded((violet and 0x00ffffff) or 0x22000000,12); importantForAccessibility=android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO }
+    }
+    private fun updateSettingsStatus() {
+        if(!::settingsStatus.isInitialized) return
+        val enabled=prefs.getBoolean("enabled",false)
+        val selected=PlaybackDetectors.selected(prefs.getStringSet("allowed",emptySet()).orEmpty()).isNotEmpty()
+        val connected=PlaybackListener.liveConnected()
+        settingsStatus.text=when { !enabled->"Tracking paused"; !selected->"Choose YouTube to start tracking"; !connected->"Playback listener disconnected"; else->"YouTube tracking active" }
+        settingsStatus.setTextColor(if(enabled && selected && connected) violet else muted)
+    }
     private fun buildSettingsCategories() {
         val definitions=SettingsCatalog.categories
         settingsOverview=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
         settingsRoot.addView(settingsOverview)
         settingsOverview.addView(txt("Settings",28,ink,true))
         settingsOverview.addView(txt("Manage your viewing experience",14,muted))
+        val status=panel(settingsOverview).apply { setPadding(dp(14),dp(12),dp(14),dp(12)) }
+        settingsStatus=txt("",15,violet,true)
+        status.addView(settingsStatus)
+        status.addView(txt(if(auth.hasConnection()) "Trakt account connected" else "Trakt account not connected",13,muted))
+        updateSettingsStatus()
         val sections=listOf(
             "Account & playback" to listOf("account","tracking","devices"),
             "Personalization" to listOf("appearance","library"),
@@ -467,15 +509,17 @@ class MainActivity : ComponentActivity() {
             val card=settingGroup(settingsOverview,title)
             for(id in ids) {
                 val category=definitions.first { it.id==id }
-                settingRow(card,category.title,category.description) { showSettingsCategory(category.id) }
+                settingRow(card,category.title,category.description,icon=id) { showSettingsCategory(category.id) }
             }
         }
+        val version=runCatching { packageManager.getPackageInfo(packageName,0).versionName }.getOrNull().orEmpty()
+        settingsOverview.addView(txt("TraktBridge • "+version,12,muted).apply { gravity=android.view.Gravity.CENTER; setPadding(0,dp(10),0,dp(12)) })
         for(category in definitions) {
             val page=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; visibility=android.view.View.GONE }
             settingsRoot.addView(page)
             settingsGroups[category.id]=page
-            page.addView(TextView(this).apply { text="‹ All settings"; contentDescription="All settings"; setTextColor(violet); textSize=15f; isFocusable=true; isClickable=true; minimumHeight=dp(adaptiveLayout.touch); gravity=android.view.Gravity.CENTER_VERTICAL; setOnClickListener { showSettingsCategory("") } })
-            page.addView(txt(category.title,26,ink,true))
+            page.addView(TextView(this).apply { text="‹  Settings"; contentDescription="All settings"; setTextColor(violet); textSize=16f; isFocusable=true; isClickable=true; minimumHeight=dp(adaptiveLayout.touch); gravity=android.view.Gravity.CENTER_VERTICAL; setOnClickListener { showSettingsCategory("") } })
+            page.addView(txt(category.title,28,ink,true))
             page.addView(txt(category.description,14,muted))
         }
         for(category in definitions) populateSettings(category.id,requireNotNull(settingsGroups[category.id]))
@@ -485,46 +529,51 @@ class MainActivity : ComponentActivity() {
         settingsCategory=id.takeIf { it in settingsGroups }.orEmpty()
         settingsOverview.visibility=if(settingsCategory.isEmpty()) android.view.View.VISIBLE else android.view.View.GONE
         settingsGroups.forEach { (key,page) -> page.visibility=if(key==settingsCategory) android.view.View.VISIBLE else android.view.View.GONE }
+        updateSettingsStatus()
         if(settingsCategory in setOf("devices","tracking","privacy")) refreshSettingsState(settingsCategory)
         if(resetScroll) settingsPage.scrollTo(0,0)
         if(tvMode && tab==4) settingsPage.post { if(tab==4) TvFocus.firstContent(settingsPage) }
     }
 
     private fun settingGroup(parent:LinearLayout,title:String):LinearLayout {
-        parent.addView(txt(title,13,violet,true).apply { setPadding(dp(4),dp(12),dp(4),dp(6)) })
-        return panel(parent).apply { setPadding(dp(12),dp(4),dp(12),dp(4)) }
+        parent.addView(txt(title,13,violet,true).apply { setPadding(dp(4),dp(14),dp(4),dp(8)) })
+        return panel(parent).apply { setPadding(dp(10),dp(2),dp(10),dp(2)) }
     }
-    private fun settingRow(parent:LinearLayout,title:String,detail:String="",action:()->Unit) {
+    private fun settingDivider(parent:LinearLayout) {
+        if(parent.childCount>0) parent.addView(android.view.View(this).apply { setBackgroundColor(0x167F7F7F) },LinearLayout.LayoutParams(-1,dp(1)).apply { marginStart=dp(4); marginEnd=dp(4) })
+    }
+    private fun settingRow(parent:LinearLayout,title:String,detail:String="",action:()->Unit) = settingRow(parent,title,detail,null,action)
+    private fun settingRow(parent:LinearLayout,title:String,detail:String="",icon:String?,action:()->Unit) {
         val row=LinearLayout(this).apply {
             orientation=LinearLayout.HORIZONTAL; gravity=android.view.Gravity.CENTER_VERTICAL
             isFocusable=true; isClickable=true; contentDescription=if(detail.isBlank()) title else "$title. $detail"
-            minimumHeight=dp(adaptiveLayout.touch); setPadding(dp(4),dp(10),dp(4),dp(10))
-            background=if(tvMode) TvFocus.background(this@MainActivity,surface,violet) else android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x227F73FF),rounded(surface,8),null)
+            minimumHeight=dp(adaptiveLayout.touch); setPadding(dp(6),dp(12),dp(6),dp(12))
+            background=if(tvMode) TvFocus.background(this@MainActivity,surface,violet) else android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf((violet and 0x00ffffff) or 0x22000000),rounded(surface,10),null)
             setOnClickListener { BridgeHaptics.tap(this); action() }
         }
-        val text=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; addView(txt(title,16,ink,true)); if(detail.isNotBlank()) addView(txt(detail,13,muted)) }
+        if(icon!=null) row.addView(settingsIcon(icon),LinearLayout.LayoutParams(dp(40),dp(40)).apply { marginEnd=dp(12) })
+        val text=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; addView(txt(title,16,ink,true)); if(detail.isNotBlank()) addView(txt(detail,13,muted).apply { setPadding(0,dp(3),0,0) }) }
         row.addView(text,LinearLayout.LayoutParams(0,-2,1f))
-        row.addView(txt("›",22,muted).apply { setPadding(dp(12),0,0,0) })
-        if(parent.childCount>0) parent.addView(android.view.View(this).apply { setBackgroundColor(0x227F7F7F) },LinearLayout.LayoutParams(-1,dp(1)))
+        row.addView(txt("›",24,muted).apply { setPadding(dp(12),0,0,0); importantForAccessibility=android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO })
+        settingDivider(parent)
         parent.addView(row,LinearLayout.LayoutParams(-1,-2))
     }
     private fun settingToggle(parent:LinearLayout,title:String,detail:String,checked:Boolean,onChange:(Switch,Boolean)->Unit) {
-        if(parent.childCount>0) parent.addView(android.view.View(this).apply { setBackgroundColor(0x227F7F7F) },LinearLayout.LayoutParams(-1,dp(1)))
+        settingDivider(parent)
         val row=LinearLayout(this).apply {
-            orientation=LinearLayout.HORIZONTAL
-            gravity=android.view.Gravity.CENTER_VERTICAL
-            minimumHeight=dp(adaptiveLayout.touch)
-            setPadding(dp(4),dp(10),dp(4),dp(10))
+            orientation=LinearLayout.HORIZONTAL; gravity=android.view.Gravity.CENTER_VERTICAL
+            minimumHeight=dp(adaptiveLayout.touch); setPadding(dp(6),dp(12),dp(6),dp(12))
         }
         val labels=LinearLayout(this).apply {
             orientation=LinearLayout.VERTICAL
             addView(txt(title,16,ink,true))
-            addView(txt(detail,13,muted))
+            addView(txt(detail,13,muted).apply { setPadding(0,dp(3),0,0) })
         }
+        val states=arrayOf(intArrayOf(android.R.attr.state_checked),intArrayOf())
         val toggle=Switch(this).apply {
-            contentDescription="$title. $detail"
-            isChecked=checked
-            isFocusable=true
+            contentDescription="$title. $detail"; isChecked=checked; isFocusable=true
+            thumbTintList=android.content.res.ColorStateList(states,intArrayOf(violet,muted))
+            trackTintList=android.content.res.ColorStateList(states,intArrayOf((violet and 0x00ffffff) or 0x66000000,0xff45454a.toInt()))
         }
         toggle.setOnCheckedChangeListener { _,value -> onChange(toggle,value) }
         row.addView(labels,LinearLayout.LayoutParams(0,-2,1f))
@@ -536,6 +585,7 @@ class MainActivity : ComponentActivity() {
         val page=settingsGroups[id] ?: return
         if(page.childCount>3) page.removeViews(3,page.childCount-3)
         populateSettings(id,page)
+        updateSettingsStatus()
     }
     private fun refreshDeviceSettings() = refreshSettingsState("devices")
     private fun disableTitleDetection() {
