@@ -56,6 +56,34 @@ object TraktCatalogue {
             if (id <= 0 || title.isBlank()) null else CatalogueItem(type,id,title,o.optInt("year"),runtimeMinutes=o.optInt("runtime"))
         }.distinctBy { it.id }
     }
+    fun suggest(record:WatchRecord,done:(Result<List<RankedMatch>>)->Unit)=request(done) {
+        val query=AutoMatchPolicy.query(record.title,record.subtitle) ?: return@request emptyList()
+        val encoded=URLEncoder.encode(query.title,"UTF-8")
+        val types=if(query.episode!=null) listOf("show") else listOf("movie","show")
+        val items=types.flatMap { type ->
+            objects(get("/search/"+type+"?query="+encoded+"&limit=15&extended=full")).mapNotNull { row ->
+                val o=row.optJSONObject(type) ?: return@mapNotNull null
+                val key=id(o); val title=o.optString("title")
+                if(key<=0 || title.isBlank()) null else CatalogueItem(type,key,title,o.optInt("year"),runtimeMinutes=o.optInt("runtime"))
+            }
+        }
+        AutoMatchPolicy.rank(query,record.title,record.duration,items).mapNotNull { ranked ->
+            val item=ranked.item
+            if(item.type=="movie") ranked
+            else if(query.episode==null) ranked
+            else {
+                val seasons=if(query.season!=null) listOf(query.season) else objects(get("/shows/"+item.id+"/seasons")).map { it.optInt("number",-1) }.filter { it>0 }.distinct()
+                if(seasons.size>8) return@mapNotNull null
+                val episodes=seasons.flatMap { season ->
+                    objects(get("/shows/"+item.id+"/seasons/"+season+"?extended=full")).mapNotNull { o ->
+                        val n=o.optInt("number",-1); val key=id(o)
+                        if(n<=0 || key<=0) null else CatalogueItem("episode",key,item.title+" — "+o.optString("title","Episode "+n),item.year,item.id,season,n,o.optInt("runtime"))
+                    }
+                }
+                AutoMatchPolicy.episodeMatches(query,episodes)?.let { RankedMatch(it,ranked.score,"Title and episode agree") }
+            }
+        }
+    }
     fun seasons(show: CatalogueItem, done: (Result<List<CatalogueSeason>>) -> Unit) = request(done) {
         require(show.type == "show" && show.id > 0)
         objects(get("/shows/" + show.id + "/seasons")).mapNotNull { o ->
