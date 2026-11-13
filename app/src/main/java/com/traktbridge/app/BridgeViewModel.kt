@@ -7,7 +7,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import java.util.concurrent.Executors
 
-data class HistorySnapshot(val records:List<WatchRecord>,val groups:List<ViewingTitle>)
+data class HistorySnapshot(val records:List<WatchRecord>,val groups:List<ViewingTitle>,val unified:List<WatchRecord> = records)
 
 /** Read-only application repository. Approval and tracking writes stay in their existing owners. */
 class ViewingRepository(private val app:Application) {
@@ -15,7 +15,13 @@ class ViewingRepository(private val app:Application) {
         val db=WatchHistory(app)
         try {
             val rows=db.records(0)
-            return HistorySnapshot(rows,ViewingGroups.build(rows))
+            val account=RemoteAccountCache.active(app)
+            val unified=if(account==null) rows else {
+                val remote=TraktLibrary.cachedHistory(app,account)
+                val approved=rows.filter { it.status=="synced" && db.approvedAccount(it.id)==account }.map { it.id }.toSet()
+                if(RemoteAccountCache.active(app)==account) UnifiedTraktHistory.merge(rows,remote,approved) else rows
+            }
+            return HistorySnapshot(rows,ViewingGroups.build(rows),unified)
         } finally { db.close() }
     }
 }
