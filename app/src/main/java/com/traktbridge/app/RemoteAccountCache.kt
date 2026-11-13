@@ -28,6 +28,7 @@ object RemoteAccountCache {
     fun generation(c:Context):Long=meta(c).getLong(GENERATION,0)
     @Synchronized fun current(c:Context,account:String,generation:Long)=active(c)==account && meta(c).getLong(GENERATION,0)==generation
     @Synchronized fun clear(c:Context) {
+        PersistentHistorySnapshot.clear(c)
         val next=meta(c).getLong(GENERATION,0)+1
         check(meta(c).edit().clear().putLong(GENERATION,next).commit())
         for(k in TraktData.entries) check(store(c,k).edit().clear().commit())
@@ -38,8 +39,8 @@ object RemoteAccountCache {
         if(!p.contains("updated")) return null
         return Status(p.getInt("count",0),p.getBoolean("complete",false),p.getLong("updated",0),p.getString("marker","").orEmpty())
     }
-    private fun encode(row:RemoteItem)=JSONObject().put("type",row.type).put("id",row.id).put("title",row.title.take(1000)).put("show",row.showId).put("season",row.season).put("episode",row.episode).put("watched",row.watchedAt).put("event",row.eventId).put("rating",row.rating).put("progress",row.progress).toString()
-    private fun decode(s:String):RemoteItem {
+    internal fun encode(row:RemoteItem)=JSONObject().put("type",row.type).put("id",row.id).put("title",row.title.take(1000)).put("show",row.showId).put("season",row.season).put("episode",row.episode).put("watched",row.watchedAt).put("event",row.eventId).put("rating",row.rating).put("progress",row.progress).toString()
+    internal fun decode(s:String):RemoteItem {
         val o=JSONObject(s)
         return RemoteItem(o.getString("type"),o.getLong("id"),o.getString("title"),o.getLong("show"),o.getInt("season"),o.getInt("episode"),o.getString("watched"),o.getLong("event"),o.getInt("rating"),o.getDouble("progress"))
     }

@@ -76,8 +76,8 @@ class BridgeViewModel(app:Application):AndroidViewModel(app) {
             val result=runCatching {
                 val local=repository.local()
                 main.post { if(request==generation && running && !latestComplete) { latest=local; observer?.invoke(Result.success(local),false) } }
-                postProgress(HistoryLoadProgress("Loading downloaded Trakt history"))
-                val result=repository.unified(local){ done,total -> postProgress(HistoryLoadProgress("Loading downloaded Trakt history",done,total)) }
+                postProgress(HistoryLoadProgress("Opening saved library"))
+                val result=repository.unified(local){ done,total -> postProgress(HistoryLoadProgress("Opening saved library",done,total)) }
                 postProgress(HistoryLoadProgress("Preparing viewing library"))
                 result
             }

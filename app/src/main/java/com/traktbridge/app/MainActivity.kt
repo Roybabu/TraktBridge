@@ -2590,17 +2590,30 @@ class MainActivity : ComponentActivity() {
         }
     }
     private fun remoteActions(item:RemoteItem,account:String) {
-        modernActionDialog(item.title,"Manage this title on your connected Trakt account",listOf("Add to watchlist","Remove from watchlist","Rate title","Remove rating")) { index ->
-            fun confirm(action:String,rating:Int=0) {
-                BridgeDialogBuilder(this).setTitle("Confirm Trakt account change").setMessage(item.title+"\n"+action+if(rating>0) " "+rating+"/10" else "").setNegativeButton("Cancel",null).setPositiveButton("Confirm") { _,_->
-                    lookup("Updating Trakt",{ done -> TraktLibrary.mutate(this,account,item,action,rating,done) }) { message:String -> Toast.makeText(this,message,Toast.LENGTH_LONG).show() }
-                }.show()
+        lookup("Checking watchlist and rating",{ done -> TraktLibrary.titleState(this,account,item,done) }) { state:RemoteTitleState ->
+            val view=ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow) }
+            val dialog=BridgeDialogBuilder(this).setView(view).create()
+            fun update(action:String,rating:Int=0,done:(Boolean)->Unit) {
+                TraktLibrary.mutate(this,account,item,action,rating) { result ->
+                    if(!isDestroyed && !isFinishing) {
+                        val confirmed=result.getOrNull()=="Trakt change confirmed"
+                        val message=if(!confirmed) "Change not confirmed. Please retry." else when(action) {
+                            "watchlist-add"->"Added to watchlist"
+                            "watchlist-remove"->"Removed from watchlist"
+                            "rate"->"Rating saved: "+rating+"/10"
+                            else->"Rating removed"
+                        }
+                        Toast.makeText(this,message,Toast.LENGTH_SHORT).show()
+                        done(confirmed)
+                    }
+                }
             }
-            when(index) {
-                0->confirm("watchlist-add")
-                1->confirm("watchlist-remove")
-                2->choose("Choose rating",(1..10).map { it.toString()+"/10" }) { confirm("rate",it+1) }
-                3->confirm("unrate")
+            view.setContent { ModernTraktActions(violet,item.title,state,{ added,done -> update(if(added) "watchlist-add" else "watchlist-remove",done=done) },{ rating,done -> update(if(rating==0) "unrate" else "rate",rating,done) },{dialog.dismiss()}) }
+            dialog.show()
+            dialog.window?.apply {
+                setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
+                setGravity(android.view.Gravity.BOTTOM)
+                setLayout(if(wide) dp(560).coerceAtMost(resources.displayMetrics.widthPixels) else -1,-2)
             }
         }
     }

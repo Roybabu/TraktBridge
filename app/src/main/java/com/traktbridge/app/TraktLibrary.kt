@@ -12,6 +12,7 @@ import java.util.concurrent.Executors
 
 data class RemoteItem(val type:String,val id:Long,val title:String,val showId:Long=0,val season:Int=-1,val episode:Int=-1,val watchedAt:String="",val eventId:Long=0,val rating:Int=0,val progress:Double=-1.0)
 data class RemotePage(val items:List<RemoteItem>,val page:Int,val pages:Int?,val account:String)
+data class RemoteTitleState(val watchlisted:Boolean,val rating:Int)
 data class RemoteProgress(val aired:Int,val completed:Int,val next:String)
 object RemoteRules {
     fun plural(type:String):String=when(type) { "movie"->"movies"; "show"->"shows"; "episode"->"episodes"; "season"->"seasons"; else->error("Unsupported type") }
@@ -81,6 +82,23 @@ object TraktLibrary {
         val next=o.optJSONObject("next_episode")
         RemoteProgress(o.optInt("aired"),o.optInt("completed"),next?.let { "S"+it.optInt("season")+" E"+it.optInt("number")+" • "+it.optString("title") }.orEmpty())
     }
+    fun titleState(context:Context,expectedAccount:String,item:RemoteItem,done:(Result<RemoteTitleState>)->Unit)=task(context,done) { token,account ->
+        require(account==expectedAccount) { "Connected Trakt account changed" }
+        fun find(kind:String):RemoteItem? {
+            val plural=RemoteRules.plural(item.type)
+            for(page in 1..TraktDownloadRules.MAX_PAGES) {
+                val response=request(token,"/sync/"+kind+"/"+plural+"?page="+page+"&limit="+TraktDownloadRules.PAGE_SIZE)
+                val a=JSONArray(response.text)
+                for(index in 0 until a.length()) {
+                    val row=a.optJSONObject(index)?.let { parse(it) }
+                    if(row?.type==item.type && row.id==item.id) return row
+                }
+                if(TraktDownloadRules.lastPage(page,response.pages,a.length())) return null
+            }
+            error("Account list incomplete")
+        }
+        RemoteTitleState(find("watchlist")!=null,find("ratings")?.rating ?: 0)
+    }
     fun mutate(context:Context,expectedAccount:String,item:RemoteItem,action:String,rating:Int=0,done:(Result<String>)->Unit)=task(context,done) { token,account ->
         require(account==expectedAccount) { "Connected Trakt account changed" }
         require(item.id>0)
@@ -141,7 +159,7 @@ object TraktLibrary {
             progress("Downloading "+kind.title,0,0)
             val marker=kind.marker(activity)
             val prior=RemoteAccountCache.status(app,account,kind)
-            if(automatic && prior!=null && TraktDownloadRules.canSkip(prior.marker,marker,prior.complete)) {
+            if(prior!=null && TraktDownloadRules.canSkip(prior.marker,marker,prior.complete)) {
                 results.add(TraktSyncResult(kind,prior.count,true,unchanged=true)); continue
             }
             val rows=linkedMapOf<String,RemoteItem>()
@@ -228,7 +246,8 @@ object TraktLibrary {
         historyMemory?.takeIf { it.account==account && it.generation==generation && status!=null && status.complete && it.updated==status.updated }?.let {
             progress(it.rows.size,it.rows.size); return it.rows
         }
-        val snapshot=RemoteAccountCache.rows(context,account,TraktData.HISTORY,progress)
+        val persisted=if(status?.complete==true) PersistentHistorySnapshot.read(context,account,generation,status) else null
+        val snapshot=persisted ?: RemoteAccountCache.rows(context,account,TraktData.HISTORY,progress)
         val legacy=if(status?.complete==true) emptyList() else {
             val prefix=AccountScope.key(account)+":"
             val entries=context.getSharedPreferences("trakt_remote_history_encrypted",Context.MODE_PRIVATE).all.filterKeys { it.startsWith(prefix) }.entries.toList()
@@ -243,8 +262,11 @@ object TraktLibrary {
             }
         }
         check(RemoteAccountCache.current(context,account,generation)) { "Account changed during history loading" }
-        val rows=(snapshot+legacy).distinctBy { it.eventId }.sortedByDescending { runCatching { Instant.parse(it.watchedAt) }.getOrDefault(Instant.EPOCH) }
-        if(status?.complete==true && RemoteAccountCache.status(context,account,TraktData.HISTORY)?.updated==status.updated) historyMemory=HistoryMemory(account,generation,status.updated,rows)
+        val rows=if(persisted!=null) persisted else (snapshot+legacy).distinctBy { it.eventId }.sortedByDescending { runCatching { Instant.parse(it.watchedAt) }.getOrDefault(Instant.EPOCH) }
+        if(status?.complete==true && RemoteAccountCache.status(context,account,TraktData.HISTORY)?.updated==status.updated) {
+            historyMemory=HistoryMemory(account,generation,status.updated,rows)
+            if(persisted==null && rows.size==status.count) runCatching { PersistentHistorySnapshot.write(context,account,generation,status,rows) }.onFailure { DebugTrace.failure("history-index",it) }
+        }
         return rows
     }
     fun clearCache(context:Context) { historyMemory=null; RemoteAccountCache.clear(context); context.getSharedPreferences("trakt_remote_history_encrypted",Context.MODE_PRIVATE).edit().clear().apply(); context.getSharedPreferences("trakt_remote_history",Context.MODE_PRIVATE).edit().clear().apply() }
