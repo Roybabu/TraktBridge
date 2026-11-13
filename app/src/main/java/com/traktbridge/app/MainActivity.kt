@@ -2851,24 +2851,76 @@ class MainActivity : ComponentActivity() {
         }.setPositiveButton("Close",null).show()
     }
     private fun completionAssessment(r:WatchRecord)=CompletionPolicy.assess(r,prefs.getInt("completion_threshold",CompletionPolicy.DEFAULT_THRESHOLD))
+    private val uploadApprovalsInFlight=mutableSetOf<String>()
     private fun approveUpload(r: WatchRecord,rewatch:Boolean=false) {
-        BridgeDialogBuilder(this).setTitle(if(rewatch) "Confirm a separate completed rewatch?" else "Mark as fully watched?")
-            .setMessage(r.matchLabel + "\nThis adds a completed watch to Trakt at the recorded end time. Only confirm if you finished the movie or episode. Partial viewing stays local. For app-activity records the end time is only the app exit time.")
-            .setNegativeButton("Cancel",null).setPositiveButton("Verify account") { _,_ ->
-                Thread {
-                    val result=runCatching { HistorySync.accountForApproval(applicationContext) }
-                    runOnUiThread {
-                        if(!isFinishing && !isDestroyed) result.fold({ accountId ->
-                            BridgeDialogBuilder(this).setTitle("Approve upload to connected Trakt account?")
-                                .setMessage(r.matchLabel + "\nAccount ID: " + accountId + "\nApproved records will retry when online.")
-                                .setNegativeButton("Cancel",null).setPositiveButton("Approve and sync") { _,_ ->
-                                    if(history.enqueue(r.id,accountId,rewatch,r.traktId,r.matchType,r.ended)) HistorySync.schedule(this) else Toast.makeText(this,"This title already has a completion or pending upload for this account.",Toast.LENGTH_LONG).show()
-                                    refreshHistory()
-                                }.show()
-                        },{ BridgeDialogBuilder(this).setTitle("Account verification required").setMessage("Connect to Trakt and verify the account online before approving uploads.").setPositiveButton("OK",null).show() })
-                    }
-                }.start()
-            }.show()
+        if(r.id in uploadApprovalsInFlight) return
+        if(!auth.hasConnection()) {
+            Toast.makeText(this,"Connect Trakt in Settings first",Toast.LENGTH_LONG).show()
+            return
+        }
+        val account=RemoteAccountCache.active(this)
+        val generation=RemoteAccountCache.generation(this)
+        val view=ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow) }
+        val dialog=BridgeDialogBuilder(this).setView(view).create()
+        val artwork=PosterLibraryItem(r.matchLabel.ifBlank { r.title },"","",if(r.matchType=="episode") "show" else "movie",if(r.matchType=="episode") r.showId else r.traktId,{},{})
+        view.setContent {
+            ModernWatchApproval(violet,artwork,rewatch,r.id.startsWith("usage:"),account!=null,{
+                dialog.dismiss()
+                if(uploadApprovalsInFlight.add(r.id)) queueWatchApproval(r,rewatch,account,generation)
+            },{dialog.dismiss()})
+        }
+        dialog.show()
+        dialog.window?.apply {
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
+            setGravity(android.view.Gravity.BOTTOM)
+            setLayout(if(wide) dp(560).coerceAtMost(resources.displayMetrics.widthPixels) else -1,-2)
+        }
+    }
+    private fun queueWatchApproval(r:WatchRecord,rewatch:Boolean,account:String?,generation:Long) {
+        val app=applicationContext
+        Thread {
+            val result=runCatching {
+                // Cached identity is bound to the current authorization and survives offline use.
+                // The worker independently verifies the same account before any network write.
+                val verified=account ?: HistorySync.accountForApproval(app)
+                check(RemoteAccountCache.generation(app)==generation && TraktAuth(app).hasConnection()) { "Account changed" }
+                if(account!=null) check(RemoteAccountCache.current(app,verified,generation)) { "Account changed" }
+                WatchHistory(app).use { db ->
+                    if(!rewatch && TraktLibrary.cachedHistory(app,verified).any { it.type==r.matchType && it.id==r.traktId }) {
+                        "Already watched on Trakt"
+                    } else if(db.enqueue(r.id,verified,rewatch,r.traktId,r.matchType,r.ended)) {
+                        ViewingNotifications.cancel(app,r.id)
+                        HistorySync.schedule(app)
+                        "Queued for Trakt sync"
+                    } else "Already approved or viewing record changed"
+                }
+            }
+            runOnUiThread {
+                uploadApprovalsInFlight.remove(r.id)
+                if(!isFinishing && !isDestroyed) {
+                    val message=result.getOrElse { "Unable to approve. Check your Trakt connection and try again." }
+                    Toast.makeText(this,message,Toast.LENGTH_SHORT).show()
+                    refreshHistory()
+                    if(message=="Queued for Trakt sync") observeWatchUpload(r.id)
+                }
+            }
+        }.start()
+    }
+    private fun observeWatchUpload(id:String) {
+        val handler=android.os.Handler(android.os.Looper.getMainLooper())
+        var checks=0
+        val task=object:Runnable {
+            override fun run() {
+                if(isFinishing || isDestroyed) return
+                val state=runCatching { history.record(id)?.status }.getOrNull() ?: return
+                when(state) {
+                    "synced"->{ Toast.makeText(this@MainActivity,"Marked watched on Trakt",Toast.LENGTH_SHORT).show(); refreshHistory() }
+                    "blocked"->{ Toast.makeText(this@MainActivity,"Sync needs attention in Review",Toast.LENGTH_SHORT).show(); refreshHistory() }
+                    "queued","uncertain"->if(++checks<30) handler.postDelayed(this,2000)
+                }
+            }
+        }
+        handler.postDelayed(task,1000)
     }
     private fun identify(r: WatchRecord) {
         val initial=RecognitionEngine.query(r.title)
