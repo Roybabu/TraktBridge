@@ -12,12 +12,16 @@ import javax.crypto.spec.GCMParameterSpec
 // Protect downloaded remote history independently of the local SQLite database.
 object PrivateHistoryCache {
     private const val ALIAS="traktbridge.remote.cache.v1"
+    @Volatile private var cachedKey:SecretKey?=null
     @Synchronized private fun key():SecretKey {
+        cachedKey?.let { return it }
         val store=KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        return (store.getKey(ALIAS,null) as? SecretKey) ?: KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES,"AndroidKeyStore").run {
+        val loaded=(store.getKey(ALIAS,null) as? SecretKey) ?: KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES,"AndroidKeyStore").run {
             init(KeyGenParameterSpec.Builder(ALIAS,KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT).setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).build())
             generateKey()
         }
+        cachedKey=loaded
+        return loaded
     }
     fun seal(value:String,scope:String):String {
         require(value.length<=16384)

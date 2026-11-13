@@ -55,7 +55,7 @@ class MainActivity : ComponentActivity() {
     private val amoled:Boolean get()=AppearancePolicy.mode(prefs.getString("appearance_mode","dark").orEmpty())=="amoled"
     private val surface:Int get()=if(amoled) 0xff101010.toInt() else BridgeDesign.surface
     private val bg:Int get()=if(amoled) 0xff000000.toInt() else BridgeDesign.background
-    private fun showAuth(message: String = auth.status()) { account.text = message }
+    private fun showAuth(message: String = auth.status()) { account.text = message; if(!auth.hasConnection()) { unifiedRows=emptyList(); refreshHistory() } }
     private fun handleCallback(i: Intent) {
         val uri = i.data ?: return
         if (uri.scheme != "traktbridge" || uri.encodedAuthority != "callback" || !uri.encodedPath.isNullOrEmpty() || uri.fragment!=null) return
@@ -530,7 +530,7 @@ class MainActivity : ComponentActivity() {
         settingsOverview.visibility=if(settingsCategory.isEmpty()) android.view.View.VISIBLE else android.view.View.GONE
         settingsGroups.forEach { (key,page) -> page.visibility=if(key==settingsCategory) android.view.View.VISIBLE else android.view.View.GONE }
         updateSettingsStatus()
-        if(settingsCategory in setOf("devices","tracking","privacy")) refreshSettingsState(settingsCategory)
+        if(settingsCategory in setOf("account","devices","tracking","privacy")) refreshSettingsState(settingsCategory)
         if(resetScroll) settingsPage.scrollTo(0,0)
         if(tvMode && tab==4) settingsPage.post { if(tab==4) TvFocus.firstContent(settingsPage) }
     }
@@ -583,6 +583,7 @@ class MainActivity : ComponentActivity() {
     }
     private fun refreshSettingsState(id:String) {
         val page=settingsGroups[id] ?: return
+        if(id=="account") (account.parent as? ViewGroup)?.removeView(account)
         if(page.childCount>3) page.removeViews(3,page.childCount-3)
         populateSettings(id,page)
         updateSettingsStatus()
@@ -648,12 +649,15 @@ class MainActivity : ComponentActivity() {
                 heading("Synchronization")
                 settingRow(group ?: root,"Automatic sync","Refresh your downloaded Trakt library daily") { configureAccountRefresh() }
                 settingRow(group ?: root,"Sync now","Download existing watches, watchlists, ratings and more") { offerTraktSync() }
-                settingRow(group ?: root,"Trakt library","Browse downloaded data or open the online library") { openDownloadedTrakt() }
+                settingRow(group ?: root,"Trakt library","Browse downloaded watchlist, ratings, favorites, collections and playback") { openDownloadedTrakt() }
+                val cacheAccount=RemoteAccountCache.active(this)
+                val lastHistory=cacheAccount?.let { RemoteAccountCache.status(this,it,TraktData.HISTORY) }
+                settingRow(group ?: root,"History sync status",lastHistory?.let { it.count.toString()+" watches • "+(if(it.complete) "Complete" else "Partial")+" • "+java.text.DateFormat.getDateTimeInstance().format(java.util.Date(it.updated)) } ?: "Not downloaded") { offerTraktSync() }
                 heading("Data & maintenance")
                 settingRow(group ?: root,"Sync maintenance","Retry approved uploads or clear downloaded account data") {
                     choose("Sync maintenance",listOf("Retry approved uploads","Clear downloaded library")) { index ->
                         if(index==0) { HistorySync.schedule(this); refreshHistory(); Toast.makeText(this,"Approved sync queue scheduled",Toast.LENGTH_SHORT).show() }
-                        else BridgeDialogBuilder(this).setTitle("Clear downloaded Trakt library?").setMessage("Stops automatic refresh and deletes downloaded account data on this device. Local viewing records and your Trakt account are unchanged.").setNegativeButton("Cancel",null).setPositiveButton("Clear") { _,_-> RemoteRefreshSchedule.disable(this); TraktLibrary.clearCache(this) }.show()
+                        else BridgeDialogBuilder(this).setTitle("Clear downloaded Trakt library?").setMessage("Stops automatic refresh and deletes downloaded account data on this device. Local viewing records and your Trakt account are unchanged.").setNegativeButton("Cancel",null).setPositiveButton("Clear") { _,_-> RemoteRefreshSchedule.disable(this); TraktLibrary.clearCache(this); unifiedRows=emptyList(); refreshSettingsState("account"); refreshHistory() }.show()
                     }
                 }
                 settingRow(group ?: root,"About Trakt sync","Data usage and upload permissions") {
@@ -1264,20 +1268,59 @@ class MainActivity : ComponentActivity() {
     private fun emptyState(parent:LinearLayout,title:String,detail:String,label:String,action:()->Unit) {
         parent.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeEmptyState(violet,title,detail,label,action) } })
     }
+    private var historyLoadPanel:LinearLayout?=null
+    private var historyLoadLabel:TextView?=null
+    private var historyLoadBar:ProgressBar?=null
+    private var renderedHistoryTab=-1
+    private fun showHistoryProgress(progress:HistoryLoadProgress) {
+        if(tab==4 || isDestroyed || isFinishing) return
+        if(historyLoadPanel?.parent!=dashboard) {
+            val panel=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(8),dp(12),dp(8)) }
+            val label=txt("",13,muted)
+            val bar=ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal).apply { max=1000; progressTintList=android.content.res.ColorStateList.valueOf(violet); indeterminateTintList=android.content.res.ColorStateList.valueOf(violet) }
+            panel.addView(label); panel.addView(bar,LinearLayout.LayoutParams(-1,dp(8)))
+            dashboard.addView(panel,0); historyLoadPanel=panel; historyLoadLabel=label; historyLoadBar=bar
+        }
+        val known=progress.total>0
+        historyLoadLabel?.text=progress.stage+if(known) " • "+progress.completed+" / "+progress.total+" records ("+(progress.completed.toLong()*100/progress.total)+"%)" else "…"
+        historyLoadBar?.isIndeterminate=!known
+        if(known) historyLoadBar?.progress=(progress.completed.toLong()*1000/progress.total).toInt().coerceIn(0,1000)
+    }
+    private fun clearHistoryProgress() {
+        historyLoadPanel?.let { if(it.parent==dashboard) dashboard.removeView(it) }
+        historyLoadPanel=null; historyLoadLabel=null; historyLoadBar=null
+    }
     private fun refreshHistory() {
         if(!::dashboard.isInitialized || tab==4 || isFinishing || isDestroyed) return
         val selectedTab=tab
-        dashboard.removeAllViews()
-        dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeLoading(violet) } })
+        if(renderedHistoryTab!=selectedTab) { dashboard.removeAllViews(); clearHistoryProgress() }
         if(tvMode && contentPage.hasFocus()) restoreContentFocus=true
-        bridgeModel.load { result ->
-            if(isDestroyed || isFinishing || tab!=selectedTab) return@load
-            result.fold({ snapshot -> renderHistory(snapshot.records,snapshot.groups); if(restoreScrollY>0) { val y=restoreScrollY; restoreScrollY=0; contentPage.post { if(tab==selectedTab) contentPage.scrollTo(0,y) } }; if(tvMode && restoreContentFocus) { restoreContentFocus=false; contentPage.post { if(tab==selectedTab) TvFocus.firstContent(contentPage) } } }, {
-                dashboard.removeAllViews()
-                emptyState(dashboard,"History unavailable","Existing viewing data has not been cleared.","Retry") { refreshHistory() }
-                dashboard.addView(actionButton("Check database integrity") { checkHistoryIntegrity() })
-            })
-        }
+        bridgeModel.load({ result,finished ->
+            if(!isDestroyed && !isFinishing && tab==selectedTab) {
+                result.fold({ snapshot ->
+                    val y=if(restoreScrollY>0) restoreScrollY else if(renderedHistoryTab==selectedTab) contentPage.scrollY else 0
+                    val drawn=runCatching { renderHistory(snapshot.records,snapshot.groups,snapshot.unified) }
+                    if(drawn.isSuccess) {
+                        renderedHistoryTab=selectedTab
+                        clearHistoryProgress()
+                        if(!finished) showHistoryProgress(HistoryLoadProgress("Loading downloaded Trakt history"))
+                        restoreScrollY=0
+                        if(y>0) contentPage.post { if(tab==selectedTab) contentPage.scrollTo(0,y) }
+                        if(tvMode && restoreContentFocus) { restoreContentFocus=false; contentPage.post { if(tab==selectedTab) TvFocus.firstContent(contentPage) } }
+                    } else {
+                        clearHistoryProgress()
+                        emptyState(dashboard,"Unable to display history","Existing viewing records are unchanged.","Retry"){refreshHistory()}
+                    }
+                }, {
+                    clearHistoryProgress()
+                    val warning=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(8),dp(12),dp(8)) }
+                    warning.addView(txt("History loading interrupted",16,ink,true))
+                    warning.addView(txt("Some history may be unavailable. Existing records have not been cleared.",13,muted))
+                    warning.addView(actionButton("Retry loading"){refreshHistory()})
+                    dashboard.addView(warning,0); historyLoadPanel=warning
+                })
+            }
+        },{ progress -> if(tab==selectedTab && !isDestroyed && !isFinishing) showHistoryProgress(progress) })
     }
 
     private fun customizeDashboard() {
@@ -1307,15 +1350,18 @@ class MainActivity : ComponentActivity() {
             refreshHistory()
         }.show()
     }
-    private fun renderHistory(records:List<WatchRecord>,groups:List<ViewingTitle>) {
+    private var unifiedRows:List<WatchRecord> = emptyList()
+    private fun renderHistory(records:List<WatchRecord>,groups:List<ViewingTitle>,unified:List<WatchRecord> = records) {
+        unifiedRows=unified
+        val allGroups=ViewingGroups.build(unified)
         dashboard.removeAllViews()
         val pending=groups.count { it.queued || it.pending }
         if(tab==2) requestReviewSuggestions(records)
         when(tab) {
-            0 -> renderModernHome(records,groups,pending)
-            1 -> renderPosterLibrary(records)
+            0 -> renderModernHome(records,allGroups,pending)
+            1 -> renderPosterLibrary(unified)
             2 -> renderModernReview(groups)
-            3 -> renderModernActivity(records)
+            3 -> renderModernActivity(unified)
         }
     }
     private fun modernContent(content:@androidx.compose.runtime.Composable ()->Unit) {
@@ -1327,8 +1373,9 @@ class MainActivity : ComponentActivity() {
         modernContent { ModernPageHeader(violet,"Home",if(live) "Tracking active" else "Tracking inactive",onMenu={ choose("Home options",listOf("Tracking settings","Now Playing • All devices","Viewing planner","Viewing assistant","Customize dashboard","Refresh")) { i -> when(i) {0->showTab(4);1->nowPlaying();2->viewingPlanner();3->localAssistant();4->customizeDashboard();5->refreshHistory()} } }) }
         val hidden=DashboardPreferences.visible(prefs.getString("dashboard_hidden","").orEmpty())
         val active=groups.filter { it.active }
-        val continuing=SeriesLibrary.continueWatching(groups)
-        val recent=groups.filter { !it.active && it !in continuing.take(7) }.take(5)
+        val continuing=SeriesLibrary.continueWatching(ViewingGroups.build(records))
+        val continuingKeys=continuing.take(7).map { it.key }.toSet()
+        val recent=groups.filter { !it.active && it.key !in continuingKeys }.take(5)
         if("now" !in hidden && active.isNotEmpty()) {
             section(dashboard,"Now watching")
             modernContent { ModernActionRow(violet,active.first().representative.title,"Live playback • all devices"){ nowPlaying() } }
@@ -1344,12 +1391,12 @@ class MainActivity : ComponentActivity() {
         if("review" !in hidden) modernContent { ModernActionRow(violet,"Review your viewing",pending.toString()+" records awaiting action"){ showTab(2) } }
         if("recent" !in hidden && recent.isNotEmpty()) {
             section(dashboard,"Recently watched")
-            recent.forEach { g -> val item=groupPoster(g); modernContent { ModernActionRow(violet,item.title,item.subtitle){ showSessions(g) } } }
+            recent.forEach { g -> val item=groupPoster(g); modernContent { ModernActionRow(violet,item.title,if(g.confirmed) java.text.DateFormat.getDateTimeInstance().format(java.util.Date(g.latest.ended))+" · "+appLabel(g.latest.source) else item.subtitle){ showSessions(g) } } }
         }
         if("discover" !in hidden) {
             section(dashboard,"Explore")
             listOf(UiAction("For you"){ recommendFromHistory() },UiAction("Upcoming episodes"){ upcomingEpisodes() },UiAction("Trending titles"){ discover() },UiAction("Anime"){ animeSearch() }).chunked(2).forEach { batch ->
-                modernContent { BridgeTheme(violet) { androidx.compose.foundation.layout.Row(androidx.compose.ui.Modifier.fillMaxWidth(),horizontalArrangement=androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) { batch.forEach { item -> androidx.compose.material3.OutlinedButton(onClick=item.action,modifier=androidx.compose.ui.Modifier.weight(1f)) { androidx.compose.material3.Text(item.label) } } } } }
+                modernContent { BridgeTheme(violet) { androidx.compose.foundation.layout.Row(androidx.compose.ui.Modifier.fillMaxWidth(),horizontalArrangement=androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) { batch.forEach { item -> androidx.compose.material3.OutlinedButton(onClick=item.run,modifier=androidx.compose.ui.Modifier.weight(1f)) { androidx.compose.material3.Text(item.label) } } } } }
             }
         }
         if("goal" !in hidden && prefs.getBoolean("show_monthly_goal",true)) monthlyGoalCard(dashboard,records)
@@ -1382,7 +1429,7 @@ class MainActivity : ComponentActivity() {
             modernContent { ModernReviewCard(violet,item,evidence,primary,secondary,manual) {
                 val options=titleEntry(g,true).actions.filter { it.label !in setOf("Yes, correct","No, incorrect","Search manually") }
                 val menu=options+if(r.status in setOf("pending","reviewed")) listOf(UiAction("Delete viewing record"){deleteFromReview(r)}) else emptyList()
-                choose("Viewing record",menu.map { it.label }) { menu[it].action() }
+                choose("Viewing record",menu.map { it.label }) { menu[it].run() }
             } }
         }
         if(visible.size>historyLimit && historyLimit<1000) dashboard.addView(actionButton("Show more"){historyLimit=MemoryPolicy.nextPage(historyLimit,MemoryPolicy.pageSize(lowRam));refreshHistory()})
@@ -1396,6 +1443,8 @@ class MainActivity : ComponentActivity() {
     private fun renderModernActivity(records:List<WatchRecord>) {
         val scoped=ViewingAnalytics.filter(records,HistoryFilter(period=analyticsPeriod,source=analyticsSource))
         val groups=ViewingGroups.build(scoped)
+        val historical=scoped.filter { it.status=="synced" }
+        val activeDays=scoped.filter { it.watched>0 || it.status=="synced" }.map { ViewingAnalytics.day(it.ended) }.distinct().size
         val total=scoped.sumOf { it.watched.coerceAtLeast(0) }
         val daily=scoped.filter { it.watched>0 }.groupBy { ViewingAnalytics.day(it.ended) }.mapValues { (_,rows)->rows.sumOf { it.watched } }
         val today=java.time.LocalDate.now()
@@ -1414,7 +1463,8 @@ class MainActivity : ComponentActivity() {
         modernContent { ModernCategories(violet,listOf("7" to "Week","30" to "Month","365" to "Year","0" to "All time"),analyticsPeriod.toString()){ analyticsPeriod=it.toInt();refreshHistory() } }
         modernContent { ModernWatchChart(violet,durationText(total),dates.map { if(monthly) it.format(java.time.format.DateTimeFormatter.ofPattern("MMM yy")) else it.format(java.time.format.DateTimeFormatter.ofPattern("d MMM")) },values){} }
         val days=(java.time.temporal.ChronoUnit.DAYS.between(start,today)+1).coerceAtLeast(1)
-        modernContent { ModernMetricTiles(violet,listOf("Movies synced" to groups.count { it.confirmed && it.representative.matchType=="movie" }.toString(),"Episodes synced" to groups.count { it.confirmed && it.representative.matchType=="episode" }.toString(),"Active days" to daily.size.toString(),"Daily average" to durationText(total/days))) }
+        modernContent { ModernMetricTiles(violet,listOf("Movies synced" to groups.count { it.confirmed && it.representative.matchType=="movie" }.toString(),"Episodes synced" to groups.count { it.confirmed && it.representative.matchType=="episode" }.toString(),"Active days" to activeDays.toString(),"Daily average" to durationText(total/days))) }
+        modernContent { ModernMetricTiles(violet,listOf("Movie watches" to historical.count { it.matchType=="movie" }.toString(),"Episode watches" to historical.count { it.matchType=="episode" }.toString())) }
         section(dashboard,"Watch time by platform")
         ViewingAnalytics.platforms(scoped).filter { it.sampledMs>0 }.forEach { platform ->
             modernContent { ModernActionRow(violet,appLabel(platform.source),durationText(platform.sampledMs)+" · "+(if(total>0) platform.sampledMs*100/total else 0)+"% of sampled time"){analyticsSource=platform.source;refreshHistory()} }
@@ -1428,7 +1478,7 @@ class MainActivity : ComponentActivity() {
         }
         section(dashboard,"Viewing calendar")
         calendarView(dashboard,if(analyticsSource.isBlank()) records else records.filter { it.source==analyticsSource })
-        dashboard.addView(txt("Sampled time is attributed to session end dates; remote history is not included.",12,muted))
+        dashboard.addView(txt("Calendar and watch counts include Trakt history. Sampled watch time excludes historical watches without measured duration.",12,muted))
     }
     private fun streamingAvailability(type:String,id:Long,title:String) {
         val initial=prefs.getString("availability_region",java.util.Locale.getDefault().country).orEmpty()
@@ -1749,7 +1799,7 @@ class MainActivity : ComponentActivity() {
         }.show()
     }
     private fun viewingJournal() {
-        val rows=history.records(0).filter { it.status!="active" }
+        val rows=unifiedRows.ifEmpty { history.records(0) }.filter { it.status!="active" }
         val years=rows.map { ViewingAnalytics.day(it.ended).year }.distinct().sortedDescending()
         choose("Viewing year",years.map { it.toString() }) { index ->
             val year=years[index]
@@ -2231,7 +2281,7 @@ class MainActivity : ComponentActivity() {
         val r=g.representative
         val episode=r.matchType=="episode" && r.showId>0
         val name=if(episode) r.matchLabel.substringBefore(" — ") else r.matchLabel.ifBlank { r.title.ifBlank { "Unidentified video" } }
-        val detail=(if(episode) "S"+r.season+" E"+r.episode+" · " else "")+(if(g.remainingMs>0) durationText(g.remainingMs)+" left" else g.platforms.joinToString(" • ") { appLabel(it) })
+        val detail=(if(episode) "S"+r.season+" E"+r.episode+" · " else "")+(if(g.confirmed) java.text.DateFormat.getDateInstance().format(java.util.Date(g.sessions.filter { it.status=="synced" }.maxOf { it.ended })) else if(g.remainingMs>0) durationText(g.remainingMs)+" left" else g.platforms.joinToString(" • ") { appLabel(it) })
         val progress=if(g.durationMs>0 && g.positionMs>=0) (g.positionMs.toDouble()/g.durationMs).toFloat().coerceIn(0f,1f) else null
         val open:()->Unit={ if(episode) showSeries(r.showId) else showSessions(g) }
         return PosterLibraryItem(name,detail,when { g.confirmed->"Watched"; g.queued->"Awaiting sync"; r.traktId<=0->"Needs match"; else->"In progress" },if(episode) "show" else "movie",if(episode) r.showId else r.traktId,open,{ showSessions(g) },progress)
@@ -2252,13 +2302,16 @@ class MainActivity : ComponentActivity() {
         dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent {
             PosterLibraryHeader(violet,libraryCategory,{ category -> libraryCategory=category; historyLimit=MemoryPolicy.pageSize(lowRam); refreshHistory() },{ universalSearch() },{ editHistoryFilter(records) },{ libraryMenu() })
         } })
+        val accountId=RemoteAccountCache.active(this)
+        val syncStatus=accountId?.let { RemoteAccountCache.status(this,it,TraktData.HISTORY) }
+        modernContent { ModernActionRow(violet,if(syncStatus==null) "Sync Trakt history" else if(syncStatus.complete) "Trakt history synchronized" else "Trakt history partially downloaded",syncStatus?.let { it.count.toString()+" watch events · "+java.text.DateFormat.getDateTimeInstance().format(java.util.Date(it.updated)) } ?: "Bring your existing movies and episodes into Library"){ offerTraktSync() } }
         if(historyFilter!=HistoryFilter()) dashboard.addView(txt("History filters active • use Filters or Library options to change",12,muted))
         val groups=ViewingAnalytics.sort(ViewingGroups.build(ViewingAnalytics.filter(records,historyFilter)),historyFilter.sort)
         val series=SeriesLibrary.build(groups)
         val movies=groups.filter { it.representative.matchType=="movie" }
         val other=groups.filter { it.representative.matchType!="movie" && !(it.representative.matchType=="episode" && it.representative.showId>0 && it.representative.season>=0 && it.representative.episode>0) }
         val anime=personalStore("anime_progress").all.values.mapNotNull { value -> runCatching { org.json.JSONObject(value.toString()) }.getOrNull() }.filter { it.optInt("id")>0 && it.optString("title").isNotBlank() && (historyFilter.query.isBlank() || it.optString("title").contains(historyFilter.query,true)) }.sortedBy { it.optString("title") }
-        val continuing=SeriesLibrary.continueWatching(groups).filter { it.representative.traktId>0 && (libraryCategory=="All" || (libraryCategory=="Movies" && it.representative.matchType=="movie") || (libraryCategory=="Series" && it.representative.matchType=="episode")) }.distinctBy { if(it.representative.showId>0) "show:"+it.representative.showId else "movie:"+it.representative.traktId }.take(10)
+        val continuing=SeriesLibrary.continueWatching(ViewingGroups.build(ViewingAnalytics.filter(records.filterNot { UnifiedTraktHistory.remote(it) },historyFilter))).filter { it.representative.traktId>0 && (libraryCategory=="All" || (libraryCategory=="Movies" && it.representative.matchType=="movie") || (libraryCategory=="Series" && it.representative.matchType=="episode")) }.distinctBy { if(it.representative.showId>0) "show:"+it.representative.showId else "movie:"+it.representative.traktId }.take(10)
         if(continuing.isNotEmpty()) {
             section(dashboard,"Continue watching")
             dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { PosterLibraryShelf(violet,continuing.map { groupPoster(it) }) } })
@@ -2302,9 +2355,9 @@ class MainActivity : ComponentActivity() {
         card.addView(actionButton("Browse seasons and episodes") { showSeries(series.id) })
     }
     private fun showSeries(id:Long) {
-        val series=SeriesLibrary.build(ViewingGroups.build(history.records(0))).firstOrNull { it.id==id } ?: return
+        val series=SeriesLibrary.build(ViewingGroups.build(if(RemoteAccountCache.active(this)!=null) unifiedRows.ifEmpty { history.records(0) } else history.records(0))).firstOrNull { it.id==id } ?: return
         val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
-        body.addView(txt(series.completed.toString()+" episodes synced to Trakt. Local counts include only identified episodes, not the full catalogue.",14,muted))
+        body.addView(txt(series.completed.toString()+" episodes synced to Trakt. Includes downloaded Trakt history and identified local episodes; not the full catalogue.",14,muted))
         var dialog:android.app.AlertDialog?=null
         val show=CatalogueItem("show",series.id,series.title)
         body.addView(actionButton("Check account series progress") { dialog?.dismiss(); remoteSeriesProgress(series.id,series.title) })
@@ -2317,7 +2370,7 @@ class MainActivity : ComponentActivity() {
         for(season in series.seasons) {
             val label=if(season.number==0) "Specials" else "Season "+season.number
             section(body,label)
-            body.addView(txt(season.completed.toString()+" synced / "+season.episodes.size+" locally identified",13,muted))
+            body.addView(txt(season.completed.toString()+" synced / "+season.episodes.size+" identified episodes",13,muted))
             body.addView(actionButton("View full "+label.lowercase()) { dialog?.dismiss(); showCatalogueSeason(series.id,season.number) })
             for(episode in season.episodes) titleCard(body,episode,true)
         }
@@ -2331,7 +2384,7 @@ class MainActivity : ComponentActivity() {
             val rows=SeriesLibrary.seasonRows(series,season,catalogue)
             val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
             val completed=rows.count { it.local?.confirmed==true }
-            val missing=FranchiseTimeline.missing(id,season,catalogue,history.records(0))
+            val missing=FranchiseTimeline.missing(id,season,catalogue,unifiedRows.ifEmpty { history.records(0) })
             body.addView(actionButton("Missing local episode records: "+missing.size) { choose("No local record • may include unaired episodes",missing.map { it.label() }) { j -> titleDetails("show",id,missing[j].title.substringBefore(" — ")) } })
             body.addView(txt(completed.toString()+" of "+rows.size+" catalogue episodes synced to Trakt",17,ink,true))
             if(rows.isNotEmpty()) body.addView(ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal).apply { progress=completed*100/rows.size; progressTintList=android.content.res.ColorStateList.valueOf(violet) })
@@ -2358,12 +2411,42 @@ class MainActivity : ComponentActivity() {
                 }
             }.show()
     }
+    private var traktDownloadRunning=false
     private fun startTraktSync() {
-        lookup("Downloading Trakt account data; large libraries may take several minutes",{ done -> TraktLibrary.syncAccount(this,done) }) { result:TraktAccountSummary ->
-            val message=result.results.joinToString("\n") { row -> row.kind.title+": "+row.count+(if(row.error.isNotBlank()) " • "+row.error else if(row.unchanged) " • unchanged" else "") }
-            BridgeDialogBuilder(this).setTitle(if(result.complete) "Trakt sync complete" else "Trakt sync incomplete")
-                .setMessage(message.ifBlank { "No categories completed. Check connection and retry." }+if(result.complete) "" else "\n\nPreviously downloaded data is retained where possible.")
-                .setNegativeButton("Close",null).setPositiveButton("Open library") { _,_->openDownloadedTrakt() }.show()
+        if(traktDownloadRunning) { Toast.makeText(this,"Trakt sync already running",Toast.LENGTH_SHORT).show(); return }
+        traktDownloadRunning=true
+        val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(20),dp(16),dp(20),dp(16)) }
+        val label=txt("Connecting to Trakt…",15,ink)
+        val bar=ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal).apply { isIndeterminate=true; max=1000; progressTintList=android.content.res.ColorStateList.valueOf(violet); indeterminateTintList=android.content.res.ColorStateList.valueOf(violet) }
+        body.addView(label); body.addView(bar,LinearLayout.LayoutParams(-1,dp(10)))
+        body.addView(txt("You can close this progress window and continue using the app.",13,muted))
+        val dialog=BridgeDialogBuilder(this).setTitle("Synchronizing Trakt").setView(body).setPositiveButton("Hide",null).create()
+        dialog.show()
+        TraktLibrary.syncAccount(this,progress={ stage,done,total ->
+            if(!isDestroyed && !isFinishing) {
+                label.text=stage+if(total>0) " • "+done+" / "+total+" pages" else if(done>0) " • page "+done else "…"
+                bar.isIndeterminate=total<=0
+                if(total>0) bar.progress=(done.toLong()*1000/total).toInt().coerceIn(0,1000)
+            }
+        }) { result ->
+            traktDownloadRunning=false
+            if(!isDestroyed && !isFinishing) {
+                val wasVisible=dialog.isShowing
+                dialog.dismiss()
+                bridgeModel.cancel()
+                if(tab==4 && settingsCategory=="account") refreshSettingsState("account")
+                refreshHistory()
+                result.fold({ summary ->
+                    val message=summary.results.joinToString("\n") { row -> row.kind.title+": "+row.count+(if(row.error.isNotBlank()) " • "+row.error else if(row.unchanged) " • unchanged" else "") }
+                    if(wasVisible) BridgeDialogBuilder(this).setTitle(if(summary.complete) "Trakt sync complete" else "Trakt sync incomplete")
+                        .setMessage(message.ifBlank { "No categories completed. Check connection and retry." })
+                        .setNegativeButton("Close",null).setNeutralButton("Retry"){_,_->startTraktSync()}.setPositiveButton("Open library"){_,_->showTab(1)}.show()
+                    else Toast.makeText(this,if(summary.complete) "Trakt sync complete" else "Trakt sync incomplete; retry in Account & Sync",Toast.LENGTH_LONG).show()
+                }, {
+                    if(wasVisible) BridgeDialogBuilder(this).setTitle("Trakt sync failed").setMessage("Check your connection and try again. Existing history is retained.").setNegativeButton("Close",null).setPositiveButton("Retry"){_,_->startTraktSync()}.show()
+                    else Toast.makeText(this,"Trakt sync failed; retry in Account & Sync",Toast.LENGTH_LONG).show()
+                })
+            }
         }
     }
     private fun openDownloadedTrakt() {
@@ -2593,12 +2676,16 @@ class MainActivity : ComponentActivity() {
         body.addView(txt("Original viewing sessions are retained. Synced viewing events: "+g.sessions.count { it.status=="synced" },14,muted))
         val dialog=BridgeDialogBuilder(this).setTitle(g.representative.matchLabel.ifBlank { g.representative.title.ifBlank { "Viewing sessions" } }).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close") { _,_->refreshHistory() }.create()
         g.sessions.forEach { session ->
-            if(session.id in g.possibleRewatchIds) body.addView(txt("Possible rewatch — review before approving",14,muted))
+            if(!UnifiedTraktHistory.remote(session) && session.id in g.possibleRewatchIds) body.addView(txt("Possible rewatch — review before approving",14,muted))
             recordCard(body,session,true,g.confirmed || g.queued,onDeleted={ dialog.dismiss() })
         }
         dialog.show()
     }
     private fun recordCard(parent:LinearLayout,r:WatchRecord,expanded:Boolean,completionAlreadyRecorded:Boolean=false,onDeleted:()->Unit={}) {
+        if(UnifiedTraktHistory.remote(r)) {
+            val row=TitleUi(r.matchLabel,"Trakt account history",java.text.DateFormat.getDateTimeInstance().format(java.util.Date(r.ended)),"Watched on Trakt","Historical watch duration unavailable",null,"","Read-only downloaded watch event",if(r.matchType=="episode") "show" else "movie",if(r.matchType=="episode") r.showId else r.traktId)
+            parent.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeTitleCard(violet,row,emptyList()) } }); return
+        }
         val status=when(r.status) { "synced"->"Synced to Trakt"; "active"->"Watching"; "pending"->"Needs review"; "reviewed"->"Ready to confirm"; "restored_audit"->"Restored audit • no upload"; else->r.status.replaceFirstChar { it.uppercase() } }
         val progress=if(r.duration>0 && r.position>=0) (r.position.toDouble()/r.duration*100).toInt().coerceIn(0,100) else null
         val evidence=buildString {
@@ -2643,7 +2730,7 @@ class MainActivity : ComponentActivity() {
         }
         parent.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeTitleCard(violet,row,actions) } })
     }
-    private fun appLabel(pkg: String): String = mapOf("server.plex" to "Plex server","server.jellyfin" to "Jellyfin server","server.emby" to "Emby server","server.kodi" to "Kodi server")[pkg] ?: apps.entries.firstOrNull { it.value == pkg }?.key ?: runCatching {
+    private fun appLabel(pkg: String): String = mapOf(UnifiedTraktHistory.SOURCE to "Trakt history","server.plex" to "Plex server","server.jellyfin" to "Jellyfin server","server.emby" to "Emby server","server.kodi" to "Kodi server")[pkg] ?: apps.entries.firstOrNull { it.value == pkg }?.key ?: runCatching {
         packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg,0)).toString()
     }.getOrDefault(pkg)
     private fun chooseInstalledApps() {
