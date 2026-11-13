@@ -58,7 +58,9 @@ class MainActivity : ComponentActivity() {
         if (uri.scheme != "traktbridge" || uri.encodedAuthority != "callback" || !uri.encodedPath.isNullOrEmpty() || uri.fragment!=null) return
         i.data = null
         showAuth("Connecting to Trakt…")
-        auth.complete(uri) { showAuth(it) }
+        auth.complete(uri) { message ->
+            if(!isDestroyed && !isFinishing) { showAuth(message); if(message.startsWith("Trakt connected.")) offerTraktSync() }
+        }
     }
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); handleCallback(intent); handleReview(intent); handleShared(intent); handleTrackingShortcut(intent); handleAutomation(intent) }
     override fun onActivityResult(requestCode:Int,resultCode:Int,data:Intent?) {
@@ -558,11 +560,12 @@ class MainActivity : ComponentActivity() {
                 root.addView(account)
                 button("Connect Trakt") { try { startActivity(Intent(Intent.ACTION_VIEW, auth.begin())); showAuth("Complete sign-in in your browser") } catch (_: Exception) { showAuth("Unable to open sign-in") } }
                 button("Check Trakt connection") { showAuth("Checking…"); auth.check { showAuth(it) } }
-                button("Daily account history refresh") { configureAccountRefresh() }
-                button("Refresh downloaded Trakt history") { lookup("Refreshing up to 2,000 remote watches",{ done -> TraktLibrary.refreshHistory(this,20,done) }) { n:Int -> Toast.makeText(this,n.toString()+" entries downloaded or updated",Toast.LENGTH_LONG).show() } }
+                button("Daily Trakt library sync") { configureAccountRefresh() }
+                button("Sync Trakt account now") { offerTraktSync() }
+                button("Downloaded Trakt library") { openDownloadedTrakt() }
                 button("Trakt account library") { openTraktLibrary() }
-                button("Clear downloaded Trakt history") { BridgeDialogBuilder(this).setTitle("Clear remote history cache?").setMessage("Local viewing records and Trakt account history are unchanged.").setNegativeButton("Cancel",null).setPositiveButton("Clear") { _,_->TraktLibrary.clearCache(this) }.show() }
-                button("Disconnect Trakt locally") { RemoteRefreshSchedule.disable(this); auth.disconnect { TraktLibrary.clearCache(this); showAuth(it) } }
+                button("Clear downloaded Trakt library") { BridgeDialogBuilder(this).setTitle("Clear downloaded Trakt library?").setMessage("Stops automatic refresh and deletes downloaded account data on this device. Local viewing records and your Trakt account are unchanged.").setNegativeButton("Cancel",null).setPositiveButton("Clear") { _,_->RemoteRefreshSchedule.disable(this); TraktLibrary.clearCache(this) }.show() }
+                button("Disconnect Trakt locally") { RemoteRefreshSchedule.disable(this); auth.disconnect { showAuth(it) } }
                 label("Uses Trakt but is not endorsed or certified by Trakt.")
                 label("Only selected apps are tracked locally. Catalogue search sends only the search text you choose to Trakt. Only explicitly approved completed watches are uploaded.")
                 button("Retry approved sync queue") { HistorySync.schedule(this); refreshHistory() }
@@ -809,11 +812,11 @@ class MainActivity : ComponentActivity() {
         status("Screenshot protection",prefs.getBoolean("secure_screen",false))
         status("Daily encrypted backup",prefs.getBoolean("daily_backup",false))
         status("Automatic remote refresh",prefs.getString("auto_refresh_account","").orEmpty().isNotBlank())
-        body.addView(txt("Local viewing SQLite is not encrypted. Remote history cache, OAuth credentials and optional encrypted backups use device-backed or password-based encryption.",14,muted))
+        body.addView(txt("Local viewing SQLite is not encrypted. Downloaded Trakt account data, OAuth credentials and optional encrypted backups use device-backed or password-based encryption.",14,muted))
         body.addView(actionButton("Pause tracking") { privacyMode() })
         body.addView(actionButton("Disable automatic remote refresh") { RemoteRefreshSchedule.disable(this); Toast.makeText(this,"Remote refresh disabled",Toast.LENGTH_SHORT).show() })
-        body.addView(actionButton("Delete downloaded remote history") {
-            BridgeDialogBuilder(this).setTitle("Clear cached history?").setMessage("Local viewing records and your Trakt account are unchanged.").setNegativeButton("Cancel",null).setPositiveButton("Clear") { _,_->TraktLibrary.clearCache(this) }.show()
+        body.addView(actionButton("Delete downloaded Trakt account data") {
+            BridgeDialogBuilder(this).setTitle("Clear downloaded Trakt data?").setMessage("Stops automatic refresh and deletes the downloaded account library. Local viewing records and your Trakt account are unchanged.").setNegativeButton("Cancel",null).setPositiveButton("Clear") { _,_->RemoteRefreshSchedule.disable(this); TraktLibrary.clearCache(this) }.show()
         })
         body.addView(actionButton("Export encrypted history") { startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/octet-stream").putExtra(Intent.EXTRA_TITLE,"traktbridge-history.tbenc"),63) })
         BridgeDialogBuilder(this).setTitle("Privacy dashboard").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
@@ -1160,7 +1163,7 @@ class MainActivity : ComponentActivity() {
                 dashboard.addView(actionButton("Upcoming episodes") { upcomingEpisodes() })
                 dashboard.addView(actionButton("Recommendations from your history") { recommendFromHistory() })
                 dashboard.addView(actionButton("Anime catalogue (AniList)") { animeSearch() })
-                dashboard.addView(actionButton("Open Trakt account library") { openTraktLibrary() })
+                dashboard.addView(actionButton("Open Trakt account library") { openDownloadedTrakt() })
 
                     }
                     "recent" -> {
@@ -1175,7 +1178,7 @@ class MainActivity : ComponentActivity() {
             1,2 -> {
                 if(tab==1) dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeLibraryToolbar(violet,groups.size.toString()+" identified titles and provisional groups",{ universalSearch() },{ editHistoryFilter(records) },{ manualLog() }) } })
                 else { if(tvMode) dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeTvSettings(violet,listOf(UiAction("Review recent activity") { reviewUsage() },UiAction("Retry approved uploads") { HistorySync.schedule(this@MainActivity); refreshHistory() })) } }); dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeReviewSummary(violet,pending,{ manualLog() },{ HistorySync.schedule(this@MainActivity); refreshHistory() }) } }) }
-                if(tab==1) { dashboard.addView(actionButton("Unified movie, TV and anime library") { unifiedLibrary() }); dashboard.addView(actionButton("Advanced search • tags and folders") { organizedLibrary() }) }
+                if(tab==1) { dashboard.addView(actionButton("Synced Trakt account library") { openDownloadedTrakt() }); dashboard.addView(actionButton("Unified movie, TV and anime library") { unifiedLibrary() }); dashboard.addView(actionButton("Advanced search • tags and folders") { organizedLibrary() }) }
                 dashboard.addView(actionButton("Refresh") { refreshHistory() })
                 if(tab==2) { dashboard.addView(actionButton("Review recent app activity") { reviewUsage() }); dashboard.addView(actionButton("Retry approved sync queue") { HistorySync.schedule(this); refreshHistory() }) }
                 if(tab==1) {
@@ -1771,10 +1774,11 @@ class MainActivity : ComponentActivity() {
         val field=EditText(this).apply { hint="Search movies, series and anime"; setSingleLine(true) }
         BridgeDialogBuilder(this).setTitle("Unified library").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Browse") { _,_->
             val library=UnifiedLibrary.build(history.records(0),anime,field.text.toString())
-            choose("Library categories",listOf("Movies ("+library.movies.size+")","TV / Trakt series ("+library.series.size+")","AniList local anime ("+library.anime.size+")","Unidentified ("+library.unidentified.size+")")) { category ->
+            choose("Library categories",listOf("Movies ("+library.movies.size+")","TV / Trakt series ("+library.series.size+")","AniList local anime ("+library.anime.size+")","Unidentified ("+library.unidentified.size+")","Downloaded Trakt account library")) { category ->
                 when(category) {
                     0,3 -> { val rows=if(category==0) library.movies else library.unidentified; choose("Viewing titles",rows.take(200).map { it.representative.matchLabel.ifBlank { it.representative.title.ifBlank { "Unidentified" } } }) { showSessions(rows[it]) } }
                     1 -> choose("Series",library.series.take(200).map { it.title }) { showSeries(library.series[it].id) }
+                    4 -> openDownloadedTrakt()
                     2 -> choose("Local anime",library.anime.take(200).map { it.title+" • "+it.progress+"/"+(if(it.episodes>0) it.episodes.toString() else "?") }+listOf("Find anime")) { index ->
                         if(index==minOf(200,library.anime.size)) animeSearch() else library.anime[index].let { editAnimeProgress(it.id,it.title,it.episodes) }
                     }
@@ -2088,11 +2092,87 @@ class MainActivity : ComponentActivity() {
             BridgeDialogBuilder(this).setTitle(series.title+" • "+if(season==0) "Specials" else "Season "+season).setView(ScrollView(this).apply { addView(body) }).setNegativeButton("Back") { _,_->showSeries(id) }.setPositiveButton("Close") { _,_->refreshHistory() }.show()
         }
     }
+    private fun offerTraktSync() {
+        BridgeDialogBuilder(this).setTitle("Sync your Trakt account?")
+            .setMessage("Download existing movie and episode watches, repeat viewings, watchlist, ratings, saved playback, favorites and collections to this device. Data is encrypted and kept separate from measured local viewing. No uploads or changes to your Trakt account. A large account may take time.")
+            .setNegativeButton("Cancel",null)
+            .setNeutralButton("Sync once") { _,_->startTraktSync() }
+            .setPositiveButton("Sync now and daily") { _,_->
+                lookup("Verifying Trakt account",{ done -> TraktLibrary.accountId(this,done) }) { id:String ->
+                    RemoteRefreshSchedule.enable(this,id); startTraktSync()
+                }
+            }.show()
+    }
+    private fun startTraktSync() {
+        lookup("Downloading Trakt account data; large libraries may take several minutes",{ done -> TraktLibrary.syncAccount(this,done) }) { result:TraktAccountSummary ->
+            val message=result.results.joinToString("\n") { row -> row.kind.title+": "+row.count+(if(row.error.isNotBlank()) " • "+row.error else if(row.unchanged) " • unchanged" else "") }
+            BridgeDialogBuilder(this).setTitle(if(result.complete) "Trakt sync complete" else "Trakt sync incomplete")
+                .setMessage(message.ifBlank { "No categories completed. Check connection and retry." }+if(result.complete) "" else "\n\nPreviously downloaded data is retained where possible.")
+                .setNegativeButton("Close",null).setPositiveButton("Open library") { _,_->openDownloadedTrakt() }.show()
+        }
+    }
+    private fun openDownloadedTrakt() {
+        val accountId=RemoteAccountCache.active(this)
+        if(accountId==null) {
+            BridgeDialogBuilder(this).setTitle("Your Trakt library").setMessage("Connect your Trakt account and sync to download your existing data.").setNegativeButton("Close",null).setNeutralButton("Online library") { _,_->openTraktLibrary() }.setPositiveButton("Sync now") { _,_->offerTraktSync() }.show()
+            return
+        }
+        val kinds=TraktData.entries
+        val labels=kinds.map { kind ->
+            val s=RemoteAccountCache.status(this,accountId,kind)
+            kind.title+" • "+(s?.let { it.count.toString()+if(it.complete) "" else " (partial)" } ?: "Not downloaded")
+        }
+        choose("Downloaded Trakt library",labels+listOf("Sync now","Online Trakt library","Daily sync settings")) { i ->
+            when(i) {
+                kinds.size->offerTraktSync()
+                kinds.size+1->openTraktLibrary()
+                kinds.size+2->configureAccountRefresh()
+                else->browseDownloadedTrakt(accountId,kinds[i],1,"")
+            }
+        }
+    }
+    private fun browseDownloadedTrakt(accountId:String,kind:TraktData,page:Int,query:String) {
+        if(RemoteAccountCache.active(this)!=accountId) { openDownloadedTrakt(); return }
+        val app=applicationContext
+        lookup("Loading downloaded "+kind.title,{ done ->
+            Thread {
+                val result=runCatching { RemoteAccountCache.rows(app,accountId,kind).filter { query.isBlank() || it.title.contains(query,ignoreCase=true) } }
+                runOnUiThread { done(result) }
+            }.start()
+        }) { rows:List<RemoteItem> ->
+            if(RemoteAccountCache.active(this)!=accountId) return@lookup
+            val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
+            val size=50; val pages=maxOf(1,(rows.size+size-1)/size); val current=page.coerceIn(1,pages)
+            val status=RemoteAccountCache.status(this,accountId,kind)
+            body.addView(txt(rows.size.toString()+" entries • Page "+current+" of "+pages,16,ink,true))
+            body.addView(txt("Downloaded from Trakt • "+(status?.let { if(it.complete) "Complete snapshot" else "Partial snapshot" } ?: "Not synced")+" • Does not add measured watch time",13,muted))
+            var dialog:android.app.AlertDialog?=null
+            body.addView(actionButton("Search downloaded titles") {
+                val field=EditText(this).apply { hint="Title"; setSingleLine(true); setText(query) }
+                BridgeDialogBuilder(this).setTitle("Search "+kind.title).setView(field).setNegativeButton("Cancel",null).setPositiveButton("Search") { _,_->dialog?.dismiss(); browseDownloadedTrakt(accountId,kind,1,field.text.toString().trim()) }.show()
+            })
+            for(item in rows.drop((current-1)*size).take(size)) {
+                val card=panel(body)
+                card.addView(txt(item.title,17,ink,true))
+                if(item.watchedAt.isNotBlank()) card.addView(txt("Watched on Trakt: "+item.watchedAt,12,muted))
+                if(item.rating>0) card.addView(txt("Your rating: "+item.rating+"/10",13,violet))
+                if(item.progress in 0.0..100.0) card.addView(txt("Saved progress: "+item.progress.toInt()+"%",13,violet))
+                if(item.type in setOf("movie","show")) card.addView(actionButton("Title details (online)") { titleDetails(item.type,item.id,item.title) })
+                if(item.showId>0) card.addView(actionButton("Series progress (online)") { remoteSeriesProgress(item.showId,item.title.substringBefore(" — ")) })
+                card.addView(actionButton("Watchlist / rating actions (online)") { remoteActions(item,accountId) })
+            }
+            if(rows.isEmpty()) body.addView(txt("No matching downloaded entries.",14,muted))
+            if(current>1) body.addView(actionButton("Previous page") { dialog?.dismiss(); browseDownloadedTrakt(accountId,kind,current-1,query) })
+            if(current<pages) body.addView(actionButton("Next page") { dialog?.dismiss(); browseDownloadedTrakt(accountId,kind,current+1,query) })
+            dialog=BridgeDialogBuilder(this).setTitle(kind.title).setView(ScrollView(this).apply { addView(body) }).setNegativeButton("Back") { _,_->openDownloadedTrakt() }.setPositiveButton("Close",null).create()
+            dialog.show()
+        }
+    }
     private fun configureAccountRefresh() {
         val enabled=prefs.getString("auto_refresh_account","").orEmpty().isNotBlank()
-        BridgeDialogBuilder(this).setTitle("Daily Trakt history refresh").setMessage("Download the latest 100 remote watches approximately daily while connected. No upload, no sampled watch time added. Currently: "+if(enabled) "enabled" else "disabled").setNegativeButton("Close",null).setNeutralButton("Disable") { _,_->RemoteRefreshSchedule.disable(this); Toast.makeText(this,"Automatic refresh disabled",Toast.LENGTH_SHORT).show() }.setPositiveButton("Enable for connected account") { _,_->
+        BridgeDialogBuilder(this).setTitle("Daily Trakt library sync").setMessage("Refresh downloaded history, watchlist, ratings, playback, favorites and collections approximately daily while connected. No upload or sampled watch time. Currently: "+if(enabled) "enabled" else "disabled").setNegativeButton("Close",null).setNeutralButton("Disable") { _,_->RemoteRefreshSchedule.disable(this); Toast.makeText(this,"Automatic refresh disabled",Toast.LENGTH_SHORT).show() }.setPositiveButton("Enable for connected account") { _,_->
             lookup("Verifying account",{ done -> TraktLibrary.accountId(this,done) }) { id:String ->
-                RemoteRefreshSchedule.enable(this,id); Toast.makeText(this,"Daily refresh enabled",Toast.LENGTH_LONG).show()
+                RemoteRefreshSchedule.enable(this,id); startTraktSync(); Toast.makeText(this,"Daily library sync enabled",Toast.LENGTH_LONG).show()
             }
         }.show()
     }
