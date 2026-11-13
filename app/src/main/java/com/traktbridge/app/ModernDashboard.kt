@@ -125,10 +125,10 @@ fun ModernReviewCard(accent:Int,item:PosterLibraryItem,evidence:String,primary:U
                 item.progress?.let { LinearProgressIndicator(progress={it.coerceIn(0f,1f)},modifier=Modifier.fillMaxWidth().height(4.dp)) }
                 if(evidence.isNotBlank()) Text(evidence,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                 if(primary!=null || secondary!=null) Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                    if(primary!=null) Button(onClick=primary.action,modifier=Modifier.weight(1f)) { Text(primary.label) }
-                    if(secondary!=null) OutlinedButton(onClick=secondary.action,modifier=Modifier.weight(1f)) { Text(secondary.label) }
+                    if(primary!=null) Button(onClick=primary.run,modifier=Modifier.weight(1f)) { Text(primary.label) }
+                    if(secondary!=null) OutlinedButton(onClick=secondary.run,modifier=Modifier.weight(1f)) { Text(secondary.label) }
                 }
-                if(manual!=null) TextButton(onClick=manual.action) { Text(manual.label) }
+                if(manual!=null) TextButton(onClick=manual.run) { Text(manual.label) }
             }
         }
     }

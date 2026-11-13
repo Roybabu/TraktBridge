@@ -1357,7 +1357,7 @@ class MainActivity : ComponentActivity() {
         if("discover" !in hidden) {
             section(dashboard,"Explore")
             listOf(UiAction("For you"){ recommendFromHistory() },UiAction("Upcoming episodes"){ upcomingEpisodes() },UiAction("Trending titles"){ discover() },UiAction("Anime"){ animeSearch() }).chunked(2).forEach { batch ->
-                modernContent { BridgeTheme(violet) { androidx.compose.foundation.layout.Row(androidx.compose.ui.Modifier.fillMaxWidth(),horizontalArrangement=androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) { batch.forEach { item -> androidx.compose.material3.OutlinedButton(onClick=item.action,modifier=androidx.compose.ui.Modifier.weight(1f)) { androidx.compose.material3.Text(item.label) } } } } }
+                modernContent { BridgeTheme(violet) { androidx.compose.foundation.layout.Row(androidx.compose.ui.Modifier.fillMaxWidth(),horizontalArrangement=androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) { batch.forEach { item -> androidx.compose.material3.OutlinedButton(onClick=item.run,modifier=androidx.compose.ui.Modifier.weight(1f)) { androidx.compose.material3.Text(item.label) } } } } }
             }
         }
         if("goal" !in hidden && prefs.getBoolean("show_monthly_goal",true)) monthlyGoalCard(dashboard,records)
@@ -1390,7 +1390,7 @@ class MainActivity : ComponentActivity() {
             modernContent { ModernReviewCard(violet,item,evidence,primary,secondary,manual) {
                 val options=titleEntry(g,true).actions.filter { it.label !in setOf("Yes, correct","No, incorrect","Search manually") }
                 val menu=options+if(r.status in setOf("pending","reviewed")) listOf(UiAction("Delete viewing record"){deleteFromReview(r)}) else emptyList()
-                choose("Viewing record",menu.map { it.label }) { menu[it].action() }
+                choose("Viewing record",menu.map { it.label }) { menu[it].run() }
             } }
         }
         if(visible.size>historyLimit && historyLimit<1000) dashboard.addView(actionButton("Show more"){historyLimit=MemoryPolicy.nextPage(historyLimit,MemoryPolicy.pageSize(lowRam));refreshHistory()})
