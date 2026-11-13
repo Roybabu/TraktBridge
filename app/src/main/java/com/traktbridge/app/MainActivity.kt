@@ -55,7 +55,7 @@ class MainActivity : ComponentActivity() {
     private val amoled:Boolean get()=AppearancePolicy.mode(prefs.getString("appearance_mode","dark").orEmpty())=="amoled"
     private val surface:Int get()=if(amoled) 0xff101010.toInt() else BridgeDesign.surface
     private val bg:Int get()=if(amoled) 0xff000000.toInt() else BridgeDesign.background
-    private fun showAuth(message: String = auth.status()) { account.text = message }
+    private fun showAuth(message: String = auth.status()) { account.text = message; if(!auth.hasConnection()) { unifiedRows=emptyList(); refreshHistory() } }
     private fun handleCallback(i: Intent) {
         val uri = i.data ?: return
         if (uri.scheme != "traktbridge" || uri.encodedAuthority != "callback" || !uri.encodedPath.isNullOrEmpty() || uri.fragment!=null) return
@@ -530,7 +530,7 @@ class MainActivity : ComponentActivity() {
         settingsOverview.visibility=if(settingsCategory.isEmpty()) android.view.View.VISIBLE else android.view.View.GONE
         settingsGroups.forEach { (key,page) -> page.visibility=if(key==settingsCategory) android.view.View.VISIBLE else android.view.View.GONE }
         updateSettingsStatus()
-        if(settingsCategory in setOf("devices","tracking","privacy")) refreshSettingsState(settingsCategory)
+        if(settingsCategory in setOf("account","devices","tracking","privacy")) refreshSettingsState(settingsCategory)
         if(resetScroll) settingsPage.scrollTo(0,0)
         if(tvMode && tab==4) settingsPage.post { if(tab==4) TvFocus.firstContent(settingsPage) }
     }
@@ -583,6 +583,7 @@ class MainActivity : ComponentActivity() {
     }
     private fun refreshSettingsState(id:String) {
         val page=settingsGroups[id] ?: return
+        if(id=="account") (account.parent as? ViewGroup)?.removeView(account)
         if(page.childCount>3) page.removeViews(3,page.childCount-3)
         populateSettings(id,page)
         updateSettingsStatus()
@@ -656,7 +657,7 @@ class MainActivity : ComponentActivity() {
                 settingRow(group ?: root,"Sync maintenance","Retry approved uploads or clear downloaded account data") {
                     choose("Sync maintenance",listOf("Retry approved uploads","Clear downloaded library")) { index ->
                         if(index==0) { HistorySync.schedule(this); refreshHistory(); Toast.makeText(this,"Approved sync queue scheduled",Toast.LENGTH_SHORT).show() }
-                        else BridgeDialogBuilder(this).setTitle("Clear downloaded Trakt library?").setMessage("Stops automatic refresh and deletes downloaded account data on this device. Local viewing records and your Trakt account are unchanged.").setNegativeButton("Cancel",null).setPositiveButton("Clear") { _,_-> RemoteRefreshSchedule.disable(this); TraktLibrary.clearCache(this) }.show()
+                        else BridgeDialogBuilder(this).setTitle("Clear downloaded Trakt library?").setMessage("Stops automatic refresh and deletes downloaded account data on this device. Local viewing records and your Trakt account are unchanged.").setNegativeButton("Cancel",null).setPositiveButton("Clear") { _,_-> RemoteRefreshSchedule.disable(this); TraktLibrary.clearCache(this); unifiedRows=emptyList(); refreshSettingsState("account"); refreshHistory() }.show()
                     }
                 }
                 settingRow(group ?: root,"About Trakt sync","Data usage and upload permissions") {
@@ -1334,7 +1335,8 @@ class MainActivity : ComponentActivity() {
         val hidden=DashboardPreferences.visible(prefs.getString("dashboard_hidden","").orEmpty())
         val active=groups.filter { it.active }
         val continuing=SeriesLibrary.continueWatching(ViewingGroups.build(records))
-        val recent=groups.filter { !it.active && it.key !in continuing.take(7).map { c->c.key } }.take(5)
+        val continuingKeys=continuing.take(7).map { it.key }.toSet()
+        val recent=groups.filter { !it.active && it.key !in continuingKeys }.take(5)
         if("now" !in hidden && active.isNotEmpty()) {
             section(dashboard,"Now watching")
             modernContent { ModernActionRow(violet,active.first().representative.title,"Live playback • all devices"){ nowPlaying() } }
@@ -2314,7 +2316,7 @@ class MainActivity : ComponentActivity() {
         card.addView(actionButton("Browse seasons and episodes") { showSeries(series.id) })
     }
     private fun showSeries(id:Long) {
-        val series=SeriesLibrary.build(ViewingGroups.build(unifiedRows.ifEmpty { history.records(0) })).firstOrNull { it.id==id } ?: return
+        val series=SeriesLibrary.build(ViewingGroups.build(if(RemoteAccountCache.active(this)!=null) unifiedRows.ifEmpty { history.records(0) } else history.records(0))).firstOrNull { it.id==id } ?: return
         val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
         body.addView(txt(series.completed.toString()+" episodes synced to Trakt. Includes downloaded Trakt history and identified local episodes; not the full catalogue.",14,muted))
         var dialog:android.app.AlertDialog?=null
@@ -2373,6 +2375,10 @@ class MainActivity : ComponentActivity() {
     private fun startTraktSync() {
         lookup("Downloading Trakt account data; large libraries may take several minutes",{ done -> TraktLibrary.syncAccount(this,done) }) { result:TraktAccountSummary ->
             val message=result.results.joinToString("\n") { row -> row.kind.title+": "+row.count+(if(row.error.isNotBlank()) " • "+row.error else if(row.unchanged) " • unchanged" else "") }
+            if(tab==4 && settingsCategory=="account") {
+                (account.parent as? ViewGroup)?.removeView(account)
+                refreshSettingsState("account")
+            }
             refreshHistory()
             BridgeDialogBuilder(this).setTitle(if(result.complete) "Trakt sync complete" else "Trakt sync incomplete")
                 .setMessage(message.ifBlank { "No categories completed. Check connection and retry." }+if(result.complete) "" else "\n\nPreviously downloaded data is retained where possible.")
