@@ -18,6 +18,8 @@ import androidx.test.espresso.matcher.ViewMatchers.withText
 import androidx.test.espresso.action.ViewActions.click
 import androidx.test.espresso.assertion.ViewAssertions.matches
 import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
+import androidx.test.espresso.matcher.ViewMatchers.isAssignableFrom
+import androidx.test.espresso.Espresso.pressBack
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -68,7 +70,15 @@ class ComposeDialogRegressionTest {
         prefs.edit().putBoolean("setup_seen",true).commit()
         try {
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-                for((method,title) in listOf("nowPlaying" to "Now Playing • All devices","showDeviceHistory" to "Cross-device history")) {
+                scenario.onActivity { activity ->
+                    MainActivity::class.java.getDeclaredMethod("nowPlaying").apply { isAccessible=true }.invoke(activity)
+                }
+                instrumentation.waitForIdleSync()
+                onView(isAssignableFrom(ComposeView::class.java)).inRoot(isDialog()).check(matches(isDisplayed()))
+                pressBack()
+                instrumentation.waitForIdleSync()
+                scenario.onActivity { assertFalse(it.isFinishing) }
+                for((method,title) in listOf("showDeviceHistory" to "Cross-device history")) {
                     scenario.onActivity { activity ->
                         MainActivity::class.java.getDeclaredMethod(method).apply { isAccessible=true }.invoke(activity)
                     }

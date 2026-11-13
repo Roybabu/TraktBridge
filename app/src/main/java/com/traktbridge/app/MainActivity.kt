@@ -1821,27 +1821,27 @@ class MainActivity : ComponentActivity() {
     private fun searchTitles(query:String) {
         val q=query.trim().take(200)
         if(q.isBlank()) return
-            val local=ViewingGroups.build(ViewingAnalytics.filter(unifiedRows.ifEmpty { history.records(0) },HistoryFilter(query=q)))
-            val favorites=personalStore("favorites").all.values.map { it.toString() }.filter { it.contains(q,true) }
-            val collections=personalStore("collections").all.filter { (name,value) -> name.contains(q,true) || value.toString().contains(q,true) }.keys.sorted()
-            val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
-            section(body,"Local library • "+local.size)
-            local.take(20).forEach { titleCard(body,it,true) }
-            if(local.isEmpty()) body.addView(txt("No matching viewing history.",14,muted))
-            if(favorites.isNotEmpty()) { section(body,"Favorites"); favorites.take(20).forEach { body.addView(txt(it,14)) } }
-            if(collections.isNotEmpty()) { section(body,"Matching collections"); collections.forEach { body.addView(txt(it,14)) }; body.addView(actionButton("Open collections") { this@MainActivity.collections() }) }
-            for(type in listOf("movie","show")) body.addView(actionButton("Search Trakt "+type+"s") {
-                lookup("Searching Trakt",{ done -> TraktCatalogue.search(q,type,done) }) { rows:List<CatalogueItem> ->
-                    choose("Trakt "+type+"s",rows.map { it.label() }) { index -> titleDetails(type,rows[index].id,rows[index].title) }
-                }
-            })
-            body.addView(actionButton("Search actors and directors") { peopleSearch(q) })
-            body.addView(actionButton("Search AniList anime") {
-                lookup("Searching AniList",{ done -> AnimeCatalogue.search(q,done) }) { rows:List<AnimeResult> ->
-                    choose("Anime matches",rows.map { it.english.ifBlank { it.romaji } }) { index -> startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://anilist.co/anime/"+rows[index].id))) }
-                }
-            })
-            BridgeDialogBuilder(this).setTitle("Search: "+q).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
+        val local=ViewingGroups.build(ViewingAnalytics.filter(unifiedRows.ifEmpty { history.records(0) },HistoryFilter(query=q)))
+        val favorites=personalStore("favorites").all.values.map { it.toString() }.filter { it.contains(q,true) }
+        val collections=personalStore("collections").all.filter { (name,value) -> name.contains(q,true) || value.toString().contains(q,true) }.keys.sorted()
+        val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
+        section(body,"Local library • "+local.size)
+        local.take(20).forEach { titleCard(body,it,true) }
+        if(local.isEmpty()) body.addView(txt("No matching viewing history.",14,muted))
+        if(favorites.isNotEmpty()) { section(body,"Favorites"); favorites.take(20).forEach { body.addView(txt(it,14)) } }
+        if(collections.isNotEmpty()) { section(body,"Matching collections"); collections.forEach { body.addView(txt(it,14)) }; body.addView(actionButton("Open collections") { this@MainActivity.collections() }) }
+        for(type in listOf("movie","show")) body.addView(actionButton("Search Trakt "+type+"s") {
+            lookup("Searching Trakt",{ done -> TraktCatalogue.search(q,type,done) }) { rows:List<CatalogueItem> ->
+                choose("Trakt "+type+"s",rows.map { it.label() }) { index -> titleDetails(type,rows[index].id,rows[index].title) }
+            }
+        })
+        body.addView(actionButton("Search actors and directors") { peopleSearch(q) })
+        body.addView(actionButton("Search AniList anime") {
+            lookup("Searching AniList",{ done -> AnimeCatalogue.search(q,done) }) { rows:List<AnimeResult> ->
+                choose("Anime matches",rows.map { it.english.ifBlank { it.romaji } }) { index -> startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://anilist.co/anime/"+rows[index].id))) }
+            }
+        })
+        BridgeDialogBuilder(this).setTitle("Search: "+q).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
     }
     private fun manualLog() {
         val field=EditText(this).apply { hint="Movie or episode title"; setSingleLine(true) }
