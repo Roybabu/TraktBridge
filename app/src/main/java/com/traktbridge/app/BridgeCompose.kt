@@ -60,11 +60,21 @@ fun BridgeTheme(accent:Int,content:@Composable ()->Unit) {
 @Composable
 fun BridgeHeader(accent:Int,onSearch:()->Unit) {
     BridgeTheme(accent) {
-        Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background).padding(horizontal=16.dp,vertical=4.dp),verticalAlignment=Alignment.CenterVertically) {
-            Image(painterResource(R.drawable.bridge_generated),contentDescription=null,modifier=Modifier.size(36.dp))
-            Spacer(Modifier.width(10.dp))
-            Text("TraktBridge",modifier=Modifier.weight(1f),color=MaterialTheme.colorScheme.onBackground,style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.SemiBold,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-            TextButton(onClick=hapticClick(onSearch),modifier=Modifier.heightIn(min=48.dp)) { Text("Search") }
+        Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background).padding(horizontal=16.dp,vertical=4.dp)) {
+            Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
+                Image(painterResource(R.drawable.bridge_generated),contentDescription=null,modifier=Modifier.size(36.dp))
+                Spacer(Modifier.width(10.dp))
+                Text("TraktBridge",modifier=Modifier.weight(1f),color=MaterialTheme.colorScheme.onBackground,style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.SemiBold)
+                IconButton(onClick=hapticClick(onSearch),modifier=Modifier.size(48.dp).semantics { contentDescription="Search" }) {
+                    Canvas(Modifier.size(24.dp)) {
+                        val tint=Color(accent)
+                        val stroke=size.minDimension*0.085f
+                        drawCircle(tint,radius=size.minDimension*0.29f,center=Offset(size.width*0.42f,size.height*0.42f),style=Stroke(width=stroke))
+                        drawLine(tint,Offset(size.width*0.64f,size.height*0.64f),Offset(size.width*0.88f,size.height*0.88f),strokeWidth=stroke,cap=StrokeCap.Round)
+                    }
+                }
+            }
+            Text("Your viewing companion",modifier=Modifier.fillMaxWidth().padding(start=46.dp,bottom=4.dp),color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.bodyMedium)
         }
     }
 }
