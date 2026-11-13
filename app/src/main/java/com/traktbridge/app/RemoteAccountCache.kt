@@ -43,22 +43,33 @@ object RemoteAccountCache {
         return RemoteItem(o.getString("type"),o.getLong("id"),o.getString("title"),o.getLong("show"),o.getInt("season"),o.getInt("episode"),o.getString("watched"),o.getLong("event"),o.getInt("rating"),o.getDouble("progress"))
     }
     private fun scope(account:String,kind:TraktData,key:String)=AccountScope.key(account)+":"+kind.name+":"+key
-    @Synchronized fun publish(c:Context,account:String,generation:Long,kind:TraktData,rows:Map<String,RemoteItem>,complete:Boolean,marker:String):Boolean {
+    fun publish(c:Context,account:String,generation:Long,kind:TraktData,rows:Map<String,RemoteItem>,complete:Boolean,marker:String):Boolean {
         if(!current(c,account,generation)) return false
         val previous=status(c,account,kind)
         // Do not replace a valid full snapshot with a truncated download.
         if(!complete && previous!=null && previous.complete) return false
+        val encrypted=rows.mapValues { (key,row)->PrivateHistoryCache.seal(encode(row),scope(account,kind,key)) }
+        return synchronized(this) {
+        if(!current(c,account,generation)) return@synchronized false
         val p=store(c,kind)
         val edit=p.edit().clear()
-        for((key,row) in rows) edit.putString("row:"+key,PrivateHistoryCache.seal(encode(row),scope(account,kind,key)))
+        for((key,value) in encrypted) edit.putString("row:"+key,value)
         edit.putInt("count",rows.size).putBoolean("complete",complete).putLong("updated",System.currentTimeMillis()).putString("marker",if(complete) marker else "")
-        return edit.commit()
-    }
-    @Synchronized fun rows(c:Context,account:String,kind:TraktData):List<RemoteItem> {
-        if(active(c)!=account) return emptyList()
-        val list=store(c,kind).all.entries.mapNotNull { (key,value) ->
-            if(!key.startsWith("row:")) null else runCatching { decode(PrivateHistoryCache.open(value as String,scope(account,kind,key.removePrefix("row:")))) }.getOrNull()
+        edit.commit()
         }
+    }
+    fun rows(c:Context,account:String,kind:TraktData,progress:(Int,Int)->Unit={_,_->}):List<RemoteItem> {
+        if(active(c)!=account) return emptyList()
+        val entries=store(c,kind).all.entries.filter { it.key.startsWith("row:") }
+        val total=entries.size
+        progress(0,total)
+        val list=entries.mapIndexedNotNull { index,(key,value) ->
+            if(Thread.currentThread().isInterrupted) throw InterruptedException()
+            val row=decode(PrivateHistoryCache.open(value as String,scope(account,kind,key.removePrefix("row:"))))
+            if((index+1)%50==0 || index+1==total) progress(index+1,total)
+            row
+        }
+        if(active(c)!=account) return emptyList()
         return if(kind==TraktData.HISTORY) list.sortedByDescending { runCatching { Instant.parse(it.watchedAt) }.getOrDefault(Instant.EPOCH) }
         else list.sortedBy { it.title.lowercase(java.util.Locale.ROOT) }
     }
