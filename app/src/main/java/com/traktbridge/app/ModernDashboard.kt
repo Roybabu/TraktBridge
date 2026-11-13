@@ -28,7 +28,7 @@ fun ModernPageHeader(accent:Int,title:String,detail:String="",onFilter:(()->Unit
     BridgeTheme(accent) {
         Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text(title,style=MaterialTheme.typography.headlineMedium,fontWeight=FontWeight.SemiBold)
+                Text(title,color=MaterialTheme.colorScheme.onBackground,style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.SemiBold)
                 if(detail.isNotBlank()) Text(detail,color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.bodySmall)
             }
             if(onFilter!=null) TextButton(onClick=onFilter) { Text("Filter") }

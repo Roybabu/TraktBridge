@@ -42,12 +42,11 @@ fun LibraryPoster(item:PosterLibraryItem,modifier:Modifier) {
 @Composable
 fun PosterLibraryHeader(accent:Int,category:String,onCategory:(String)->Unit,onSearch:()->Unit,onFilter:()->Unit,onMenu:()->Unit) {
     BridgeTheme(accent) {
-        Column(Modifier.fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(2.dp)) {
             Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
-                Text("Library",Modifier.weight(1f),style=MaterialTheme.typography.headlineMedium,fontWeight=FontWeight.SemiBold)
-                IconButton(onClick=onSearch) { Text("⌕",fontSize=28.sp) }
-                IconButton(onClick=onFilter) { Text("≡",fontSize=24.sp) }
-                IconButton(onClick=onMenu) { Text("⋯",fontSize=26.sp) }
+                Text("Library",Modifier.weight(1f),color=MaterialTheme.colorScheme.onBackground,style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.SemiBold)
+                IconButton(onClick=onFilter,modifier=Modifier.semantics { contentDescription="Filter library" }) { Text("≡",color=MaterialTheme.colorScheme.onBackground,fontSize=24.sp) }
+                IconButton(onClick=onMenu,modifier=Modifier.semantics { contentDescription="Library options" }) { Text("⋯",color=MaterialTheme.colorScheme.onBackground,fontSize=26.sp) }
             }
             Row(Modifier.horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                 listOf("All","Movies","Series","Anime","Unidentified").forEach { label ->
@@ -123,7 +122,7 @@ fun ModernLazyLibrary(accent:Int,columns:Int,category:String,sections:List<Poste
     BridgeTheme(accent) {
         val state=androidx.compose.foundation.lazy.grid.rememberLazyGridState()
         LaunchedEffect(category) { state.scrollToItem(0) }
-        LazyVerticalGrid(columns=GridCells.Fixed(columns),state=state,modifier=Modifier.fillMaxSize(),contentPadding=PaddingValues(12.dp),horizontalArrangement=Arrangement.spacedBy(12.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+        LazyVerticalGrid(columns=GridCells.Fixed(columns),state=state,modifier=Modifier.fillMaxSize(),contentPadding=PaddingValues(start=12.dp,end=12.dp,top=0.dp,bottom=8.dp),horizontalArrangement=Arrangement.spacedBy(12.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
             item(key="header",span={GridItemSpan(maxLineSpan)}) { PosterLibraryHeader(accent,category,onCategory,onSearch,onFilter,onMenu) }
             item(key="sync",span={GridItemSpan(maxLineSpan)}) { ModernActionRow(accent,syncTitle,syncDetail,onSync) }
             if(filtered) item(key="filter",span={GridItemSpan(maxLineSpan)}) { Text("History filters active",color=MaterialTheme.colorScheme.onSurfaceVariant) }

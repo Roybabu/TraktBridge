@@ -413,7 +413,7 @@ class MainActivity : ComponentActivity() {
         libraryCompose=ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed); setContent { libraryContent?.invoke() } }
         libraryHost.addView(libraryCompose,LinearLayout.LayoutParams(-1,0,1f))
         frame.addView(libraryHost,android.widget.FrameLayout.LayoutParams(-1,-1))
-        nav=LinearLayout(this).apply { orientation=if(wide) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL; setPadding(dp(8),dp(8),dp(8),dp(8)); setBackgroundColor(surface) }
+        nav=LinearLayout(this).apply { orientation=if(wide) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL; val padding=if(wide || tvMode) dp(8) else 0; setPadding(padding,padding,padding,padding); setBackgroundColor(if(wide || tvMode) surface else bg) }
         if(wide) { workspace.addView(nav,LinearLayout.LayoutParams(dp(adaptiveLayout.rail),-1)); workspace.addView(frame,LinearLayout.LayoutParams(0,-1,1f)) }
         else { workspace.addView(frame,LinearLayout.LayoutParams(-1,0,1f)); workspace.addView(nav,LinearLayout.LayoutParams(-1,-2)) }
         val navLabels=listOf(getString(R.string.nav_home),getString(R.string.nav_library),getString(R.string.nav_review),getString(R.string.nav_activity),getString(R.string.nav_settings))

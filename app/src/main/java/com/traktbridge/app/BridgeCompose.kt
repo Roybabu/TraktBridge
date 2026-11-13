@@ -52,21 +52,19 @@ fun BridgeTheme(accent:Int,content:@Composable ()->Unit) {
     val tv=context.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_TYPE_MASK == android.content.res.Configuration.UI_MODE_TYPE_TELEVISION
     val scale=if(BridgeScaled.current) 1f else UiAccessibility.readingScale(prefs.getInt("reading_size",0),tv)
     CompositionLocalProvider(LocalDensity provides Density(density.density,density.fontScale*scale),BridgeScaled provides true) {
-        MaterialTheme(colorScheme=if(prefs.getBoolean("high_contrast",false)) scheme.copy(onSurface=Color.White,onSurfaceVariant=Color.White) else scheme,content=content)
+        val colors=if(prefs.getBoolean("high_contrast",false)) scheme.copy(onSurface=Color.White,onSurfaceVariant=Color.White,onBackground=Color.White) else scheme
+        MaterialTheme(colorScheme=colors) { CompositionLocalProvider(LocalContentColor provides colors.onBackground) { content() } }
     }
 }
 
 @Composable
 fun BridgeHeader(accent:Int,onSearch:()->Unit) {
     BridgeTheme(accent) {
-        Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background).padding(horizontal=20.dp,vertical=12.dp),verticalAlignment=Alignment.CenterVertically) {
-            Image(painterResource(R.drawable.bridge_generated),contentDescription=null,modifier=Modifier.size(46.dp))
+        Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background).padding(horizontal=16.dp,vertical=4.dp),verticalAlignment=Alignment.CenterVertically) {
+            Image(painterResource(R.drawable.bridge_generated),contentDescription=null,modifier=Modifier.size(36.dp))
             Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) {
-                Text("TRAKTBRIDGE",color=MaterialTheme.colorScheme.primary,fontSize=11.sp,fontWeight=FontWeight.Bold)
-                Text("Your viewing companion",color=MaterialTheme.colorScheme.onSurface,fontSize=20.sp,fontWeight=FontWeight.SemiBold,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-            }
-            OutlinedButton(onClick=hapticClick(onSearch),modifier=Modifier.heightIn(min=48.dp)) { Text("Search") }
+            Text("TraktBridge",modifier=Modifier.weight(1f),color=MaterialTheme.colorScheme.onBackground,style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.SemiBold,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+            TextButton(onClick=hapticClick(onSearch),modifier=Modifier.heightIn(min=48.dp)) { Text("Search") }
         }
     }
 }
@@ -119,7 +117,7 @@ fun BridgeNavigation(accent:Int,labels:List<String>,selected:Int,wide:Boolean,on
         } else {
             Row(
                 Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background)
-                    .selectableGroup().navigationBarsPadding().padding(horizontal=4.dp,vertical=6.dp),
+                    .selectableGroup().padding(horizontal=4.dp,vertical=2.dp),
                 verticalAlignment=Alignment.CenterVertically
             ) {
                 labels.forEachIndexed { index,label ->
@@ -127,12 +125,12 @@ fun BridgeNavigation(accent:Int,labels:List<String>,selected:Int,wide:Boolean,on
                     val tint=if(active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha=0.68f)
                     val click=hapticClick { onSelect(index) }
                     Column(
-                        Modifier.weight(1f).heightIn(min=56.dp).selectable(selected=active,onClick=click,role=Role.Tab).padding(vertical=6.dp),
+                        Modifier.weight(1f).heightIn(min=56.dp).selectable(selected=active,onClick=click,role=Role.Tab).padding(vertical=4.dp),
                         horizontalAlignment=Alignment.CenterHorizontally,
                         verticalArrangement=Arrangement.Center
                     ) {
                         BridgeNavIcon(index,tint)
-                        Spacer(Modifier.height(5.dp))
+                        Spacer(Modifier.height(3.dp))
                         Text(label,color=tint,fontSize=11.sp,fontWeight=if(active) FontWeight.Medium else FontWeight.Normal,
                             maxLines=2,textAlign=androidx.compose.ui.text.style.TextAlign.Center,
                             overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)
