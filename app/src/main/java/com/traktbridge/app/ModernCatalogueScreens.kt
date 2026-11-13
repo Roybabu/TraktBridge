@@ -15,6 +15,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
 private fun actionDescription(label:String):String=when {
+    label=="Customize dashboard"->"Choose sections, order and startup preferences"
+    label=="Refresh library"->"Reload saved viewing information"
+    label=="Viewing planner"->"Find something that fits your available time"
     label.startsWith("Title details")->"Information, rating and related titles"
     label.contains("duplicate",true)->"Review possible matches"
     label.contains("More title",true)->"Status, favorites, notes and collections"
@@ -44,7 +47,7 @@ fun ModernDetailAction(label:String,onClick:()->Unit) {
 }
 
 @Composable
-private fun DetailHeader(title:String,onClose:()->Unit) {
+internal fun DetailHeader(title:String,onClose:()->Unit) {
     Row(Modifier.fillMaxWidth().padding(horizontal=8.dp,vertical=4.dp),verticalAlignment=Alignment.CenterVertically) {
         TextButton(onClick=onClose,modifier=Modifier.size(48.dp),contentPadding=PaddingValues(0.dp)) { Text("‹",style=MaterialTheme.typography.headlineMedium) }
         Text(title,Modifier.weight(1f),style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.SemiBold,color=MaterialTheme.colorScheme.onBackground)
