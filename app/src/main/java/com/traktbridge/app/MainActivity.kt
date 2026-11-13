@@ -2404,6 +2404,11 @@ class MainActivity : ComponentActivity() {
         }
         if(item.type=="show") { selectSuggestedEpisode(current,item); return }
         history.match(current.id,item,false)
+        val saved=history.record(current.id)
+        if(saved==null || saved.traktId!=item.id || saved.matchType!=item.type) {
+            Toast.makeText(this,"Match could not be saved; refresh and try again",Toast.LENGTH_LONG).show()
+            refreshHistory(); return
+        }
         AutoMatchSuggestions.remove(this,current.id)
         ViewingNotifications.cancel(this,current.id)
         refreshHistory()
