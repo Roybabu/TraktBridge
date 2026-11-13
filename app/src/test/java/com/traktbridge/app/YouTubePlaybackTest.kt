@@ -16,6 +16,11 @@ class YouTubePlaybackTest {
         assertEquals("Wayne | Ep 1: \"Get Some Then\"",YouTubePlayback.recognition("",listOf("Wayne | Ep 1: \"Get Some Then\""),"")?.title)
         assertNull(YouTubePlayback.recognition("",listOf("One video","Different video"),""))
     }
+    @Test fun ignoresGenericAndAdvertisementTitles() {
+        for(title in listOf("YouTube","Now playing","Unknown","Ad","Skip ad","Subscribe","Shorts")) {
+            assertNull(YouTubePlayback.recognition(title,emptyList(),""))
+        }
+    }
     @Test fun excludesShortsEvenWithPriorTitle() {
         val regular=YouTubePlayback.Mode.REGULAR
         val shorts=YouTubePlayback.Mode.SHORTS
