@@ -60,7 +60,7 @@ fun BridgeTheme(accent:Int,content:@Composable ()->Unit) {
 fun BridgeHeader(accent:Int,onSearch:()->Unit) {
     BridgeTheme(accent) {
         Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background).padding(horizontal=20.dp,vertical=12.dp),verticalAlignment=Alignment.CenterVertically) {
-            Image(painterResource(R.drawable.bridge_logo),contentDescription=null,modifier=Modifier.size(46.dp))
+            Image(painterResource(R.drawable.bridge_generated),contentDescription=null,modifier=Modifier.size(46.dp))
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Text("TRAKTBRIDGE",color=MaterialTheme.colorScheme.primary,fontSize=11.sp,fontWeight=FontWeight.Bold)
