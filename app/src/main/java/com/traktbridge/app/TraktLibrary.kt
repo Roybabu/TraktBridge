@@ -220,7 +220,8 @@ object TraktLibrary {
         val legacy=context.getSharedPreferences("trakt_remote_history_encrypted",Context.MODE_PRIVATE).all.filterKeys { it.startsWith(prefix) }.entries.mapNotNull { (key,value) ->
             runCatching { val o=JSONObject(PrivateHistoryCache.open(value as String,key)); RemoteItem(o.getString("type"),o.getLong("id"),o.getString("title"),o.getLong("show"),o.getInt("season"),o.getInt("episode"),o.getString("watched"),o.getLong("event")) }.getOrNull()
         }
-        return (RemoteAccountCache.rows(context,account,TraktData.HISTORY)+legacy).distinctBy { it.eventId }.sortedByDescending { it.watchedAt }
+        val snapshot=RemoteAccountCache.rows(context,account,TraktData.HISTORY)
+        return (if(RemoteAccountCache.status(context,account,TraktData.HISTORY)?.complete==true) snapshot else snapshot+legacy).distinctBy { it.eventId }.sortedByDescending { runCatching { Instant.parse(it.watchedAt) }.getOrDefault(Instant.EPOCH) }
     }
     fun clearCache(context:Context) { RemoteAccountCache.clear(context); context.getSharedPreferences("trakt_remote_history_encrypted",Context.MODE_PRIVATE).edit().clear().apply(); context.getSharedPreferences("trakt_remote_history",Context.MODE_PRIVATE).edit().clear().apply() }
 }
