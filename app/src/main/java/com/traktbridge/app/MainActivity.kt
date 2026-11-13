@@ -313,7 +313,8 @@ class MainActivity : ComponentActivity() {
     private fun armOcr() {
         if(android.os.Build.VERSION.SDK_INT<34) { Toast.makeText(this,"Window OCR requires Android 14 or later",Toast.LENGTH_LONG).show(); return }
         if(!prefs.getBoolean("enabled",false) || !prefs.getBoolean("title_optin",false) || !prefs.getBoolean("title_connected",false)) { Toast.makeText(this,"Enable tracking and Accessibility title detection first",Toast.LENGTH_LONG).show(); return }
-        val packages=(prefs.getStringSet("allowed",emptySet()) ?: emptySet()).sortedBy { appLabel(it) }
+        val packages=(prefs.getStringSet("allowed",emptySet()) ?: emptySet()).filter { it!=YouTubePlayback.PACKAGE }.sortedBy { appLabel(it) }
+        if(packages.isEmpty()) { Toast.makeText(this,"YouTube uses native title detection; no other selected player is available for OCR",Toast.LENGTH_LONG).show(); return }
         choose("Choose one player to scan",packages.map { appLabel(it) }) { index ->
             val pkg=packages[index]
             BridgeDialogBuilder(this).setTitle("One-time on-device OCR").setMessage("TraktBridge will attempt one screenshot of the selected app's window, beginning in 8 seconds and expiring after 45 seconds. Open the video and reveal its controls. Only edge regions are read locally; the image is not saved or uploaded. Protected windows cannot be captured. Review any detected text before using it.").setNegativeButton("Cancel",null).setPositiveButton("Arm scan") { _,_->
@@ -326,6 +327,7 @@ class MainActivity : ComponentActivity() {
     private fun reviewOcr() {
         val status=prefs.getString("ocr_status","No OCR scan yet").orEmpty()
         val source=prefs.getString("ocr_source","").orEmpty()
+        if(source==YouTubePlayback.PACKAGE) { prefs.edit().remove("ocr_choices").remove("ocr_source").remove("ocr_captured").remove("ocr_status").apply(); Toast.makeText(this,"YouTube uses native title detection; old OCR result cleared",Toast.LENGTH_LONG).show(); return }
         val choices=runCatching { org.json.JSONArray(prefs.getString("ocr_choices","[]")) }.getOrDefault(org.json.JSONArray())
         if(choices.length()==0) { BridgeDialogBuilder(this).setTitle("OCR result").setMessage(status).setPositiveButton("OK",null).show(); return }
         val entries=(0 until choices.length()).map { choices.getJSONObject(it) }
