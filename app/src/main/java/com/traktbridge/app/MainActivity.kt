@@ -672,8 +672,6 @@ class MainActivity : ComponentActivity() {
                 }
             }
             "tracking" -> {
-                heading("YouTube testing")
-                settingRow(group ?: root,"YouTube detection tester","Start a test and compare video title sources") { youtubeDetectionTester() }
                 heading("Tracking preferences")
                 settingRow(group ?: root,"Guided tracking setup","Walk through app selection and Android permissions") { setupGuide() }
                 button("Completion review threshold") { configureCompletionThreshold() }
@@ -1001,41 +999,6 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-    }
-    private fun youtubeDetectionTester() {
-        val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(8),dp(16),dp(12)) }
-        body.addView(txt("YouTube only. Start a two-minute local test, switch to YouTube and play one video, then return here to compare the sources. Titles are kept temporarily in memory; nothing is uploaded or added to history by this tester.",14,muted))
-        val report=txt("",14,ink).apply { setTextIsSelectable(true) }
-        fun redraw() {
-            report.text="Tracking: "+(if(prefs.getBoolean("enabled",false)) "On" else "Off")+" • YouTube selected: "+(YouTubeTitleProbe.PACKAGE in (prefs.getStringSet("allowed",emptySet()) ?: emptySet()))+"\nNotification listener: "+PlaybackListener.liveConnected()+" • Accessibility opt-in: "+prefs.getBoolean("title_optin",false)+"\n\n"+YouTubeProbeState.report(System.currentTimeMillis())
-        }
-        body.addView(actionButton("Start new test") {
-            if(!prefs.getBoolean("enabled",false) || YouTubeTitleProbe.PACKAGE !in (prefs.getStringSet("allowed",emptySet()) ?: emptySet())) {
-                Toast.makeText(this,"Enable tracking and select YouTube first",Toast.LENGTH_LONG).show()
-            } else {
-                YouTubeProbeState.start(System.currentTimeMillis())
-                PlaybackListener.wake()
-                redraw()
-                Toast.makeText(this,"Open YouTube and play a video, then return here",Toast.LENGTH_LONG).show()
-            }
-        })
-        body.addView(actionButton("Refresh results") { redraw() })
-        body.addView(actionButton("Copy results") {
-            redraw()
-            getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(android.content.ClipData.newPlainText("YouTube detection results",report.text))
-            Toast.makeText(this,"Results copied",Toast.LENGTH_SHORT).show()
-        })
-        body.addView(actionButton("Clear test") { YouTubeProbeState.clear(); redraw() })
-        body.addView(report)
-        redraw()
-        val dialog=BridgeDialogBuilder(this).setTitle("YouTube detection tester").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).create()
-        val handler=android.os.Handler(android.os.Looper.getMainLooper())
-        val tick=object:Runnable {
-            override fun run() { if(dialog.isShowing && !isDestroyed && !isFinishing) { redraw(); handler.postDelayed(this,2000) } }
-        }
-        dialog.setOnDismissListener { handler.removeCallbacks(tick) }
-        dialog.show()
-        handler.post(tick)
     }
     private fun betaFeedback() {
         val field=EditText(this).apply { hint="Describe the issue and steps to reproduce"; minLines=4; maxLines=8 }
