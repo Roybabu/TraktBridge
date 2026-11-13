@@ -215,13 +215,33 @@ object TraktLibrary {
         check(edit.commit())
         return count
     }
-    fun cachedHistory(context:Context,account:String):List<RemoteItem> {
-        val prefix=AccountScope.key(account)+":"
-        val legacy=context.getSharedPreferences("trakt_remote_history_encrypted",Context.MODE_PRIVATE).all.filterKeys { it.startsWith(prefix) }.entries.mapNotNull { (key,value) ->
-            runCatching { val o=JSONObject(PrivateHistoryCache.open(value as String,key)); RemoteItem(o.getString("type"),o.getLong("id"),o.getString("title"),o.getLong("show"),o.getInt("season"),o.getInt("episode"),o.getString("watched"),o.getLong("event")) }.getOrNull()
+    private data class HistoryMemory(val account:String,val generation:Long,val updated:Long,val rows:List<RemoteItem>)
+    @Volatile private var historyMemory:HistoryMemory?=null
+    fun cachedHistory(context:Context,account:String,progress:(Int,Int)->Unit={_,_->}):List<RemoteItem> {
+        val generation=RemoteAccountCache.generation(context)
+        val status=RemoteAccountCache.status(context,account,TraktData.HISTORY)
+        if(RemoteAccountCache.active(context)!=account) return emptyList()
+        historyMemory?.takeIf { it.account==account && it.generation==generation && it.updated==status?.updated && status.complete }?.let {
+            progress(it.rows.size,it.rows.size); return it.rows
         }
-        val snapshot=RemoteAccountCache.rows(context,account,TraktData.HISTORY)
-        return (if(RemoteAccountCache.status(context,account,TraktData.HISTORY)?.complete==true) snapshot else snapshot+legacy).distinctBy { it.eventId }.sortedByDescending { runCatching { Instant.parse(it.watchedAt) }.getOrDefault(Instant.EPOCH) }
+        val snapshot=RemoteAccountCache.rows(context,account,TraktData.HISTORY,progress)
+        val legacy=if(status?.complete==true) emptyList() else {
+            val prefix=AccountScope.key(account)+":"
+            val entries=context.getSharedPreferences("trakt_remote_history_encrypted",Context.MODE_PRIVATE).all.filterKeys { it.startsWith(prefix) }.entries.toList()
+            val total=snapshot.size+entries.size
+            progress(snapshot.size,total)
+            entries.mapIndexed { index,(key,value) ->
+                if(Thread.currentThread().isInterrupted) throw InterruptedException()
+                val o=JSONObject(PrivateHistoryCache.open(value as String,key))
+                val row=RemoteItem(o.getString("type"),o.getLong("id"),o.getString("title"),o.getLong("show"),o.getInt("season"),o.getInt("episode"),o.getString("watched"),o.getLong("event"))
+                if((index+1)%50==0 || index+1==entries.size) progress(snapshot.size+index+1,total)
+                row
+            }
+        }
+        check(RemoteAccountCache.current(context,account,generation)) { "Account changed during history loading" }
+        val rows=(snapshot+legacy).distinctBy { it.eventId }.sortedByDescending { runCatching { Instant.parse(it.watchedAt) }.getOrDefault(Instant.EPOCH) }
+        if(status?.complete==true && RemoteAccountCache.status(context,account,TraktData.HISTORY)?.updated==status.updated) historyMemory=HistoryMemory(account,generation,status.updated,rows)
+        return rows
     }
-    fun clearCache(context:Context) { RemoteAccountCache.clear(context); context.getSharedPreferences("trakt_remote_history_encrypted",Context.MODE_PRIVATE).edit().clear().apply(); context.getSharedPreferences("trakt_remote_history",Context.MODE_PRIVATE).edit().clear().apply() }
+    fun clearCache(context:Context) { historyMemory=null; RemoteAccountCache.clear(context); context.getSharedPreferences("trakt_remote_history_encrypted",Context.MODE_PRIVATE).edit().clear().apply(); context.getSharedPreferences("trakt_remote_history",Context.MODE_PRIVATE).edit().clear().apply() }
 }
