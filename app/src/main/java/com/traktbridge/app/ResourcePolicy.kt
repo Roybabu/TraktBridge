@@ -1,7 +1,7 @@
 package com.traktbridge.app
 object ResourcePolicy {
-    const val ARTWORK_BYTES=32L*1024*1024
-    const val ARTWORK_FILES=100
+    const val ARTWORK_BYTES=128L*1024*1024
+    const val ARTWORK_FILES=1000
     fun evictions(files:List<Pair<String,Long>>):Set<String> {
         var bytes=0L; var count=0
         return files.filter { (_,size) ->
