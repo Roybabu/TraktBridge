@@ -54,7 +54,7 @@ class TitleAccessibility: AccessibilityService() {
         val pkg=event?.packageName?.toString() ?: return
         if(pkg !in (prefs.getStringSet("allowed",emptySet()) ?: emptySet())) return
         val now=System.currentTimeMillis()
-        if(now-lastScan<1000) return
+        if(now-lastScan<(if(pkg==YouTubeTitleProbe.PACKAGE) 250L else 1000L)) return
         lastScan=now
         val root=rootInActiveWindow ?: return
         if(root.packageName?.toString()!=pkg) return
@@ -63,6 +63,7 @@ class TitleAccessibility: AccessibilityService() {
         if(window.width()<=0 || window.height()<=0) return
         val labels=mutableListOf<ScreenLabel>()
         val ids=linkedSetOf<String>()
+        val visibleIds=linkedSetOf<String>()
         val classes=linkedSetOf<String>()
         var player=false
         var count=0
@@ -75,6 +76,7 @@ class TitleAccessibility: AccessibilityService() {
             if(cls.matches(Regex("[A-Za-z0-9_]{1,80}"))) classes.add(cls)
             if(PlayerRules.isPlayer(id)) player=true
             if(node.isVisibleToUser) {
+                if(id.isNotBlank()) visibleIds.add(id)
                 val value=(node.text ?: node.contentDescription)?.toString()?.trim().orEmpty()
                 val seek=cls=="SeekBar" || id.contains("seekbar") || id.contains("seek_bar") || id=="exo_progress"
                 if(value.isNotBlank() || seek) {
@@ -93,6 +95,7 @@ class TitleAccessibility: AccessibilityService() {
         player=ContentRecognition.playerContext(labels,player)
         if(pkg==YouTubeTitleProbe.PACKAGE) YouTubeProbeState.observeScreen(now,labels,player)
         val segment=SegmentDetection.screen(labels,player)
+        if(pkg==YouTubeTitleProbe.PACKAGE && YouTubePlayback.observe(YouTubePlayback.mode(visibleIds,segment),now)) PlaybackListener.wake()
         prefs.edit().putString("segment:"+pkg,segment.name).putLong("segment_time:"+pkg,now).apply()
         val hint=ContentRecognition.detect(pkg,labels,player)
         val timing=ContentRecognition.timing(labels,player)
@@ -107,7 +110,7 @@ class TitleAccessibility: AccessibilityService() {
         prefs.edit().putString("title_hint:"+pkg,hint.title).putString("title_detail:"+pkg,hint.detail).putLong("title_time:"+pkg,now).apply()
     }
     override fun onInterrupt() { DebugTrace.event("title","interrupted") }
-    override fun onDestroy() { prefs.edit().putBoolean("title_connected",false).apply(); super.onDestroy() }
+    override fun onDestroy() { YouTubePlayback.clear(); prefs.edit().putBoolean("title_connected",false).apply(); super.onDestroy() }
     companion object {
         fun segment(context:Context,pkg:String,now:Long):PlaybackSegment {
             val p=context.getSharedPreferences("tracker",Context.MODE_PRIVATE)
