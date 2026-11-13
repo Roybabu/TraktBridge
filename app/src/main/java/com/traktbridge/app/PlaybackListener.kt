@@ -51,7 +51,7 @@ class PlaybackListener : NotificationListenerService() {
         if(!extras.containsKey(android.app.Notification.EXTRA_MEDIA_SESSION)) return
         wake()
         val title=extras.getCharSequence(android.app.Notification.EXTRA_TITLE)?.toString().orEmpty()
-        if(PlayerRules.validTitle(title)) { mediaTitles[pkg]=System.currentTimeMillis() to title; DebugTrace.event("media-notification","package="+pkg+" titlePresent=true") }
+        if(pkg!=YouTubePlayback.PACKAGE && PlayerRules.validTitle(title)) { mediaTitles[pkg]=System.currentTimeMillis() to title; DebugTrace.event("media-notification","package="+pkg+" titlePresent=true") }
     }
     override fun onNotificationRemoved(sbn: android.service.notification.StatusBarNotification?) { sbn?.let { mediaTitles.remove(it.packageName) } }
     override fun onCreate() { super.onCreate(); DebugTrace.init(this); DebugTrace.event("listener","service created"); history = WatchHistory(this); runCatching { history.recover() }.onFailure { DebugTrace.failure("history-recovery",it) } }
@@ -84,7 +84,7 @@ class PlaybackListener : NotificationListenerService() {
         val since=maxOf(prefs.getLong("usage_since",now),now-10*60*1000L)
         val allowed=prefs.getStringSet("allowed",emptySet()) ?: emptySet()
         for (activity in UsageFallback.recent(this,allowed,since).sortedBy { it.end }) {
-            if(activity.source==YouTubeTitleProbe.PACKAGE) continue // App usage cannot distinguish Shorts from regular videos.
+            if(activity.source==YouTubePlayback.PACKAGE) continue // App usage cannot distinguish Shorts from regular videos.
             // Allow time for media sessions to finish and suppress overlap with actual playback.
             if(now-activity.end<15000 || history.overlapsActivity(activity.source,activity.start,activity.end)) continue
             val key="usage_reminded:"+activity.source
@@ -127,16 +127,6 @@ class PlaybackListener : NotificationListenerService() {
             runCatching { android.media.session.MediaController(this,token) }.getOrNull()?.takeIf { it.packageName==n.packageName }
         } }.getOrDefault(emptyList())
         val sessions=(active+notificationControllers).distinctBy { it.sessionToken }
-        if(YouTubeProbeState.active(wallNow) && YouTubeTitleProbe.PACKAGE in allowed) {
-            val youtube=sessions.filter { it.packageName==YouTubeTitleProbe.PACKAGE }
-            val titles=youtube.mapNotNull { controller ->
-                val metadata=controller.metadata
-                metadata?.getString(MediaMetadata.METADATA_KEY_TITLE)?.takeIf { YouTubeTitleProbe.clean(it)!=null }
-                    ?: metadata?.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE)
-            }
-            val notes=runCatching { activeNotifications.orEmpty().filter { it.packageName==YouTubeTitleProbe.PACKAGE && it.notification.extras.containsKey(android.app.Notification.EXTRA_MEDIA_SESSION) }.mapNotNull { it.notification.extras.getCharSequence(android.app.Notification.EXTRA_TITLE)?.toString() } }.getOrDefault(emptyList())
-            YouTubeProbeState.observeMedia(wallNow,titles,notes,youtube.size)
-        }
         DebugTrace.event("sampling","notificationControllers="+notificationControllers.size)
         DebugTrace.event("sampling","all="+sessions.size+" selected="+sessions.count { it.packageName in allowed }+" allowed="+allowed.size)
         val rows = JSONArray()
@@ -155,8 +145,8 @@ class PlaybackListener : NotificationListenerService() {
             val m = c.metadata
             val p = c.playbackState
             DebugTrace.event("media","selected package="+c.packageName+" metadata="+(m!=null)+" titlePresent="+(!m?.getString(MediaMetadata.METADATA_KEY_TITLE).isNullOrBlank() || !m?.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE).isNullOrBlank())+" state="+(p?.state ?: -1)+" positionMs="+(p?.position ?: -1)+" durationMs="+(m?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0))
-            val isYouTube=c.packageName==YouTubeTitleProbe.PACKAGE
-            fun validTitle(value:String)=if(isYouTube) YouTubeTitleProbe.clean(value)!=null else DetectionProfiles.validMetadata(value)
+            val isYouTube=c.packageName==YouTubePlayback.PACKAGE
+            fun validTitle(value:String)=if(isYouTube) YouTubePlayback.clean(value)!=null else DetectionProfiles.validMetadata(value)
             val direct=m?.getString(MediaMetadata.METADATA_KEY_TITLE)?.takeIf { validTitle(it) } ?: m?.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE)?.takeIf { validTitle(it) }.orEmpty()
             val now=System.currentTimeMillis()
             val explicitSegment=SegmentDetection.metadata(m?.getString(MediaMetadata.METADATA_KEY_TITLE).orEmpty())
@@ -171,11 +161,11 @@ class PlaybackListener : NotificationListenerService() {
                 else -> PlaybackPhase.UNKNOWN
             }
             val playing=phase==PlaybackPhase.PLAYING
-            val hint=if(playing) TitleAccessibility.hint(this,c.packageName,now-120000,now) else null
+            val hint=if(playing && !isYouTube) TitleAccessibility.hint(this,c.packageName,now-120000,now) else null
             val prior=retained[key]?.takeIf { tick-it.observed in 0..profile.retentionMs }
             val metaDetail=m?.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE).orEmpty()
             val youtubeNotes=if(isYouTube && direct.isBlank()) runCatching { activeNotifications.orEmpty().filter { n ->
-                if(n.packageName!=YouTubeTitleProbe.PACKAGE || now-n.postTime !in 0..30000) return@filter false
+                if(n.packageName!=YouTubePlayback.PACKAGE || now-n.postTime !in 0..30000) return@filter false
                 @Suppress("DEPRECATION") val token=n.notification.extras.getParcelable<android.media.session.MediaSession.Token>(android.app.Notification.EXTRA_MEDIA_SESSION)
                 token==c.sessionToken
             }.mapNotNull { it.notification.extras.getCharSequence(android.app.Notification.EXTRA_TITLE)?.toString() } }.getOrDefault(emptyList()) else emptyList()
@@ -200,14 +190,14 @@ class PlaybackListener : NotificationListenerService() {
             }
             val safeRecognition=recognition?.takeIf { !it.conflict && it.score>=65 }
             if(recognition?.conflict==true || segment==PlaybackSegment.ADVERTISEMENT) retained.remove(key)
-            val title=if(recognition?.conflict==true) "" else safeRecognition?.title ?: prior?.title.orEmpty()
-            val subtitle=if(recognition?.conflict==true) "" else safeRecognition?.detail?.takeIf { it.isNotBlank() } ?: prior?.takeIf { it.title==title }?.detail.orEmpty()
+            val title=if(isYouTube) safeRecognition?.title.orEmpty() else if(recognition?.conflict==true) "" else safeRecognition?.title ?: prior?.title.orEmpty()
+            val subtitle=if(isYouTube) safeRecognition?.detail.orEmpty() else if(recognition?.conflict==true) "" else safeRecognition?.detail?.takeIf { it.isNotBlank() } ?: prior?.takeIf { it.title==title }?.detail.orEmpty()
             if(playing && recognition!=null) DebugTrace.event("recognition","package="+c.packageName+" score="+recognition.score+" sources="+recognition.sources.joinToString(",")+" conflict="+recognition.conflict)
-            if(playing && safeRecognition!=null && segment!=PlaybackSegment.ADVERTISEMENT) retained[key]=RetainedTitle(title,subtitle,tick)
+            if(!isYouTube && playing && safeRecognition!=null && segment!=PlaybackSegment.ADVERTISEMENT) retained[key]=RetainedTitle(title,subtitle,tick)
             if(p?.state in setOf(PlaybackState.STATE_STOPPED,PlaybackState.STATE_NONE,PlaybackState.STATE_ERROR)) retained.remove(key)
             val mediaDuration=m?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L
             val mediaPosition=PlaybackPosition.sanitize(p?.position ?: -1L,mediaDuration)
-            val screen=if(profile.screenTiming && playing && mediaPosition<0 && title.isNotBlank() && selected.count { it.packageName==c.packageName }==1) TitleAccessibility.timing(this,c.packageName,title,now) else null
+            val screen=if(!isYouTube && profile.screenTiming && playing && mediaPosition<0 && title.isNotBlank() && selected.count { it.packageName==c.packageName }==1) TitleAccessibility.timing(this,c.packageName,title,now) else null
             val duration=screen?.duration ?: mediaDuration
             val position=screen?.position ?: mediaPosition
             if(playing && p!=null && p.position>=0 && position<0) DebugTrace.event("progress","package="+c.packageName+" rejected position without valid runtime")
