@@ -18,6 +18,7 @@ object AutoMatchSuggestions {
         if(k in running) return State("searching")
         val o=runCatching { JSONObject(store(context).getString(k,"").orEmpty()) }.getOrNull() ?: return State("waiting")
         if(o.optString("fingerprint")!=fingerprint(r)) return State("waiting")
+        if(o.optString("status")!="rejected" && o.optInt("policyVersion")!=2) return State("waiting")
         val state=o.optString("status")
         if(state=="ready" && (o.optJSONArray("matches")?.length() ?: 0)==0) return State("waiting")
         if(state=="error" && System.currentTimeMillis()-o.optLong("at")>=120000) return State("waiting")
@@ -39,7 +40,7 @@ object AutoMatchSuggestions {
         }) }
         val edit=prefs.edit()
         if(prefs.all.size>=500) prefs.all.entries.sortedBy { runCatching { JSONObject(it.value.toString()).optLong("at") }.getOrDefault(0L) }.take(50).forEach { edit.remove(it.key) }
-        edit.putString(key(r),JSONObject().put("fingerprint",fingerprint(r)).put("at",System.currentTimeMillis()).put("status",status).put("matches",array).toString()).apply()
+        edit.putString(key(r),JSONObject().put("policyVersion",2).put("fingerprint",fingerprint(r)).put("at",System.currentTimeMillis()).put("status",status).put("matches",array).toString()).apply()
     }
     fun reject(context:Context,r:WatchRecord) { write(context,r,"rejected") }
     fun remove(context:Context,id:String) { store(context).edit().remove(id).apply() }
