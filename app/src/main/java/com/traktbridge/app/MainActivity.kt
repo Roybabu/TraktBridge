@@ -1381,11 +1381,9 @@ class MainActivity : ComponentActivity() {
             modernContent { ModernActionRow(violet,active.first().representative.title,"Live playback • all devices"){ nowPlaying() } }
         }
         if("continue" !in hidden && continuing.isNotEmpty()) {
-            val featured=continuing.first()
-            val item=groupPoster(featured)
             section(dashboard,"Continue watching")
-            modernContent { ModernReviewCard(violet,item.copy(status="Continue watching"),item.subtitle,UiAction("Open player"){ openPlaybackApp(featured.platforms) },null,null,{ showSessions(featured) }) }
-            if(continuing.size>1) modernContent { PosterLibraryShelf(violet,continuing.drop(1).take(6).map { groupPoster(it) }) }
+            val items=continuing.take(7).map { groupPoster(it) }
+            modernContent { PosterLibraryShelf(violet,items) }
         }
         if("metrics" !in hidden) modernContent { ModernMetricTiles(violet,listOf("This week" to durationText(ViewingAnalytics.filter(records,HistoryFilter(period=7)).sumOf { it.watched }),"Titles tracked" to groups.size.toString(),"To review" to pending.toString())) }
         if("review" !in hidden) modernContent { ModernActionRow(violet,"Review your viewing",pending.toString()+" records awaiting action"){ showTab(2) } }
@@ -1422,12 +1420,12 @@ class MainActivity : ComponentActivity() {
             val original=groupPoster(g)
             val item=if(candidate!=null) original.copy(title=candidate.title.substringBefore(" — "),subtitle=candidate.label().substringAfter(" — ",candidate.label())+" · "+appLabel(r.source),status="Suggested match",type=if(candidate.type=="movie") "movie" else "show",id=if(candidate.type=="episode") candidate.showId else candidate.id) else original.copy(status=if(g.queued) "Awaiting sync" else if(r.traktId>0) "Match verified" else "Needs match")
             val actions=if(state!=null) suggestionActions(r,state) else emptyList()
-            val primary=if(candidate!=null) actions.firstOrNull() else if(g.queued) UiAction("View sync status"){showSessions(g)} else if(r.traktId>0 && reviewBucket(g)=="sync") UiAction("Confirm watched"){showSessions(g)} else if(r.traktId>0) UiAction("Open player"){openPlaybackApp(g.platforms)} else null
+            val primary=if(candidate!=null) actions.firstOrNull() else if(g.queued) UiAction("View sync status"){showSessions(g)} else if(r.traktId>0 && reviewBucket(g)=="sync") UiAction("Confirm watched"){showSessions(g)} else null
             val secondary=actions.firstOrNull { it.label=="No, incorrect" }
             val manual=if(r.traktId<=0) UiAction("Search manually"){identify(r)} else null
             val evidence=when { candidate!=null->state?.matches?.firstOrNull()?.reason.orEmpty()+" · Original: "+r.title; state?.status in setOf("waiting","searching")->"Searching Trakt automatically…"; state?.status=="error"->"Catalogue unavailable; will retry"; state?.status=="rejected"->"Suggestion rejected"; r.traktId<=0->"No reliable Trakt match found"; else->durationText(g.sampledMs)+" sampled · "+original.subtitle }
             modernContent { ModernReviewCard(violet,item,evidence,primary,secondary,manual) {
-                val options=titleEntry(g,true).actions.filter { it.label !in setOf("Yes, correct","No, incorrect","Search manually") }
+                val options=titleEntry(g,true).actions.filter { it.label !in setOf("Yes, correct","No, incorrect","Search manually","Open playback app","Open player") || item.play==null }
                 val menu=options+if(r.status in setOf("pending","reviewed")) listOf(UiAction("Delete viewing record"){deleteFromReview(r)}) else emptyList()
                 choose("Viewing record",menu.map { it.label }) { menu[it].run() }
             } }
@@ -1514,9 +1512,8 @@ class MainActivity : ComponentActivity() {
     private fun openPlaybackApp(sources:List<String>) {
         val installed=sources.distinct().mapNotNull { pkg -> packageManager.getLaunchIntentForPackage(pkg)?.let { pkg to it } }
         if(installed.isEmpty()) { Toast.makeText(this,"No recorded playback app is installed or launchable",Toast.LENGTH_LONG).show(); return }
-        choose("Open recorded playback app",installed.map { appLabel(it.first) }) { i ->
-            runCatching { startActivity(installed[i].second) }.onFailure { Toast.makeText(this,"Unable to open player",Toast.LENGTH_LONG).show() }
-        }
+        fun launch(index:Int) { runCatching { startActivity(installed[index].second) }.onFailure { Toast.makeText(this,"Unable to open player",Toast.LENGTH_LONG).show() } }
+        if(installed.size==1) launch(0) else choose("Open recorded playback app",installed.map { appLabel(it.first) }) { i -> launch(i) }
     }
     private fun upcomingEpisodes() {
         lookup("Loading upcoming episodes",{ done -> TraktLibrary.upcoming(this,30,done) }) { rows:List<UpcomingEpisode> ->
@@ -2277,6 +2274,11 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+    private fun playbackAction(g:ViewingTitle): (()->Unit)? {
+        val sources=g.sessions.filterNot { UnifiedTraktHistory.remote(it) }.sortedByDescending { it.ended }.map { it.source }.distinct()
+        val launchable=sources.filter { runCatching { packageManager.getLaunchIntentForPackage(it)!=null }.getOrDefault(false) }
+        return if(launchable.isEmpty()) null else { { openPlaybackApp(launchable) } }
+    }
     private fun groupPoster(g:ViewingTitle):PosterLibraryItem {
         val r=g.representative
         val episode=r.matchType=="episode" && r.showId>0
@@ -2284,7 +2286,8 @@ class MainActivity : ComponentActivity() {
         val detail=(if(episode) "S"+r.season+" E"+r.episode+" · " else "")+(if(g.confirmed) java.text.DateFormat.getDateInstance().format(java.util.Date(g.sessions.filter { it.status=="synced" }.maxOf { it.ended })) else if(g.remainingMs>0) durationText(g.remainingMs)+" left" else g.platforms.joinToString(" • ") { appLabel(it) })
         val progress=if(g.durationMs>0 && g.positionMs>=0) (g.positionMs.toDouble()/g.durationMs).toFloat().coerceIn(0f,1f) else null
         val open:()->Unit={ if(episode) showSeries(r.showId) else showSessions(g) }
-        return PosterLibraryItem(name,detail,when { g.confirmed->"Watched"; g.queued->"Awaiting sync"; r.traktId<=0->"Needs match"; else->"In progress" },if(episode) "show" else "movie",if(episode) r.showId else r.traktId,open,{ showSessions(g) },progress)
+        val play=playbackAction(g)
+        return PosterLibraryItem(name,detail,when { g.confirmed->"Watched"; g.queued->"Awaiting sync"; r.traktId<=0->"Needs match"; else->"In progress" },if(episode) "show" else "movie",if(episode) r.showId else r.traktId,open,{ showSessions(g) },progress,play)
     }
     private fun posterGrid(items:List<PosterLibraryItem>) {
         val columns=if(resources.configuration.fontScale>=1.5f) 1 else maxOf(2,adaptiveLayout.columns)
@@ -2321,7 +2324,8 @@ class MainActivity : ComponentActivity() {
             section(dashboard,"Your series")
             posterGrid(series.take(historyLimit).map { item ->
                 val resume=item.resume?.representative
-                PosterLibraryItem(item.title,item.episodes.size.toString()+" tracked episode(s)",if(resume!=null) "Continue S"+resume.season+" E"+resume.episode else item.completed.toString()+" watched","show",item.id,{ showSeries(item.id) },{ seriesMenu(item) })
+                val resumePoster=item.resume?.let { groupPoster(it) }
+                PosterLibraryItem(item.title,resumePoster?.subtitle ?: (item.episodes.size.toString()+" tracked episode(s)"),if(resume!=null) "Continue S"+resume.season+" E"+resume.episode else item.completed.toString()+" watched","show",item.id,{ showSeries(item.id) },{ seriesMenu(item) },resumePoster?.progress,resumePoster?.play)
             }); shown+=series.size
         }
         if(libraryCategory in setOf("All","Movies") && movies.isNotEmpty()) { section(dashboard,"Your movies"); posterGrid(movies.take(historyLimit).map { groupPoster(it) }); shown+=movies.size }

@@ -114,7 +114,7 @@ fun ModernReviewCard(accent:Int,item:PosterLibraryItem,evidence:String,primary:U
         Card(Modifier.fillMaxWidth().padding(vertical=6.dp)) {
             Column(Modifier.padding(14.dp),verticalArrangement=Arrangement.spacedBy(10.dp)) {
                 Row(verticalAlignment=Alignment.Top,horizontalArrangement=Arrangement.spacedBy(12.dp)) {
-                    LibraryPoster(item,Modifier.width(88.dp).aspectRatio(2f/3f).clip(RoundedCornerShape(8.dp)))
+                    PlaybackArtwork(item,Modifier.width(88.dp).aspectRatio(2f/3f))
                     Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(4.dp)) {
                         Text(item.status,color=MaterialTheme.colorScheme.primary,style=MaterialTheme.typography.labelMedium)
                         Text(item.title,style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.SemiBold,maxLines=3,overflow=TextOverflow.Ellipsis)
@@ -122,7 +122,7 @@ fun ModernReviewCard(accent:Int,item:PosterLibraryItem,evidence:String,primary:U
                     }
                     IconButton(onClick=onMenu,modifier=Modifier.size(40.dp).semantics { contentDescription="Viewing record options" }) { Text("⋯",fontSize=24.sp) }
                 }
-                item.progress?.let { LinearProgressIndicator(progress={it.coerceIn(0f,1f)},modifier=Modifier.fillMaxWidth().height(4.dp)) }
+                if(item.play==null) item.progress?.let { LinearProgressIndicator(progress={it.coerceIn(0f,1f)},modifier=Modifier.fillMaxWidth().height(4.dp)) }
                 if(evidence.isNotBlank()) Text(evidence,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                 if(primary!=null || secondary!=null) Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                     if(primary!=null) Button(onClick=primary.run,modifier=Modifier.weight(1f)) { Text(primary.label) }

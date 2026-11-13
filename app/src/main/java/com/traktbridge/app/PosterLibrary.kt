@@ -1,6 +1,11 @@
 package com.traktbridge.app
 
-import androidx.compose.foundation.Image
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -21,7 +26,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import android.widget.ImageView
 
-data class PosterLibraryItem(val title:String,val subtitle:String,val status:String,val type:String,val id:Long,val open:()->Unit,val menu:()->Unit,val progress:Float?=null)
+data class PosterLibraryItem(val title:String,val subtitle:String,val status:String,val type:String,val id:Long,val open:()->Unit,val menu:()->Unit,val progress:Float?=null,val play:(()->Unit)?=null)
 
 @Composable
 fun LibraryPoster(item:PosterLibraryItem,modifier:Modifier) {
@@ -50,15 +55,41 @@ fun PosterLibraryHeader(accent:Int,category:String,onCategory:(String)->Unit,onS
     }
 }
 
+/** Shared poster action: playback when available, details otherwise. */
+@Composable
+fun PlaybackArtwork(item:PosterLibraryItem,modifier:Modifier) {
+    val play=item.play
+    Box(modifier.clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surface)
+        .clickable(role=Role.Button,onClick=play ?: item.open)
+        .semantics { contentDescription=if(play!=null) "Open playback app for "+item.title else "Details for "+item.title }) {
+        LibraryPoster(item,Modifier.matchParentSize())
+        if(play!=null) {
+            Box(Modifier.align(Alignment.Center).size(48.dp).background(Color.Black.copy(alpha=0.40f),CircleShape),contentAlignment=Alignment.Center) {
+                Canvas(Modifier.size(21.dp)) {
+                    val triangle=Path().apply { moveTo(size.width*0.24f,size.height*0.10f); lineTo(size.width*0.88f,size.height*0.50f); lineTo(size.width*0.24f,size.height*0.90f); close() }
+                    drawPath(triangle,Color.White.copy(alpha=0.92f))
+                }
+            }
+            item.progress?.let { value ->
+                Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(5.dp).background(Color.Black.copy(alpha=0.55f))) {
+                    Box(Modifier.fillMaxWidth(value.coerceIn(0f,1f)).fillMaxHeight().background(MaterialTheme.colorScheme.primary))
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun PosterLibraryShelf(accent:Int,items:List<PosterLibraryItem>) {
     BridgeTheme(accent) {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(12.dp)) {
             items.forEach { item ->
-                Column(Modifier.width(190.dp).clickable(onClick=item.open),verticalArrangement=Arrangement.spacedBy(5.dp)) {
-                    LibraryPoster(item,Modifier.fillMaxWidth().aspectRatio(16f/9f).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surface))
-                    item.progress?.let { LinearProgressIndicator(progress={it.coerceIn(0f,1f)},modifier=Modifier.fillMaxWidth().height(4.dp)) }
-                    Text(item.title,fontWeight=FontWeight.SemiBold,maxLines=1,overflow=TextOverflow.Ellipsis)
+                Column(Modifier.width(148.dp),verticalArrangement=Arrangement.spacedBy(4.dp)) {
+                    PlaybackArtwork(item,Modifier.fillMaxWidth().aspectRatio(2f/3f))
+                    Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
+                        Text(item.title,Modifier.weight(1f).clickable(onClick=item.open),color=MaterialTheme.colorScheme.onBackground,fontWeight=FontWeight.SemiBold,maxLines=1,overflow=TextOverflow.Ellipsis)
+                        IconButton(onClick=item.menu,modifier=Modifier.size(40.dp).semantics { contentDescription="More options for "+item.title }) { Text("⋯",color=MaterialTheme.colorScheme.onBackground,fontSize=24.sp) }
+                    }
                     Text(item.subtitle,color=MaterialTheme.colorScheme.onSurfaceVariant,fontSize=12.sp,maxLines=2,overflow=TextOverflow.Ellipsis)
                 }
             }
@@ -70,10 +101,10 @@ fun PosterLibraryShelf(accent:Int,items:List<PosterLibraryItem>) {
 fun PosterLibraryTile(accent:Int,item:PosterLibraryItem) {
     BridgeTheme(accent) {
         Column(Modifier.fillMaxWidth().padding(bottom=14.dp),verticalArrangement=Arrangement.spacedBy(4.dp)) {
-            LibraryPoster(item,Modifier.fillMaxWidth().aspectRatio(2f/3f).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surface).clickable(onClick=item.open))
+            PlaybackArtwork(item,Modifier.fillMaxWidth().aspectRatio(2f/3f))
             Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
-                Text(item.title,Modifier.weight(1f).clickable(onClick=item.open),fontWeight=FontWeight.SemiBold,maxLines=2,overflow=TextOverflow.Ellipsis)
-                IconButton(onClick=item.menu,modifier=Modifier.size(40.dp)) { Text("⋯",fontSize=24.sp) }
+                Text(item.title,Modifier.weight(1f).clickable(onClick=item.open),color=MaterialTheme.colorScheme.onBackground,fontWeight=FontWeight.SemiBold,maxLines=2,overflow=TextOverflow.Ellipsis)
+                IconButton(onClick=item.menu,modifier=Modifier.size(40.dp).semantics { contentDescription="More options for "+item.title }) { Text("⋯",color=MaterialTheme.colorScheme.onBackground,fontSize=24.sp) }
             }
             Text(item.subtitle,color=MaterialTheme.colorScheme.onSurfaceVariant,fontSize=12.sp,maxLines=2,overflow=TextOverflow.Ellipsis)
             if(item.status.isNotBlank()) Text(item.status,color=MaterialTheme.colorScheme.primary,fontSize=12.sp)
