@@ -1,6 +1,9 @@
 package com.traktbridge.app
 
 import androidx.activity.ComponentActivity
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.weight
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.ComposeView
@@ -1284,99 +1287,123 @@ class MainActivity : ComponentActivity() {
         val pending=groups.count { it.queued || it.pending }
         if(tab==2) requestReviewSuggestions(records)
         when(tab) {
-            0 -> {
-                val age=System.currentTimeMillis()-prefs.getLong("last_sample",0)
-                val live=prefs.getBoolean("enabled",false) && prefs.getBoolean("listener_connected",false) && age in 0..20000
-                val weekly=ViewingAnalytics.filter(records,HistoryFilter(period=7))
-                dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { if(tvMode) BridgeTvHome(violet,live,pending,durationText(weekly.sumOf { it.watched }),{ nowPlaying() },{ showTab(2) },{ discover() },{ showTab(4) },{ viewingPlanner() }) else if(adaptiveLayout.mode==AdaptiveUi.Mode.EXPANDED) BridgeExpandedHome(violet,live,pending,durationText(weekly.sumOf { it.watched }),{ showTab(4) },{ showTab(2) },{ discover() },{ viewingPlanner() },{ nowPlaying() }) else BridgeHomeSummary(violet,live,pending,durationText(weekly.sumOf { it.watched }),{ showTab(4) },{ showTab(2) },{ discover() },{ viewingPlanner() }) } })
-                val hidden=DashboardPreferences.visible(prefs.getString("dashboard_hidden","").orEmpty())
-                for(key in DashboardPreferences.order(prefs.getString("dashboard_order","").orEmpty())) {
-                    if(key in hidden) continue
-                    when(key) {
-                    "metrics" -> {
-                metricGrid(dashboard,listOf("This week" to durationText(weekly.sumOf { it.watched }),"Movies synced" to groups.count { it.confirmed && it.representative.matchType=="movie" }.toString(),"Episodes synced" to groups.count { it.confirmed && it.representative.matchType=="episode" }.toString(),"Needs review" to pending.toString()))
-
-                    }
-                    "goal" -> {
-                if(prefs.getBoolean("show_monthly_goal",true)) monthlyGoalCard(dashboard,records)
-
-                    }
-                    "now" -> {
-                section(dashboard,"Now watching")
-                dashboard.addView(actionButton("Now Playing • All devices") { nowPlaying() })
-                val active=groups.filter { it.active }
-                if(active.isEmpty()) emptyState(dashboard,"Nothing playing","Play a video in a selected app to see live observations.","Tracking settings") { showTab(4) } else cards(dashboard,active.take(2)) { parent,g -> titleCard(parent,g,false) }
-
-                    }
-                    "continue" -> {
-                section(dashboard,"Continue watching")
-                SeriesLibrary.continueWatching(groups).firstOrNull()?.let { heroCard(dashboard,it) }
-                val continuing=SeriesLibrary.continueWatching(groups)
-                if(continuing.isEmpty()) emptyState(dashboard,"Nothing to resume","Unfinished sampled viewing appears here.","Discover") { discover() } else cards(dashboard,continuing.drop(1).take(6)) { parent,g -> titleCard(parent,g,false) }
-
-                    }
-                    "review" -> {
-                section(dashboard,"Review queue")
-                val q=panel(dashboard); q.addView(txt("$pending awaiting action",22,ink,true)); q.addView(actionButton("Open review queue") { showTab(2) })
-
-                    }
-                    "discover" -> {
-                dashboard.addView(actionButton("Ask your viewing assistant") { localAssistant() })
-                dashboard.addView(actionButton("Upcoming episodes") { upcomingEpisodes() })
-                dashboard.addView(actionButton("Recommendations from your history") { recommendFromHistory() })
-                dashboard.addView(actionButton("Anime catalogue (AniList)") { animeSearch() })
-                dashboard.addView(actionButton("Open Trakt account library") { openDownloadedTrakt() })
-
-                    }
-                    "recent" -> {
-                section(dashboard,"Recently watched")
-                val recent=groups.filter { !it.active }.take(5)
-                if(recent.isEmpty()) emptyState(dashboard,"Your history starts here","Track a selected player or record a viewing manually.","Log a watch") { manualLog() } else cards(dashboard,recent) { parent,g -> titleCard(parent,g,false) }
-                    }
-                    }
-                }
-                dashboard.addView(actionButton("Customize dashboard") { customizeDashboard() })
-            }
+            0 -> renderModernHome(records,groups,pending)
             1 -> renderPosterLibrary(records)
-            2 -> {
-                dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeReviewSummary(violet,pending,{ manualLog() },{ HistorySync.schedule(this@MainActivity); refreshHistory() }) } })
-                dashboard.addView(actionButton("Refresh") { refreshHistory() })
-                val items=groups.filter { it.queued || it.pending }
-                if(items.isEmpty()) panel(dashboard).addView(txt("You're all caught up.",16,muted))
-                val visible=items.take(historyLimit)
-                lazyTitles(dashboard,visible,true)
-                if(items.size>visible.size && historyLimit<1000) dashboard.addView(actionButton("Show more ("+visible.size+" of "+items.size+")") { historyLimit=MemoryPolicy.nextPage(historyLimit,MemoryPolicy.pageSize(lowRam)); refreshHistory() })
-            }
-            3 -> {
-                section(dashboard,"Viewing activity")
-                dashboard.addView(actionButton(if(analyticsPeriod==0) "Period: All time" else "Period: Last "+analyticsPeriod+" days") {
-                    val periods=listOf(7,30,90,0); choose("Analytics period",listOf("Last 7 days","Last 30 days","Last 90 days","All time")) { analyticsPeriod=periods[it]; refreshHistory() }
-                })
-                val sources=records.map { it.source }.distinct().sortedBy { appLabel(it) }
-                dashboard.addView(actionButton("Platform: "+analyticsSource.takeIf { it.isNotBlank() }?.let { appLabel(it) }.orEmpty().ifBlank { "All" }) {
-                    choose("Filter viewing activity",listOf("All platforms")+sources.map { appLabel(it) }) { i -> analyticsSource=if(i==0) "" else sources[i-1]; refreshHistory() }
-                })
-                val scoped=ViewingAnalytics.filter(records,HistoryFilter(period=analyticsPeriod,source=analyticsSource))
-                val scopedGroups=ViewingGroups.build(scoped)
-                metricGrid(dashboard,listOf("Sampled watch time" to durationText(scoped.sumOf { it.watched }),"Movies synced" to scopedGroups.count { it.confirmed && it.representative.matchType=="movie" }.toString(),"Episodes synced" to scopedGroups.count { it.confirmed && it.representative.matchType=="episode" }.toString(),"Platforms" to scoped.filter { it.watched>0 }.map { it.source }.distinct().size.toString(),"Paused" to durationText(scoped.sumOf { it.pausedMs }),"Buffering" to durationText(scoped.sumOf { it.bufferingMs }),"Seeks" to scoped.sumOf { it.seeks }.toString(),"Uncertain" to durationText(scoped.sumOf { it.uncertainMs })))
-                dashboard.addView(actionButton("Subscription costs") { subscriptions() })
-                dashboard.addView(actionButton("Streaming service dashboard") { serviceDashboard() })
-                section(dashboard,"Watch time by platform")
-                val totals=ViewingAnalytics.platforms(scoped).map { it.source to it.sampledMs }
-                val max=totals.maxOfOrNull { it.second }?.coerceAtLeast(1) ?: 1
-                val chart=panel(dashboard)
-                if(totals.isEmpty()) chart.addView(txt("No sampled activity yet.",15,muted))
-                totals.forEach { (pkg,time) ->
-                    chart.addView(actionButton(appLabel(pkg)+" • "+durationText(time)) { analyticsSource=pkg; refreshHistory() })
-                    chart.addView(ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal).apply { progress=(time.toDouble()/max*100).toInt(); progressTintList=android.content.res.ColorStateList.valueOf(violet) },LinearLayout.LayoutParams(-1,dp(12)).apply { bottomMargin=dp(14) })
-                }
-                chart.addView(txt("App-activity and remote history are excluded from sampled time. Date filters use session end date.",13,muted))
-                dashboard.addView(actionButton("Viewing journal and yearly recap") { viewingJournal() })
-                section(dashboard,"Viewing calendar")
-                calendarView(dashboard,if(analyticsSource.isBlank()) records else records.filter { it.source==analyticsSource })
-
+            2 -> renderModernReview(groups)
+            3 -> renderModernActivity(records)
+        }
+    }
+    private fun modernContent(content:@androidx.compose.runtime.Composable ()->Unit) {
+        dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent(content) })
+    }
+    private fun renderModernHome(records:List<WatchRecord>,groups:List<ViewingTitle>,pending:Int) {
+        val age=System.currentTimeMillis()-prefs.getLong("last_sample",0)
+        val live=prefs.getBoolean("enabled",false) && prefs.getBoolean("listener_connected",false) && age in 0..20000
+        modernContent { ModernPageHeader(violet,"Home",if(live) "Tracking active" else "Tracking inactive",onMenu={ choose("Home options",listOf("Tracking settings","Now Playing • All devices","Viewing planner","Viewing assistant","Customize dashboard","Refresh")) { i -> when(i) {0->showTab(4);1->nowPlaying();2->viewingPlanner();3->localAssistant();4->customizeDashboard();5->refreshHistory()} } }) }
+        val hidden=DashboardPreferences.visible(prefs.getString("dashboard_hidden","").orEmpty())
+        val active=groups.filter { it.active }
+        val continuing=SeriesLibrary.continueWatching(groups)
+        val recent=groups.filter { !it.active && it !in continuing.take(6) }.take(5)
+        if("now" !in hidden && active.isNotEmpty()) {
+            section(dashboard,"Now watching")
+            modernContent { ModernActionRow(violet,active.first().representative.title,"Live playback • all devices"){ nowPlaying() } }
+        }
+        if("continue" !in hidden && continuing.isNotEmpty()) {
+            val featured=continuing.first()
+            val item=groupPoster(featured)
+            section(dashboard,"Continue watching")
+            modernContent { ModernReviewCard(violet,item.copy(status="Continue watching"),item.subtitle,UiAction("Open player"){ openPlaybackApp(featured.platforms) },null,null,{ showSessions(featured) }) }
+            if(continuing.size>1) modernContent { PosterLibraryShelf(violet,continuing.drop(1).take(6).map { groupPoster(it) }) }
+        }
+        if("metrics" !in hidden) modernContent { ModernMetricTiles(violet,listOf("This week" to durationText(ViewingAnalytics.filter(records,HistoryFilter(period=7)).sumOf { it.watched }),"Titles tracked" to groups.size.toString(),"To review" to pending.toString())) }
+        if("review" !in hidden) modernContent { ModernActionRow(violet,"Review your viewing",pending.toString()+" records awaiting action"){ showTab(2) } }
+        if("recent" !in hidden && recent.isNotEmpty()) {
+            section(dashboard,"Recently watched")
+            recent.forEach { g -> val item=groupPoster(g); modernContent { ModernActionRow(violet,item.title,item.subtitle){ showSessions(g) } } }
+        }
+        if("discover" !in hidden) {
+            section(dashboard,"Explore")
+            listOf(UiAction("For you"){ recommendFromHistory() },UiAction("Upcoming episodes"){ upcomingEpisodes() },UiAction("Trending titles"){ discover() },UiAction("Anime"){ animeSearch() }).chunked(2).forEach { batch ->
+                modernContent { BridgeTheme(violet) { androidx.compose.foundation.layout.Row(androidx.compose.ui.Modifier.fillMaxWidth(),horizontalArrangement=androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) { batch.forEach { item -> androidx.compose.material3.OutlinedButton(onClick=item.action,modifier=androidx.compose.ui.Modifier.weight(1f)) { androidx.compose.material3.Text(item.label) } } } } }
             }
         }
+        if("goal" !in hidden && prefs.getBoolean("show_monthly_goal",true)) monthlyGoalCard(dashboard,records)
+    }
+    private var reviewCategory="match"
+    private fun reviewBucket(g:ViewingTitle):String {
+        if(g.queued) return "sync"
+        if(g.representative.traktId<=0) return "match"
+        if(g.positionSession?.let { completionAssessment(it).suggested }==true) return "sync"
+        return "progress"
+    }
+    private fun renderModernReview(groups:List<ViewingTitle>) {
+        val items=groups.filter { it.queued || it.pending }
+        modernContent { ModernPageHeader(violet,"Review",items.size.toString()+" awaiting action",onMenu={ choose("Review options",listOf("Refresh","Log a watch manually","Retry approved uploads")) { i -> when(i){0->refreshHistory();1->manualLog();2->{HistorySync.schedule(this);refreshHistory()}} } }) }
+        val categories=listOf("match" to "Needs match","progress" to "In progress","sync" to "Ready / sync")
+        modernContent { ModernCategories(violet,categories.map { (key,label)->key to (label+" ("+items.count { reviewBucket(it)==key }+")") },reviewCategory) { reviewCategory=it; refreshHistory() } }
+        val visible=items.filter { reviewBucket(it)==reviewCategory }
+        if(visible.isEmpty()) dashboard.addView(txt("Nothing in this category.",15,muted))
+        visible.take(historyLimit).forEach { g ->
+            val r=g.representative
+            val state=if(AutoMatchSuggestions.eligible(r)) AutoMatchSuggestions.read(this,r) else null
+            val candidate=state?.matches?.firstOrNull()?.item
+            val original=groupPoster(g)
+            val item=if(candidate!=null) original.copy(title=candidate.title.substringBefore(" — "),subtitle=candidate.label().substringAfter(" — ",candidate.label())+" · "+appLabel(r.source),status="Suggested match",type=if(candidate.type=="movie") "movie" else "show",id=if(candidate.type=="episode") candidate.showId else candidate.id) else original.copy(status=if(g.queued) "Awaiting sync" else if(r.traktId>0) "Match verified" else "Needs match")
+            val actions=if(state!=null) suggestionActions(r,state) else emptyList()
+            val primary=if(candidate!=null) actions.firstOrNull() else if(g.queued) UiAction("View sync status"){showSessions(g)} else if(r.traktId>0 && reviewBucket(g)=="sync") UiAction("Confirm watched"){showSessions(g)} else if(r.traktId>0) UiAction("Open player"){openPlaybackApp(g.platforms)} else null
+            val secondary=actions.firstOrNull { it.label=="No, incorrect" }
+            val manual=if(r.traktId<=0) UiAction("Search manually"){identify(r)} else null
+            val evidence=when { candidate!=null->state?.matches?.firstOrNull()?.reason.orEmpty()+" · Original: "+r.title; state?.status in setOf("waiting","searching")->"Searching Trakt automatically…"; state?.status=="error"->"Catalogue unavailable; will retry"; state?.status=="rejected"->"Suggestion rejected"; r.traktId<=0->"No reliable Trakt match found"; else->durationText(g.sampledMs)+" sampled · "+original.subtitle }
+            modernContent { ModernReviewCard(violet,item,evidence,primary,secondary,manual) {
+                val options=titleEntry(g,true).actions.filter { it.label !in setOf("Yes, correct","No, incorrect","Search manually") }
+                val menu=options+if(r.status in setOf("pending","reviewed")) listOf(UiAction("Delete viewing record"){deleteFromReview(r)}) else emptyList()
+                choose("Viewing record",menu.map { it.label }) { menu[it].action() }
+            } }
+        }
+        if(visible.size>historyLimit && historyLimit<1000) dashboard.addView(actionButton("Show more"){historyLimit=MemoryPolicy.nextPage(historyLimit,MemoryPolicy.pageSize(lowRam));refreshHistory()})
+    }
+    private fun deleteFromReview(r:WatchRecord) {
+        BridgeDialogBuilder(this).setTitle("Delete this local record?").setNegativeButton("Cancel",null).setPositiveButton("Delete"){_,_->
+            if(runCatching { history.trash(r.id) }.getOrDefault(false)) { AutoMatchSuggestions.remove(this,r.id); ViewingNotifications.cancel(this,r.id); refreshHistory() }
+            else Toast.makeText(this,"Record could not be deleted",Toast.LENGTH_LONG).show()
+        }.show()
+    }
+    private fun renderModernActivity(records:List<WatchRecord>) {
+        val scoped=ViewingAnalytics.filter(records,HistoryFilter(period=analyticsPeriod,source=analyticsSource))
+        val groups=ViewingGroups.build(scoped)
+        val total=scoped.sumOf { it.watched.coerceAtLeast(0) }
+        val daily=scoped.filter { it.watched>0 }.groupBy { ViewingAnalytics.day(it.ended) }.mapValues { (_,rows)->rows.sumOf { it.watched } }
+        val today=java.time.LocalDate.now()
+        val start=if(analyticsPeriod>0) today.minusDays(analyticsPeriod.toLong()-1) else daily.keys.minOrNull() ?: today
+        val monthly=analyticsPeriod==365 || analyticsPeriod==0
+        val dates=if(monthly) {
+            val first=java.time.YearMonth.from(start)
+            val count=(java.time.temporal.ChronoUnit.MONTHS.between(first,java.time.YearMonth.from(today))+1).coerceIn(1,120).toInt()
+            (0 until count).map { java.time.YearMonth.from(today).minusMonths((count-1-it).toLong()).atDay(1) }
+        } else (0 until analyticsPeriod).map { start.plusDays(it.toLong()) }
+        val values=dates.map { date -> if(monthly) daily.entries.filter { java.time.YearMonth.from(it.key)==java.time.YearMonth.from(date) }.sumOf { it.value } else daily[date] ?: 0L }
+        modernContent { ModernPageHeader(violet,"Activity",analyticsSource.takeIf { it.isNotBlank() }?.let { appLabel(it) } ?: "All platforms",onFilter={
+            val sources=records.map { it.source }.distinct().sortedBy { appLabel(it) }
+            choose("Filter by platform",listOf("All platforms")+sources.map { appLabel(it) }){ i -> analyticsSource=if(i==0) "" else sources[i-1];refreshHistory() }
+        },onMenu={choose("Activity options",listOf("Subscription costs","Streaming service dashboard","Viewing journal and yearly recap","Playback diagnostics","Refresh")){ i->when(i){0->subscriptions();1->serviceDashboard();2->viewingJournal();3->BridgeDialogBuilder(this).setTitle("Playback diagnostics").setMessage("Paused: "+durationText(scoped.sumOf{it.pausedMs})+"\nBuffering: "+durationText(scoped.sumOf{it.bufferingMs})+"\nSeeks: "+scoped.sumOf{it.seeks}+"\nUncertain: "+durationText(scoped.sumOf{it.uncertainMs})).setPositiveButton("Close",null).show();4->refreshHistory()}}}) }
+        modernContent { ModernCategories(violet,listOf("7" to "Week","30" to "Month","365" to "Year","0" to "All time"),analyticsPeriod.toString()){ analyticsPeriod=it.toInt();refreshHistory() } }
+        modernContent { ModernWatchChart(violet,durationText(total),dates.map { if(monthly) it.format(java.time.format.DateTimeFormatter.ofPattern("MMM yy")) else it.format(java.time.format.DateTimeFormatter.ofPattern("d MMM")) },values){} }
+        val days=(java.time.temporal.ChronoUnit.DAYS.between(start,today)+1).coerceAtLeast(1)
+        modernContent { ModernMetricTiles(violet,listOf("Movies synced" to groups.count { it.confirmed && it.representative.matchType=="movie" }.toString(),"Episodes synced" to groups.count { it.confirmed && it.representative.matchType=="episode" }.toString(),"Active days" to daily.size.toString(),"Daily average" to durationText(total/days))) }
+        section(dashboard,"Watch time by platform")
+        ViewingAnalytics.platforms(scoped).filter { it.sampledMs>0 }.forEach { platform ->
+            modernContent { ModernActionRow(violet,appLabel(platform.source),durationText(platform.sampledMs)+" · "+(if(total>0) platform.sampledMs*100/total else 0)+"% of sampled time"){analyticsSource=platform.source;refreshHistory()} }
+        }
+        if(daily.isNotEmpty()) {
+            var streak=0;var longest=0;var previous:java.time.LocalDate?=null
+            daily.keys.sorted().forEach { day -> streak=if(previous?.plusDays(1)==day) streak+1 else 1;longest=maxOf(longest,streak);previous=day }
+            val busiest=daily.entries.groupBy { it.key.dayOfWeek }.maxByOrNull { (_,rows)->rows.sumOf { it.value } }?.key?.name.orEmpty()
+            section(dashboard,"Viewing insights")
+            modernContent { ModernMetricTiles(violet,listOf("Longest streak" to "$longest days","Most active day" to busiest.lowercase().replaceFirstChar { it.uppercase() })) }
+        }
+        section(dashboard,"Viewing calendar")
+        calendarView(dashboard,if(analyticsSource.isBlank()) records else records.filter { it.source==analyticsSource })
+        dashboard.addView(txt("Sampled time is attributed to session end dates; remote history is not included.",12,muted))
     }
     private fun streamingAvailability(type:String,id:Long,title:String) {
         val initial=prefs.getString("availability_region",java.util.Locale.getDefault().country).orEmpty()
@@ -2135,7 +2162,7 @@ class MainActivity : ComponentActivity() {
                     gravity=android.view.Gravity.CENTER; textSize=14f; setTextColor(ink); minHeight=dp(44)
                     if(d!=null) {
                         text=d.date.dayOfMonth.toString()+if(d.sessions>0) "\n•" else ""
-                        background=rounded(if(d.sampledMs>0) 0xff40336a.toInt() else if(d.sessions>0) 0xff292c40.toInt() else surface,8)
+                        background=rounded(if(d.sampledMs>0) android.graphics.Color.argb(255, (android.graphics.Color.red(violet)*(0.25+0.6*d.sampledMs.toDouble()/days.maxOf { it.sampledMs }.coerceAtLeast(1))).toInt().coerceIn(0,255), (android.graphics.Color.green(violet)*(0.25+0.6*d.sampledMs.toDouble()/days.maxOf { it.sampledMs }.coerceAtLeast(1))).toInt().coerceIn(0,255), (android.graphics.Color.blue(violet)*(0.25+0.6*d.sampledMs.toDouble()/days.maxOf { it.sampledMs }.coerceAtLeast(1))).toInt().coerceIn(0,255)) else if(d.sessions>0) 0xff292c40.toInt() else surface,8)
                         contentDescription=d.date.toString()+", "+durationText(d.sampledMs)+" sampled, "+d.sessions+" sessions"
                         setOnClickListener { showCalendarDay(d,records) }
                     }
@@ -2143,7 +2170,7 @@ class MainActivity : ComponentActivity() {
                 row.addView(cell,LinearLayout.LayoutParams(0,dp(48),1f).apply { setMargins(dp(2),dp(2),dp(2),dp(2)) })
             }
         }
-        card.addView(txt("Dots indicate local records; purple indicates sampled playback. Sessions spanning midnight are attributed to their end date.",12,muted))
+        card.addView(txt("Dots indicate local records; brighter cells indicate more sampled playback. Sessions spanning midnight are attributed to their end date.",12,muted))
     }
     private fun showCalendarDay(day:ActivityDay,records:List<WatchRecord>) {
         val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
