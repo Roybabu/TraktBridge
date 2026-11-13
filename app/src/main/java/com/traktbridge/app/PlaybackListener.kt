@@ -47,7 +47,7 @@ class PlaybackListener : NotificationListenerService() {
         wake()
     }
     override fun onNotificationRemoved(sbn: android.service.notification.StatusBarNotification?) { if(sbn?.packageName==YouTubePlayback.PACKAGE) wake() }
-    override fun onCreate() { super.onCreate(); DebugTrace.init(this); DebugTrace.event("listener","service created"); history = WatchHistory(this); runCatching { history.recover() }.onFailure { DebugTrace.failure("history-recovery",it) } }
+    override fun onCreate() { super.onCreate(); PlaybackTrackingMigration.apply(this); DebugTrace.init(this); DebugTrace.event("listener","service created"); history = WatchHistory(this); runCatching { history.recover() }.onFailure { DebugTrace.failure("history-recovery",it) } }
     private val handler = Handler(Looper.getMainLooper())
     private val poll = object : Runnable {
         override fun run() {
