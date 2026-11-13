@@ -5,6 +5,7 @@ object AutoMatchPolicy {
     data class Query(val title:String,val season:Int?,val episode:Int?,val episodeTitle:String)
     private val episodeOnly=Regex("(?i)\\b(?:ep\\.?|episode)\\s*0*(\\d{1,4})\\b")
     fun query(raw:String,detail:String=""):Query? {
+        if(RecognitionEngine.ambiguousEpisode(raw+" "+detail)) return null
         val parts=raw.split('|').map { it.trim() }.filter { it.isNotBlank() }
         val explicit=RecognitionEngine.episodeOf(raw+" "+detail)
         val ep=explicit?.episode ?: episodeOnly.find(raw)?.groupValues?.get(1)?.toIntOrNull()
@@ -37,7 +38,7 @@ object AutoMatchPolicy {
             val expected=RecognitionEngine.normalized(q.episodeTitle)
             val named=candidates.filter { RecognitionEngine.normalized(it.title.substringAfter(" — ",it.title))==expected }
             if(named.size==1) return named.single()
-            if(named.size>1) return null
+            return null
         }
         return candidates.singleOrNull()
     }
