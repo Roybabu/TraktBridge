@@ -54,11 +54,11 @@ class TitleAccessibility: AccessibilityService() {
         val pkg=event?.packageName?.toString() ?: return
         if(pkg !in (prefs.getStringSet("allowed",emptySet()) ?: emptySet())) return
         val now=System.currentTimeMillis()
-        if(now-lastScan<(if(pkg==YouTubeTitleProbe.PACKAGE) 250L else 1000L)) return
+        if(now-lastScan<(if(pkg==YouTubePlayback.PACKAGE) 250L else 1000L)) return
         lastScan=now
         val root=rootInActiveWindow ?: return
         if(root.packageName?.toString()!=pkg) return
-        maybeOcr(pkg,root,now)
+        if(pkg!=YouTubePlayback.PACKAGE) maybeOcr(pkg,root,now)
         val window=Rect().also { root.getBoundsInScreen(it) }
         if(window.width()<=0 || window.height()<=0) return
         val labels=mutableListOf<ScreenLabel>()
@@ -93,10 +93,10 @@ class TitleAccessibility: AccessibilityService() {
         }
         walk(root,0)
         player=ContentRecognition.playerContext(labels,player)
-        if(pkg==YouTubeTitleProbe.PACKAGE) YouTubeProbeState.observeScreen(now,labels,player)
         val segment=SegmentDetection.screen(labels,player)
-        if(pkg==YouTubeTitleProbe.PACKAGE && YouTubePlayback.observe(YouTubePlayback.mode(visibleIds,segment),now)) PlaybackListener.wake()
+        if(pkg==YouTubePlayback.PACKAGE && YouTubePlayback.observe(YouTubePlayback.mode(visibleIds,segment),now)) PlaybackListener.wake()
         prefs.edit().putString("segment:"+pkg,segment.name).putLong("segment_time:"+pkg,now).apply()
+        if(pkg==YouTubePlayback.PACKAGE) return // Mode only; titles come exclusively from native media metadata.
         val hint=ContentRecognition.detect(pkg,labels,player)
         val timing=ContentRecognition.timing(labels,player)
         if(timing!=null && hint!=null && hint.kind!="details") prefs.edit().putLong("screen_position:"+pkg,timing.position).putLong("screen_duration:"+pkg,timing.duration).putLong("screen_time:"+pkg,now).putString("screen_title:"+pkg,hint.title).apply()
