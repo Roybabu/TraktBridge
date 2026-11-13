@@ -55,6 +55,8 @@ class SettingsNavigationTest {
                     assertFalse(trackingLabels.contains("Scan player title (one-shot OCR)"))
                     assertFalse(trackingLabels.contains("App activity fallback"))
                     assertFalse(trackingLabels.contains("Connect media servers"))
+                    for(legacy in listOf("Identify content","Identify local video file","Identify shared movie link","Automatically reuse confirmed local title mappings","Clear learned title mappings","YouTube detection tester")) assertFalse(trackingLabels.contains(legacy))
+                    assertFalse(labels(pages.getValue("advanced")).contains("Playback compatibility"))
                     activity.onBackPressedDispatcher.onBackPressed()
                     assertEquals(View.VISIBLE,overview.visibility)
                     assertTrue(pages.values.all { it.visibility==View.GONE })
