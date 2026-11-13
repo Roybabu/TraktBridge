@@ -2411,17 +2411,42 @@ class MainActivity : ComponentActivity() {
                 }
             }.show()
     }
+    private var traktDownloadRunning=false
     private fun startTraktSync() {
-        lookup("Downloading Trakt account data; large libraries may take several minutes",{ done -> TraktLibrary.syncAccount(this,done) }) { result:TraktAccountSummary ->
-            val message=result.results.joinToString("\n") { row -> row.kind.title+": "+row.count+(if(row.error.isNotBlank()) " • "+row.error else if(row.unchanged) " • unchanged" else "") }
-            if(tab==4 && settingsCategory=="account") {
-                (account.parent as? ViewGroup)?.removeView(account)
-                refreshSettingsState("account")
+        if(traktDownloadRunning) { Toast.makeText(this,"Trakt sync already running",Toast.LENGTH_SHORT).show(); return }
+        traktDownloadRunning=true
+        val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(20),dp(16),dp(20),dp(16)) }
+        val label=txt("Connecting to Trakt…",15,ink)
+        val bar=ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal).apply { isIndeterminate=true; max=1000; progressTintList=android.content.res.ColorStateList.valueOf(violet); indeterminateTintList=android.content.res.ColorStateList.valueOf(violet) }
+        body.addView(label); body.addView(bar,LinearLayout.LayoutParams(-1,dp(10)))
+        body.addView(txt("You can close this progress window and continue using the app.",13,muted))
+        val dialog=BridgeDialogBuilder(this).setTitle("Synchronizing Trakt").setView(body).setPositiveButton("Hide",null).create()
+        dialog.show()
+        TraktLibrary.syncAccount(this,progress={ stage,done,total ->
+            if(!isDestroyed && !isFinishing) {
+                label.text=stage+if(total>0) " • "+done+" / "+total+" pages" else if(done>0) " • page "+done else "…"
+                bar.isIndeterminate=total<=0
+                if(total>0) bar.progress=(done.toLong()*1000/total).toInt().coerceIn(0,1000)
             }
-            refreshHistory()
-            BridgeDialogBuilder(this).setTitle(if(result.complete) "Trakt sync complete" else "Trakt sync incomplete")
-                .setMessage(message.ifBlank { "No categories completed. Check connection and retry." }+if(result.complete) "" else "\n\nPreviously downloaded data is retained where possible.")
-                .setNegativeButton("Close",null).setPositiveButton("Open library") { _,_->showTab(1) }.show()
+        }) { result ->
+            traktDownloadRunning=false
+            if(!isDestroyed && !isFinishing) {
+                val wasVisible=dialog.isShowing
+                dialog.dismiss()
+                bridgeModel.cancel()
+                if(tab==4 && settingsCategory=="account") refreshSettingsState("account")
+                refreshHistory()
+                result.fold({ summary ->
+                    val message=summary.results.joinToString("\n") { row -> row.kind.title+": "+row.count+(if(row.error.isNotBlank()) " • "+row.error else if(row.unchanged) " • unchanged" else "") }
+                    if(wasVisible) BridgeDialogBuilder(this).setTitle(if(summary.complete) "Trakt sync complete" else "Trakt sync incomplete")
+                        .setMessage(message.ifBlank { "No categories completed. Check connection and retry." })
+                        .setNegativeButton("Close",null).setNeutralButton("Retry"){_,_->startTraktSync()}.setPositiveButton("Open library"){_,_->showTab(1)}.show()
+                    else Toast.makeText(this,if(summary.complete) "Trakt sync complete" else "Trakt sync incomplete; retry in Account & Sync",Toast.LENGTH_LONG).show()
+                }, {
+                    if(wasVisible) BridgeDialogBuilder(this).setTitle("Trakt sync failed").setMessage("Check your connection and try again. Existing history is retained.").setNegativeButton("Close",null).setPositiveButton("Retry"){_,_->startTraktSync()}.show()
+                    else Toast.makeText(this,"Trakt sync failed; retry in Account & Sync",Toast.LENGTH_LONG).show()
+                })
+            }
         }
     }
     private fun openDownloadedTrakt() {
