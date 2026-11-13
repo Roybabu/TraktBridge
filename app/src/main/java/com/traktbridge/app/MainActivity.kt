@@ -1280,6 +1280,7 @@ class MainActivity : ComponentActivity() {
     private fun renderHistory(records:List<WatchRecord>,groups:List<ViewingTitle>) {
         dashboard.removeAllViews()
         val pending=groups.count { it.queued || it.pending }
+        if(tab==2) requestReviewSuggestions(records)
         when(tab) {
             0 -> {
                 val age=System.currentTimeMillis()-prefs.getLong("last_sample",0)
@@ -2385,18 +2386,60 @@ class MainActivity : ComponentActivity() {
         val min=ms/60000
         return if(min>=60) (min/60).toString()+"h "+(min%60)+"m" else if(min==0L && ms>0) (ms/1000).toString()+"s" else min.toString()+" min"
     }
+    private fun requestReviewSuggestions(records:List<WatchRecord>) {
+        if(tab!=2 || (prefs.getBoolean("privacy_lock",false) && !unlocked)) return
+        AutoMatchSuggestions.enqueue(this,records) {
+            if(!isDestroyed && !isFinishing && tab==2 && (!prefs.getBoolean("privacy_lock",false) || unlocked)) {
+                restoreScrollY=contentPage.scrollY
+                refreshHistory()
+            }
+        }
+    }
+    private fun acceptSuggestion(r:WatchRecord,item:CatalogueItem) {
+        val current=history.record(r.id)
+        if(current==null || !AutoMatchSuggestions.eligible(current) || current.title!=r.title || current.subtitle!=r.subtitle) {
+            Toast.makeText(this,"Viewing record changed; refresh and try again",Toast.LENGTH_LONG).show()
+            refreshHistory(); return
+        }
+        if(item.type=="show") { selectSuggestedEpisode(current,item); return }
+        history.match(current.id,item,false)
+        AutoMatchSuggestions.remove(this,current.id)
+        ViewingNotifications.cancel(this,current.id)
+        refreshHistory()
+        Toast.makeText(this,"Match saved locally",Toast.LENGTH_SHORT).show()
+    }
+    private fun suggestionActions(r:WatchRecord,state:AutoMatchSuggestions.State):List<UiAction> {
+        val best=state.matches.firstOrNull()?.item
+        val actions=mutableListOf<UiAction>()
+        if(best!=null) {
+            actions.add(UiAction(if(best.type=="show") "Yes — choose episode" else "Yes, correct") { acceptSuggestion(r,best) })
+            if(state.matches.size>1) actions.add(UiAction("Other suggested matches") {
+                choose("Alternative Trakt matches",state.matches.drop(1).map { it.item.label()+" • "+it.reason }) { i ->
+                    val item=state.matches[i+1].item
+                    BridgeDialogBuilder(this).setTitle("Use this match?").setMessage(item.label()).setNegativeButton("Cancel",null).setPositiveButton("Yes") { _,_->acceptSuggestion(r,item) }.show()
+                }
+            })
+            actions.add(UiAction("No, incorrect") { AutoMatchSuggestions.reject(this,r); refreshHistory() })
+        }
+        actions.add(UiAction("Search manually") { identify(r) })
+        return actions
+    }
     private fun titleEntry(g:ViewingTitle,expanded:Boolean):LazyTitleEntry {
         val r=g.representative
+        val suggestion=if(tab==2 && AutoMatchSuggestions.eligible(r)) AutoMatchSuggestions.read(this,r) else null
+        val candidate=suggestion?.matches?.firstOrNull()?.item
         val assessment=g.positionSession?.let { completionAssessment(it) }
         val completion=when { g.sessions.all { it.status=="restored_audit" } -> "Restored history • prior upload not repeated"; g.confirmed -> "Finished • synced to Trakt"; g.queued -> "Completion approved • sync pending"; g.active -> "Currently watching"; assessment?.suggested==true -> "Completion suggested • confirm manually"; g.positionMs>=0 -> "In progress"; else -> "Completion unknown" }
         val progress=if(g.durationMs>0 && g.positionMs>=0) (g.positionMs.toDouble()/g.durationMs*100).toInt().coerceIn(0,100) else null
         val position=if(progress!=null) durationText(g.positionMs)+" / "+durationText(g.durationMs)+" • "+durationText(g.remainingMs)+" left • "+g.positionSource else (if(g.catalogueRuntimeMs>0) "Catalogue runtime: "+durationText(g.catalogueRuntimeMs)+" • " else "")+"Remaining time unavailable"
         val diagnostics=buildString {
             if(g.bufferingMs>0 || g.pausedMs>0 || g.seeks>0 || g.uncertainMs>0) append("Paused: "+durationText(g.pausedMs)+" • Buffering: "+durationText(g.bufferingMs)+" • Seeks: "+g.seeks+" • Uncertain: "+durationText(g.uncertainMs))
-            if(r.traktId<=0) append(" Identify exact title to combine sessions.")
+            if(suggestion!=null) append("\n"+when(suggestion.status) { "ready"->"Suggested: "+suggestion.matches.first().reason+" • Original: "+r.title; "searching","waiting"->"Searching Trakt automatically…"; "none"->"No reliable Trakt match found."; "error"->"Catalogue unavailable; will retry."; "rejected"->"Suggestion rejected."; else->"" })
+            else if(r.traktId<=0) append(" Identify exact title to combine sessions.")
         }
-        val row=TitleUi(r.matchLabel.ifBlank { r.title.ifBlank { "Unidentified video" } },g.platforms.joinToString(" • ") { appLabel(it) },g.sessions.size.toString()+" viewing session(s) • "+java.text.DateFormat.getDateInstance().format(java.util.Date(g.latest.ended)),completion,"Total sampled watch time: "+if(g.sampledMs>0) durationText(g.sampledMs) else "Unknown",progress,position,diagnostics,if(r.matchType=="episode") "show" else "movie",if(r.matchType=="episode") r.showId else r.traktId)
+        val row=TitleUi(candidate?.label() ?: r.matchLabel.ifBlank { r.title.ifBlank { "Unidentified video" } },if(candidate!=null) "Suggested Trakt match • "+appLabel(r.source) else g.platforms.joinToString(" • ") { appLabel(it) },g.sessions.size.toString()+" viewing session(s) • "+java.text.DateFormat.getDateInstance().format(java.util.Date(g.latest.ended)),completion,"Total sampled watch time: "+if(g.sampledMs>0) durationText(g.sampledMs) else "Unknown",progress,position,diagnostics,if(candidate?.type in setOf("episode","show") || r.matchType=="episode") "show" else "movie",candidate?.let { if(it.type=="episode") it.showId else it.id } ?: if(r.matchType=="episode") r.showId else r.traktId)
         val actions=mutableListOf<UiAction>()
+        if(suggestion!=null) actions.addAll(suggestionActions(r,suggestion))
         if(r.traktId>0) actions.add(UiAction("Title details") { titleDetails(if(r.matchType=="episode") "show" else "movie",if(r.matchType=="episode") r.showId else r.traktId,r.matchLabel) })
         if(!g.confirmed) actions.add(UiAction("Open playback app") { openPlaybackApp(g.platforms) })
         if(r.traktId>0) actions.add(UiAction("Review possible duplicate titles") { duplicateTitles(r) })
@@ -2467,6 +2510,7 @@ class MainActivity : ComponentActivity() {
                 BridgeDialogBuilder(this).setTitle("Delete this local record?").setNegativeButton("Cancel",null).setPositiveButton("Delete") { _,_->
                     val deleted=runCatching { history.trash(r.id) }.getOrDefault(false)
                     if(deleted) {
+                        AutoMatchSuggestions.remove(this,r.id)
                         ViewingNotifications.cancel(this,r.id)
                         onDeleted()
                         refreshHistory()
