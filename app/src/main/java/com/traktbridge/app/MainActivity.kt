@@ -736,15 +736,53 @@ class MainActivity : ComponentActivity() {
                 settingRow(advanced,"Network & device maintenance","Relay, discovery and received history") { deviceAdvancedMenu() }
             }
             "appearance" -> {
-                heading("Display & interaction")
-                (group ?: root).addView(Switch(this).apply { text="Hide catalogue spoilers"; isChecked=prefs.getBoolean("hide_spoilers",true); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("hide_spoilers",checked).apply() } })
-                (group ?: root).addView(Switch(this).apply { text="High contrast text"; isChecked=prefs.getBoolean("high_contrast",false); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("high_contrast",checked).apply(); recreate() } })
-                if(!tvMode) (group ?: root).addView(Switch(this).apply { text="Haptic feedback"; isChecked=prefs.getBoolean(BridgeHaptics.PREF,true); setOnCheckedChangeListener { view,checked -> prefs.edit().putBoolean(BridgeHaptics.PREF,checked).apply(); if(checked) BridgeHaptics.tap(view) } })
-                (group ?: root).addView(Switch(this).apply { text="Reduce interface motion"; isChecked=prefs.getBoolean("reduce_motion",false); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("reduce_motion",checked).apply(); recreate() } })
-                heading("Theme & reading")
-                button("Text size") { choose("Reading size",listOf("System default","Large","Extra large")) { prefs.edit().putInt("reading_size",it).apply(); recreate() } }
-                button("Appearance theme") { choose("Theme",listOf("Classic dark","AMOLED black","Dynamic dark (Android 12+)")) { prefs.edit().putString("appearance_mode",listOf("dark","amoled","dynamic")[it]).apply(); recreate() } }
-                button("Appearance accent") { choose("Accent color",listOf("Violet","Blue","Green")) { prefs.edit().putString("accent",listOf("violet","blue","green")[it]).apply(); recreate() } }
+                val themes=listOf("Classic dark","AMOLED black","Dynamic dark (Android 12+)")
+                val themeKeys=listOf("dark","amoled","dynamic")
+                val accents=listOf("Violet","Blue","Green")
+                val accentKeys=listOf("violet","blue","green")
+                val sizes=listOf("System default","Large","Extra large")
+                fun preferenceRow(title:String,detail:String,action:()->Unit) {
+                    settingRow(group ?: root,title,detail,action)
+                }
+                fun appearanceToggle(title:String,detail:String,key:String,default:Boolean,onChange:(View,Boolean)->Unit={ _,_-> }) {
+                    val parent=group ?: root
+                    if(parent.childCount>0) parent.addView(android.view.View(this).apply { setBackgroundColor(0x227F7F7F) },LinearLayout.LayoutParams(-1,dp(1)))
+                    val row=LinearLayout(this).apply {
+                        orientation=LinearLayout.HORIZONTAL
+                        gravity=android.view.Gravity.CENTER_VERTICAL
+                        minimumHeight=dp(adaptiveLayout.touch)
+                        setPadding(dp(4),dp(10),dp(4),dp(10))
+                    }
+                    val labels=LinearLayout(this).apply {
+                        orientation=LinearLayout.VERTICAL
+                        addView(txt(title,16,ink,true))
+                        addView(txt(detail,13,muted))
+                    }
+                    row.addView(labels,LinearLayout.LayoutParams(0,-2,1f))
+                    val toggle=Switch(this).apply {
+                        contentDescription="$title. $detail"
+                        isChecked=prefs.getBoolean(key,default)
+                        isFocusable=true
+                        setOnCheckedChangeListener { view,checked ->
+                            prefs.edit().putBoolean(key,checked).apply()
+                            onChange(view,checked)
+                        }
+                    }
+                    row.addView(toggle,LinearLayout.LayoutParams(-2,-2))
+                    labels.setOnClickListener { toggle.isChecked=!toggle.isChecked }
+                    parent.addView(row,LinearLayout.LayoutParams(-1,-2))
+                }
+                heading("Theme & colors")
+                preferenceRow("Theme",themes[themeKeys.indexOf(prefs.getString("appearance_mode","dark")).coerceAtLeast(0)]) { choose("Theme",themes) { prefs.edit().putString("appearance_mode",themeKeys[it]).apply(); recreate() } }
+                preferenceRow("Accent color",accents[accentKeys.indexOf(prefs.getString("accent","violet")).coerceAtLeast(0)]) { choose("Accent color",accents) { prefs.edit().putString("accent",accentKeys[it]).apply(); recreate() } }
+                heading("Display")
+                preferenceRow("Text size",sizes[prefs.getInt("reading_size",0).coerceIn(0,sizes.lastIndex)]) { choose("Reading size",sizes) { prefs.edit().putInt("reading_size",it).apply(); recreate() } }
+                appearanceToggle("High contrast text","Improve text visibility","high_contrast",false) { _,_-> recreate() }
+                heading("Interaction")
+                if(!tvMode) appearanceToggle("Haptic feedback","Feel a light vibration when interacting",BridgeHaptics.PREF,true) { view,checked -> if(checked) BridgeHaptics.tap(view) }
+                appearanceToggle("Reduce motion","Minimize interface animations","reduce_motion",false) { _,_-> recreate() }
+                heading("Content preferences")
+                appearanceToggle("Hide spoilers","Keep catalogue plot details hidden","hide_spoilers",true)
             }
             "library" -> {
                 heading("Dashboard & goals")
