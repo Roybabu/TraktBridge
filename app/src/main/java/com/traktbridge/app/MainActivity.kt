@@ -815,6 +815,7 @@ class MainActivity : ComponentActivity() {
                 libraryRow("Tags & folders","Find and organize titles by tags or collection") { organizedLibrary() }
                 libraryRow("Favorites","Manage saved favorite titles") { favorites() }
                 heading("Discovery")
+                libraryRow("Explore preferences","Recommendations, calendar, spoilers and reminders") { openExploreSettings() }
                 libraryRow("Franchise guides","Explore curated movie viewing orders") { franchises() }
                 libraryRow("Anime","Local progress and public AniList libraries") {
                     libraryMenu("Anime",listOf(
@@ -829,13 +830,7 @@ class MainActivity : ComponentActivity() {
                         Triple("Playback shortcuts","Open a specific title or installed player") { playbackShortcut() }
                     ))
                 }
-                libraryRow("Episode reminders","Manage or cancel scheduled reminders") {
-                    BridgeDialogBuilder(this).setTitle("Episode reminders").setMessage("Cancel all scheduled episode reminders on this device?").setNegativeButton("Keep reminders",null).setPositiveButton("Cancel all reminders") { _,_->
-                        prefs.edit().putBoolean("episode_reminders",false).apply()
-                        EpisodeReminders.cancelAll(this)
-                        Toast.makeText(this,"Reminders cancelled",Toast.LENGTH_SHORT).show()
-                    }.show()
-                }
+
             }
             "privacy" -> {
                 heading("Tracking privacy")
@@ -1460,13 +1455,10 @@ class MainActivity : ComponentActivity() {
 
             }
             "discover" -> {
-        if("discover" !in hidden) {
-            section(dashboard,"Explore")
-            listOf(UiAction("For you"){ recommendFromHistory() },UiAction("Upcoming episodes"){ upcomingEpisodes() },UiAction("Trending titles"){ discover() },UiAction("Anime"){ animeSearch() }).chunked(2).forEach { batch ->
-                modernContent { BridgeTheme(violet) { androidx.compose.foundation.layout.Row(androidx.compose.ui.Modifier.fillMaxWidth(),horizontalArrangement=androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) { batch.forEach { item -> androidx.compose.material3.OutlinedButton(onClick=item.run,modifier=androidx.compose.ui.Modifier.weight(1f)) { androidx.compose.material3.Text(item.label) } } } } }
-            }
-        }
-
+                if("discover" !in hidden) {
+                    section(dashboard,"Explore")
+                    modernContent { ModernExploreLinks(violet,{recommendFromHistory()},{discover()},{upcomingEpisodes()},{animeSearch()},{openExploreSettings()}) }
+                }
             }
             "goal" -> {
         if("goal" !in hidden && prefs.getBoolean("show_monthly_goal",true)) monthlyGoalCard(dashboard,records)
@@ -1591,24 +1583,22 @@ class MainActivity : ComponentActivity() {
         if(installed.size==1) launch(0) else choose("Open recorded playback app",installed.map { appLabel(it.first) }) { i -> launch(i) }
     }
     private fun upcomingEpisodes() {
-        lookup("Loading upcoming episodes",{ done -> TraktLibrary.upcoming(this,30,done) }) { rows:List<UpcomingEpisode> ->
-            val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
-            body.addView(txt("Next 30 days • Trakt personal calendar. Air dates are not streaming availability.",14,muted))
-            if(rows.isEmpty()) body.addView(txt("No upcoming episodes returned.",15))
-            for(e in rows) {
-                val card=panel(body)
-                val date=java.time.Instant.parse(e.airs).atZone(java.time.ZoneId.systemDefault()).format(java.time.format.DateTimeFormatter.ofPattern("EEE, dd MMM • HH:mm"))
-                card.addView(txt(date,14,violet,true)); card.addView(txt(e.show,18,ink,true));
-                val at=java.time.Instant.parse(e.airs).toEpochMilli()
-                if(at>System.currentTimeMillis()) {
-                    card.addView(txt("Airs in "+durationText(at-System.currentTimeMillis()),13,muted))
-                    card.addView(actionButton("Remind me near air time") {
-                        if(android.os.Build.VERSION.SDK_INT>=33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)!=android.content.pm.PackageManager.PERMISSION_GRANTED) { requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),42); Toast.makeText(this,"Grant notifications, then schedule again",Toast.LENGTH_LONG).show() }
-                        else { prefs.edit().putBoolean("episode_reminders",true).apply(); EpisodeReminders.schedule(this,e); Toast.makeText(this,"Reminder scheduled; timing may vary",Toast.LENGTH_LONG).show() }
-                    })
-                }; card.addView(txt("S"+e.season+" E"+e.episode+if(prefs.getBoolean("hide_spoilers",true)) "" else " • "+e.title,14,muted))
-            }
-            BridgeDialogBuilder(this).setTitle("Upcoming episodes").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
+        val days=prefs.getInt("explore_calendar_days",30).coerceIn(1,31)
+        if(!auth.hasConnection()) {
+            Toast.makeText(this,"Connect Trakt to view your personal calendar",Toast.LENGTH_LONG).show()
+            return
+        }
+        lookup("Loading upcoming episodes",{ done -> TraktLibrary.upcoming(this,days,done) }) { rows:List<UpcomingEpisode> ->
+            modernDetailWindow { close -> ModernEpisodeCalendar(violet,rows,days,prefs.getBoolean("hide_spoilers",true),prefs.getBoolean("episode_reminders",true),{ e ->
+                if(android.os.Build.VERSION.SDK_INT>=33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)!=android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                    requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),42)
+                    Toast.makeText(this,"Grant notifications, then schedule again",Toast.LENGTH_LONG).show(); false
+                } else if(!prefs.getBoolean("episode_reminders",true)) {
+                    Toast.makeText(this,"Enable episode reminders in Explore settings",Toast.LENGTH_LONG).show(); false
+                } else {
+                    runCatching { EpisodeReminders.schedule(this,e) }.fold({Toast.makeText(this,"Reminder scheduled; timing may vary",Toast.LENGTH_SHORT).show();true},{Toast.makeText(this,"Unable to schedule reminder",Toast.LENGTH_SHORT).show();false})
+                }
+            },{close();openExploreSettings()},close) }
         }
     }
     private fun externalIdentity(record:WatchRecord) {
@@ -2104,84 +2094,71 @@ class MainActivity : ComponentActivity() {
         }.show()
     }
     private fun animeSearch() {
-        val field=EditText(this).apply { hint="English, Japanese or romaji title"; setSingleLine(true) }
-        BridgeDialogBuilder(this).setTitle("Search AniList").setMessage("Your search text is sent to AniList. No account access or history upload.").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Search") { _,_->
-            val q=field.text.toString().trim()
-            if(q.isBlank()) return@setPositiveButton
-            lookup("Searching anime",{ done -> AnimeCatalogue.search(q,done) }) { rows:List<AnimeResult> ->
-                choose("Anime matches",rows.map { it.english.ifBlank { it.romaji }+" • "+it.romaji }) { i ->
-                    val a=rows[i]
-                    BridgeDialogBuilder(this).setTitle(a.english.ifBlank { a.romaji }).setMessage(a.romaji+"\n"+a.native+"\nEpisodes: "+if(a.episodes>0) a.episodes.toString()+"\n\n"+a.description else "Unknown\n\n"+a.description).setNegativeButton("Close",null).setNeutralButton("Track locally") { _,_->editAnimeProgress(a.id,a.english.ifBlank { a.romaji },a.episodes) }.setPositiveButton("AniList details") { _,_->startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://anilist.co/anime/"+a.id))) }.show()
-                }
+        modernDetailWindow { close -> ModernAnimeSearch(violet,{ query ->
+            close()
+            lookup("Searching anime",{ done -> AnimeCatalogue.search(query,done) }) { rows:List<AnimeResult> ->
+                modernDetailWindow { back -> ModernAnimeResults(violet,rows,prefs.getBoolean("hide_spoilers",true),{ item ->
+                    back();editAnimeProgress(item.id,item.english.ifBlank { item.romaji },item.episodes)
+                },{ item -> startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://anilist.co/anime/"+item.id))) },back) }
             }
-        }.show()
+        },{close();animeLocalProgress()},{close();publicAnimeList()},close) }
     }
     private fun recommendFromHistory() {
         val records=unifiedRows.ifEmpty { history.records(0) }
         val seeds=RecommendationEngine.seeds(records,System.currentTimeMillis())
-        if(seeds.isEmpty()) {
-            BridgeDialogBuilder(this).setTitle("Recommendations").setMessage("Confirm some viewing history first, or browse trending titles.").setNegativeButton("Close",null).setPositiveButton("Discover") { _,_->discover() }.show()
-            return
-        }
         val hiddenStore=personalStore("recommendation_hidden")
-        BridgeDialogBuilder(this).setTitle("Personalized recommendations").setMessage("Trakt receives up to five catalogue title IDs to find related content. Viewing times and local feedback stay on this device.").setNegativeButton("Cancel",null).setNeutralButton("Reset hidden titles") { _,_->hiddenStore.edit().clear().apply(); recommendFromHistory() }.setPositiveButton("Find titles") { _,_->
-            lookup("Finding personal recommendations",{ done -> TraktCatalogue.personalized(seeds,done) }) { batches:List<RelatedBatch> ->
-                val rows=RecommendationEngine.rank(batches,RecommendationEngine.seen(records),hiddenStore.all.keys)
-                val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
-                if(batches.size<seeds.size) body.addView(txt("Some recommendation sources were unavailable.",14,muted))
-                if(rows.isEmpty()) body.addView(txt("No new recommendations. Try Discover or reset hidden titles.",15,muted))
-                cards(body,rows) { parent,row ->
-                    val item=row.item
-                    val card=panel(parent)
-                    card.addView(txt(item.label(),17,ink,true))
-                    card.addView(txt("Because you watched "+row.reasons.take(3).joinToString(", "),14,muted))
-                    card.addView(actionButton("Details") { titleDetails(item.type,item.id,item.title) })
-                    card.addView(actionButton("Not interested") {
-                        if(hiddenStore.all.size>=500) { Toast.makeText(this,"Hidden list full. Reset it to add more.",Toast.LENGTH_LONG).show() }
-                        else { hiddenStore.edit().putBoolean(item.type+":"+item.id,true).apply(); card.visibility=android.view.View.GONE }
-                    })
+        modernDetailWindow { close ->
+            ModernForYou(violet,seeds.isNotEmpty(),prefs.getBoolean("explore_personalized",false),{ 
+                prefs.edit().putBoolean("explore_personalized",true).apply()
+                close()
+                lookup("Finding recommendations",{ done -> TraktCatalogue.personalized(seeds,done) }) { batches:List<RelatedBatch> ->
+                    val seen=if(prefs.getBoolean("explore_exclude_watched",true)) RecommendationEngine.seen(records) else emptySet()
+                    val rows=RecommendationEngine.rank(batches,seen,hiddenStore.all.keys)
+                    modernDetailWindow { back -> ModernExploreResults(violet,"For you",rows.map { ExploreEntry(it.item,"Because you watched "+it.reasons.take(3).joinToString(", ")) },
+                        if(batches.size<seeds.size) "Some sources were unavailable." else "Recommendations from your viewing history",
+                        { item -> back(); titleDetails(item.type,item.id,item.title) },
+                        { item -> if(hiddenStore.all.size>=500) false else { hiddenStore.edit().putBoolean(item.type+":"+item.id,true).apply(); true } },back) }
                 }
-                BridgeDialogBuilder(this).setTitle("For you").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
-            }
-        }.show()
+            },{close();discover()},{close();openExploreSettings()},close)
+        }
     }
     private fun discover() {
-        choose("Discover",listOf("Trending movies","Trending shows","Popular movies","Popular shows","Mood-based discovery")) { index ->
-            if(index==4) { moodDiscovery(); return@choose }
-            val type=if(index%2==0) "movie" else "show"; val mode=if(index<2) "trending" else "popular"
-            lookup("Loading "+mode,{ done -> TraktCatalogue.discover(type,mode,done) }) { rows:List<CatalogueItem> ->
-                val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
-                if(tvMode) {
-                    val shelf=rows.distinctBy { it.id }.map { item -> TvLibraryItem(item.id.toString(),item.title,item.label(),type,item.id) { titleDetails(type,item.id,item.title) } }
-                    body.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeTvShelf(violet,mode.replaceFirstChar { it.uppercase() },shelf) } })
-                } else cards(body,rows) { parent,item ->
-                    val card=panel(parent); val image=ImageView(this).apply { scaleType=ImageView.ScaleType.FIT_CENTER; contentDescription="Poster" }
-                    card.addView(image,LinearLayout.LayoutParams(-1,dp(180))); Artwork.load(this,type,item.id,image)
-                    card.addView(txt(item.label(),16,ink,true)); card.addView(actionButton("Details") { titleDetails(type,item.id,item.title) })
+        modernDetailWindow { close ->
+            ModernDiscover(violet,prefs.getString("explore_type","movie").orEmpty(),prefs.getString("explore_mode","trending").orEmpty(),{ type,mode ->
+                prefs.edit().putString("explore_type",type).putString("explore_mode",mode).apply()
+                close()
+                lookup("Loading "+mode,{ done -> TraktCatalogue.discover(type,mode,done) }) { rows:List<CatalogueItem> ->
+                    val seen=if(prefs.getBoolean("explore_exclude_watched",true)) RecommendationEngine.seen(unifiedRows.ifEmpty { history.records(0) }) else emptySet()
+                    val excluded=seen+personalStore("recommendation_hidden").all.keys
+                    modernDetailWindow { back -> ModernExploreResults(violet,mode.replaceFirstChar { it.uppercase() }+" "+if(type=="movie") "movies" else "shows",
+                        rows.filter { it.type+":"+it.id !in excluded }.map { ExploreEntry(it,"") },"Browse titles from Trakt",
+                        { item -> back();titleDetails(item.type,item.id,item.title) },null,back) }
                 }
-                BridgeDialogBuilder(this).setTitle(mode.replaceFirstChar { it.uppercase() }).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
-            }
+            },{close();moodDiscovery()},close)
         }
     }
+    private fun openExploreSettings() {
+        val hidden=personalStore("recommendation_hidden")
+        modernDetailWindow { close -> ModernExploreSettings(violet,prefs.getBoolean("explore_personalized",false),prefs.getBoolean("explore_exclude_watched",true),prefs.getBoolean("hide_spoilers",true),prefs.getInt("explore_calendar_days",30).coerceIn(1,31),prefs.getBoolean("episode_reminders",true),hidden.all.size,
+            { personalized,exclude,spoilers,days,reminders ->
+                prefs.edit().putBoolean("explore_personalized",personalized).putBoolean("explore_exclude_watched",exclude).putBoolean("hide_spoilers",spoilers).putInt("explore_calendar_days",days).putBoolean("episode_reminders",reminders).apply()
+                if(!reminders) EpisodeReminders.cancelAll(this)
+                close(); if(tab==4) { refreshSettingsState("library"); refreshSettingsState("appearance") } else refreshHistory()
+                Toast.makeText(this,"Explore preferences saved",Toast.LENGTH_SHORT).show()
+            },{ hidden.edit().clear().apply(); Toast.makeText(this,"Hidden recommendations reset",Toast.LENGTH_SHORT).show() },
+            { EpisodeReminders.cancelAll(this); Toast.makeText(this,"Episode reminders cancelled",Toast.LENGTH_SHORT).show() },close) }
+    }
     private fun moodDiscovery() {
-        choose("Choose your mood",DiscoveryEngine.moods.map { it.label }) { moodIndex ->
+        modernDetailWindow { close -> ModernMoodDiscovery(violet,{ moodIndex,type,runtime,rating ->
             val mood=DiscoveryEngine.moods[moodIndex]
-            choose("Content type",listOf("Movies","TV shows")) { typeIndex ->
-                val type=if(typeIndex==0) "movie" else "show"
-                val times=listOf(0,30,60,90,120)
-                choose("Maximum runtime (per episode for shows)",listOf("Any runtime","30 minutes","60 minutes","90 minutes","120 minutes")) { timeIndex ->
-                    choose("Minimum Trakt rating",listOf("Any rating","7 / 10","8 / 10")) { ratingIndex ->
-                        val excluded=RecommendationEngine.seen(history.records(0))+personalStore("recommendation_hidden").all.keys
-                        lookup("Finding "+mood.label.lowercase()+" titles",{ done -> TraktCatalogue.moodDiscovery(type,mood,done) }) { candidates:List<DiscoveryItem> ->
-                            val rows=DiscoveryEngine.filter(candidates,mood,times[timeIndex],listOf(0.0,7.0,8.0)[ratingIndex],excluded)
-                            choose(mood.label+" • new to you",rows.map { row -> row.item.label()+" • "+(if(row.item.runtimeMinutes>0) row.item.runtimeMinutes.toString()+" min" else "Runtime unknown") }) { i ->
-                                val item=rows[i].item; titleDetails(item.type,item.id,item.title)
-                            }
-                        }
-                    }
-                }
+            val seen=if(prefs.getBoolean("explore_exclude_watched",true)) RecommendationEngine.seen(unifiedRows.ifEmpty { history.records(0) }) else emptySet()
+            val excluded=seen+personalStore("recommendation_hidden").all.keys
+            close()
+            lookup("Finding "+mood.label.lowercase()+" titles",{ done -> TraktCatalogue.moodDiscovery(type,mood,done) }) { candidates:List<DiscoveryItem> ->
+                val rows=DiscoveryEngine.filter(candidates,mood,runtime,rating,excluded)
+                modernDetailWindow { back -> ModernExploreResults(violet,mood.label,rows.map { ExploreEntry(it.item,if(it.item.runtimeMinutes>0) it.item.runtimeMinutes.toString()+" min" else "Runtime unknown") },"Matches your selected filters",{ item -> back();titleDetails(item.type,item.id,item.title) },null,back) }
             }
-        }
+        },close) }
     }
     private fun titleDetails(type:String,id:Long,label:String) {
         val cache=getSharedPreferences("offline_catalogue",MODE_PRIVATE)
