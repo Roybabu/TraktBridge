@@ -36,6 +36,10 @@ class BridgeViewModel(app:Application):AndroidViewModel(app) {
     private var generation=0L
     private var running=false
     private var latest:HistorySnapshot?=null
+    private var latestComplete=false
+    private var latestAt=0L
+    private var latestAccountGeneration=-1L
+    private var latestConnected=false
     private var observer:((Result<HistorySnapshot>,Boolean)->Unit)?=null
     private var progressObserver:((HistoryLoadProgress)->Unit)?=null
     private var lastProgress=HistoryLoadProgress("Reading local history")
@@ -43,12 +47,25 @@ class BridgeViewModel(app:Application):AndroidViewModel(app) {
     var selectedTab by mutableStateOf(0)
         private set
     fun select(index:Int) { if(index in 0..4) selectedTab=index }
-    fun load(deliver:(Result<HistorySnapshot>,Boolean)->Unit,onProgress:(HistoryLoadProgress)->Unit) {
+    fun load(deliver:(Result<HistorySnapshot>,Boolean)->Unit,onProgress:(HistoryLoadProgress)->Unit, navigation:Boolean=false) {
+        observer=deliver; progressObserver=onProgress
+        val app=getApplication<Application>()
+        val accountGeneration=RemoteAccountCache.generation(app)
+        val connected=TraktAuth(app).hasConnection()
+        if(latestAccountGeneration!=accountGeneration || latestConnected!=connected) {
+            if(running) cancel()
+            latest=null; latestComplete=false
+        }
         observer=deliver; progressObserver=onProgress
         if(running) {
             latest?.let { deliver(Result.success(it),false) }
             onProgress(lastProgress); return
         }
+        if(navigation && latestComplete && latest!=null) {
+            deliver(Result.success(latest!!),true)
+            if(android.os.SystemClock.elapsedRealtime()-latestAt<30000) return
+        }
+        latestAccountGeneration=accountGeneration; latestConnected=connected
         val request=++generation
         running=true
         lastProgress=HistoryLoadProgress("Reading local history")
@@ -58,7 +75,7 @@ class BridgeViewModel(app:Application):AndroidViewModel(app) {
         task=worker.submit {
             val result=runCatching {
                 val local=repository.local()
-                main.post { if(request==generation && running) { latest=local; observer?.invoke(Result.success(local),false) } }
+                main.post { if(request==generation && running && !latestComplete) { latest=local; observer?.invoke(Result.success(local),false) } }
                 postProgress(HistoryLoadProgress("Loading downloaded Trakt history"))
                 val result=repository.unified(local){ done,total -> postProgress(HistoryLoadProgress("Loading downloaded Trakt history",done,total)) }
                 postProgress(HistoryLoadProgress("Preparing viewing library"))
@@ -67,7 +84,7 @@ class BridgeViewModel(app:Application):AndroidViewModel(app) {
             main.post {
                 if(request==generation && running) {
                     running=false; timeout?.let { main.removeCallbacks(it) }; timeout=null
-                    result.getOrNull()?.let { latest=it }
+                    result.getOrNull()?.let { latest=it; latestComplete=true; latestAt=android.os.SystemClock.elapsedRealtime() }
                     observer?.invoke(result,true)
                 }
             }
@@ -83,6 +100,6 @@ class BridgeViewModel(app:Application):AndroidViewModel(app) {
         }
         timeout=action; main.postDelayed(action,45000)
     }
-    fun cancel() { generation++; running=false; task?.cancel(true); task=null; timeout?.let { main.removeCallbacks(it) }; timeout=null; observer=null; progressObserver=null; latest=null }
+    fun cancel() { generation++; running=false; task?.cancel(true); task=null; timeout?.let { main.removeCallbacks(it) }; timeout=null; observer=null; progressObserver=null; latest=null; latestComplete=false; latestAt=0L }
     override fun onCleared() { cancel(); worker.shutdownNow(); super.onCleared() }
 }

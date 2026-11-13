@@ -58,7 +58,7 @@ class MainActivity : ComponentActivity() {
     private val amoled:Boolean get()=AppearancePolicy.mode(prefs.getString("appearance_mode","dark").orEmpty())=="amoled"
     private val surface:Int get()=if(amoled) 0xff101010.toInt() else BridgeDesign.surface
     private val bg:Int get()=if(amoled) 0xff000000.toInt() else BridgeDesign.background
-    private fun showAuth(message: String = auth.status()) { account.text = message; if(!auth.hasConnection()) { unifiedRows=emptyList(); refreshHistory() } }
+    private fun showAuth(message: String = auth.status()) { account.text = message; if(!auth.hasConnection()) { unifiedRows=emptyList(); bridgeModel.cancel(); if(::libraryHost.isInitialized) libraryContent=null; refreshHistory() } }
     private fun handleCallback(i: Intent) {
         val uri = i.data ?: return
         if (uri.scheme != "traktbridge" || uri.encodedAuthority != "callback" || !uri.encodedPath.isNullOrEmpty() || uri.fragment!=null) return
@@ -664,7 +664,7 @@ class MainActivity : ComponentActivity() {
                 settingRow(group ?: root,"Sync maintenance","Retry approved uploads or clear downloaded account data") {
                     choose("Sync maintenance",listOf("Retry approved uploads","Clear downloaded library")) { index ->
                         if(index==0) { HistorySync.schedule(this); refreshHistory(); Toast.makeText(this,"Approved sync queue scheduled",Toast.LENGTH_SHORT).show() }
-                        else BridgeDialogBuilder(this).setTitle("Clear downloaded Trakt library?").setMessage("Stops automatic refresh and deletes downloaded account data on this device. Local viewing records and your Trakt account are unchanged.").setNegativeButton("Cancel",null).setPositiveButton("Clear") { _,_-> RemoteRefreshSchedule.disable(this); TraktLibrary.clearCache(this); unifiedRows=emptyList(); refreshSettingsState("account"); refreshHistory() }.show()
+                        else BridgeDialogBuilder(this).setTitle("Clear downloaded Trakt library?").setMessage("Stops automatic refresh and deletes downloaded account data on this device. Local viewing records and your Trakt account are unchanged.").setNegativeButton("Cancel",null).setPositiveButton("Clear") { _,_-> RemoteRefreshSchedule.disable(this); TraktLibrary.clearCache(this); bridgeModel.cancel(); libraryContent=null; unifiedRows=emptyList(); refreshSettingsState("account"); refreshHistory() }.show()
                     }
                 }
                 settingRow(group ?: root,"About Trakt sync","Data usage and upload permissions") {
@@ -1275,7 +1275,7 @@ class MainActivity : ComponentActivity() {
         contentPage.visibility=if(index==4 || index==1) android.view.View.GONE else android.view.View.VISIBLE
         libraryHost.visibility=if(index==1) android.view.View.VISIBLE else android.view.View.GONE
         if(tvMode) for(i in 0 until nav.childCount) (nav.getChildAt(i) as TextView).apply { setTextColor(if(i==index) violet else muted); background=TvFocus.background(this@MainActivity,if(i==index) BridgeDesign.action else surface,violet,i==index); isSelected=i==index }
-        refreshHistory(); contentPage.scrollTo(0,0)
+        clearHistoryProgress(); refreshHistory(navigation=true); contentPage.scrollTo(0,0)
         if(index==4 && restoreScrollY>0) { val y=restoreScrollY; restoreScrollY=0; settingsPage.post { if(tab==4) settingsPage.scrollTo(0,y) } }
         if(tvMode && index==4 && (!nav.hasFocus() || restoreContentFocus)) { settingsPage.post { if(tab==4) TvFocus.firstContent(settingsPage) }; restoreContentFocus=false }
     }
@@ -1306,20 +1306,28 @@ class MainActivity : ComponentActivity() {
         historyLoadPanel?.let { (it.parent as? android.view.ViewGroup)?.removeView(it) }
         historyLoadPanel=null; historyLoadLabel=null; historyLoadBar=null
     }
-    private fun refreshHistory() {
+    private var historyProgressEpoch=0L
+    private val historyProgressHandler=android.os.Handler(android.os.Looper.getMainLooper())
+    private fun refreshHistory(navigation:Boolean=false) {
         if(!::dashboard.isInitialized || tab==4 || isFinishing || isDestroyed) return
         val selectedTab=tab
+        val epoch=++historyProgressEpoch
+        var completed=false
+        var pendingProgress:HistoryLoadProgress?=null
+        var progressVisible=false
+        historyProgressHandler.postDelayed({ if(!completed && epoch==historyProgressEpoch && tab==selectedTab && !isDestroyed && !isFinishing) { progressVisible=true; pendingProgress?.let { showHistoryProgress(it) } } },700)
         if(renderedHistoryTab!=selectedTab) { dashboard.removeAllViews(); clearHistoryProgress() }
         if(tvMode && contentPage.hasFocus()) restoreContentFocus=true
         bridgeModel.load({ result,finished ->
-            if(!isDestroyed && !isFinishing && tab==selectedTab) {
+            if(!isDestroyed && !isFinishing && tab==selectedTab && epoch==historyProgressEpoch) {
+                if(finished) completed=true
                 result.fold({ snapshot ->
                     val y=if(restoreScrollY>0) restoreScrollY else if(renderedHistoryTab==selectedTab) contentPage.scrollY else 0
                     val drawn=runCatching { renderHistory(snapshot.records,snapshot.groups,snapshot.unified) }
                     if(drawn.isSuccess) {
                         renderedHistoryTab=selectedTab
                         clearHistoryProgress()
-                        if(!finished) showHistoryProgress(HistoryLoadProgress("Loading downloaded Trakt history"))
+                        if(!finished && progressVisible) pendingProgress?.let { showHistoryProgress(it) }
                         restoreScrollY=0
                         if(y>0) contentPage.post { if(tab==selectedTab) contentPage.scrollTo(0,y) }
                         if(tvMode && restoreContentFocus) { restoreContentFocus=false; contentPage.post { if(tab==selectedTab) TvFocus.firstContent(contentPage) } }
@@ -1336,12 +1344,11 @@ class MainActivity : ComponentActivity() {
                     (if(tab==1) libraryHost else dashboard).addView(warning,0); historyLoadPanel=warning
                 })
             }
-        },{ progress -> if(tab==selectedTab && !isDestroyed && !isFinishing) showHistoryProgress(progress) })
+        },{ progress -> if(tab==selectedTab && epoch==historyProgressEpoch && !isDestroyed && !isFinishing) { pendingProgress=progress; completed=false; if(progressVisible) showHistoryProgress(progress) } },navigation=navigation)
     }
 
     private fun customizeDashboard() {
         val keys=DashboardPreferences.order(prefs.getString("dashboard_order","").orEmpty()).toMutableList()
-        if(!live && prefs.getBoolean("enabled",false)) modernContent { ModernActionRow(violet,"Repair tracking",TrackingRecovery.status(this)){ repairTracking() } }
         val hidden=DashboardPreferences.visible(prefs.getString("dashboard_hidden","").orEmpty()).toMutableSet()
         val labels=mapOf("metrics" to "Statistics","goal" to "Monthly goal","now" to "Now playing","continue" to "Continue watching","review" to "Review queue","discover" to "Discovery shortcuts","recent" to "Recent viewing")
         val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(8),dp(12),dp(8)) }
