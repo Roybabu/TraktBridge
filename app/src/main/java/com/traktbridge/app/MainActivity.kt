@@ -534,9 +534,10 @@ class MainActivity : ComponentActivity() {
     }
     private fun refreshDeviceSettings() = refreshSettingsState("devices")
     private fun disableTitleDetection() {
-        val edit=prefs.edit().putLong("ocr_generation",prefs.getLong("ocr_generation",0)+1).putBoolean("title_optin",false).remove("ocr_target").remove("ocr_after").remove("ocr_until").remove("ocr_choices").remove("ocr_source").remove("ocr_captured").remove("ocr_status")
-        prefs.all.keys.filter { it.startsWith("title_hint:") || it.startsWith("title_detail:") || it.startsWith("title_time:") }.forEach { edit.remove(it) }
-                    edit.apply(); startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+        prefs.edit().putBoolean("title_optin",false).remove("segment:"+YouTubePlayback.PACKAGE).remove("segment_time:"+YouTubePlayback.PACKAGE).apply()
+        YouTubePlayback.clear()
+        PlaybackListener.wake()
+        startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         recreate()
     }
     private fun pairDeviceMenu() {
@@ -608,16 +609,6 @@ class MainActivity : ComponentActivity() {
                 heading("Tracking preferences")
                 settingRow(group ?: root,"Guided tracking setup","Walk through app selection and Android permissions") { setupGuide() }
                 button("Completion review threshold") { configureCompletionThreshold() }
-                heading("Identify content")
-                button("Identify local video file") { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("video/*"),57) }
-                button("Identify shared movie link") { val field=EditText(this).apply { hint="Paste shared title or link" }; BridgeDialogBuilder(this).setTitle("Identify shared content").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Continue") { _,_-> presentShared(SharedContent.fromText(field.text.toString())) }.show() }
-
-
-
-
-                (group ?: root).addView(Switch(this).apply { text="Automatically reuse confirmed local title mappings"; isChecked=prefs.getBoolean("learned_auto",false); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("learned_auto",checked).apply() } })
-                button("Clear learned title mappings") { BridgeDialogBuilder(this).setTitle("Clear learned mappings?").setMessage("Existing viewing history and Trakt matches stay unchanged.").setNegativeButton("Cancel",null).setPositiveButton("Clear") { _,_->history.clearLearning() }.show() }
-                label("Remote playback is recognized when Android exposes a media session. Picture-in-picture can continue tracking through the same session; unsupported casts cannot be observed directly.")
                 heading("Permissions & notifications")
                 button("Grant notification access") { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
                 button("Reconnect playback listener") { runCatching { android.service.notification.NotificationListenerService.requestRebind(android.content.ComponentName(this,PlaybackListener::class.java)) }; refresh() }
@@ -802,7 +793,7 @@ class MainActivity : ComponentActivity() {
             }
             "privacy" -> {
                 heading("Tracking privacy")
-                val trackingActive=prefs.getBoolean("enabled",false) || prefs.getBoolean("title_optin",false) || prefs.contains("usage_since") || prefs.getBoolean("device_sharing",false) || prefs.getBoolean("device_controls",false) || prefs.getBoolean("device_history",false)
+                val trackingActive=prefs.getBoolean("enabled",false) || prefs.getBoolean("title_optin",false) || prefs.getBoolean("device_sharing",false) || prefs.getBoolean("device_controls",false) || prefs.getBoolean("device_history",false)
                 settingRow(group ?: root,"Pause all tracking",if(trackingActive) "Tracking or sharing is enabled" else "Tracking and sharing are paused") { privacyMode() }
                 settingRow(group ?: root,"Privacy overview","Review tracking, data storage and account privacy") { privacyDashboard() }
                 heading("App protection")
@@ -893,14 +884,11 @@ class MainActivity : ComponentActivity() {
                 heading("App & support")
                 supportRow("App updates","Check for a newer version") { checkUpdates() }
                 supportRow("Send feedback","Report a problem or suggest an improvement") { betaFeedback() }
-                heading("Tracking & compatibility")
+                heading("Tracking status")
                 supportRow("Tracking health","Permissions, sampling, battery and review status") { trackingHealth() }
                 supportRow("Companion status","Active sessions, pending reviews and measured viewing") {
                     val summary=CompanionStatus.summarize(history.records(0))
                     BridgeDialogBuilder(this).setTitle("Companion status").setMessage("Active sessions: "+summary.active+"\nAwaiting review: "+summary.pending+"\nSampled time: "+durationText(summary.watchedMs)).setPositiveButton("Close",null).show()
-                }
-                supportRow("Playback compatibility","View detection profiles for supported apps") {
-                    BridgeDialogBuilder(this).setTitle("Playback profiles").setMessage("YouTube — regular videos only. Other playback apps are not integrated.").setPositiveButton("Close",null).show()
                 }
                 heading("Advanced tools")
                 supportRow("Database & encryption","Integrity checks and encryption migration readiness") {
@@ -995,11 +983,9 @@ class MainActivity : ComponentActivity() {
         BridgeDialogBuilder(this).setTitle("Privacy dashboard").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
     }
     private fun privacyMode() {
-        BridgeDialogBuilder(this).setTitle("Pause all playback tracking?").setMessage("Sampling, title hints and optional usage reminders stop. Existing history and already approved uploads are retained. Restart tracking manually in Settings.").setNegativeButton("Cancel",null).setPositiveButton("Pause tracking") { _,_->
-            val generation=prefs.getLong("ocr_generation",0)+1
-            val edit=prefs.edit().putBoolean("enabled",false).putBoolean("device_sharing",false).putBoolean("device_controls",false).putBoolean("device_history",false).putBoolean("title_optin",false).remove("usage_since").remove("sessions").remove("last_nonempty_sessions")
-            prefs.all.keys.filter { it.startsWith("ocr_") || it.startsWith("title_hint:") || it.startsWith("title_detail:") || it.startsWith("title_time:") }.forEach { edit.remove(it) }
-            edit.putLong("ocr_generation",generation).apply(); stopService(Intent(this,TrackingService::class.java)); recreate()
+        BridgeDialogBuilder(this).setTitle("Pause all playback tracking?").setMessage("YouTube playback sampling, player identification and device sharing stop. Existing history and already approved uploads are retained. Restart tracking manually in Settings.").setNegativeButton("Cancel",null).setPositiveButton("Pause tracking") { _,_->
+            val edit=prefs.edit().putBoolean("enabled",false).putBoolean("device_sharing",false).putBoolean("device_controls",false).putBoolean("device_history",false).putBoolean("title_optin",false).remove("sessions").remove("last_nonempty_sessions")
+            edit.remove("segment:"+YouTubePlayback.PACKAGE).remove("segment_time:"+YouTubePlayback.PACKAGE).apply(); YouTubePlayback.clear(); PlaybackListener.wake(); stopService(Intent(this,TrackingService::class.java)); recreate()
         }.show()
     }
     private fun configureGoal() {
