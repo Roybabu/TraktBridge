@@ -2570,7 +2570,7 @@ class MainActivity : ComponentActivity() {
         }
     }
     private fun remoteActions(item:RemoteItem,account:String) {
-        choose(item.title,listOf("Add to Trakt watchlist","Remove from Trakt watchlist","Rate on Trakt","Remove Trakt rating")) { index ->
+        modernActionDialog(item.title,"Manage this title on your connected Trakt account",listOf("Add to watchlist","Remove from watchlist","Rate title","Remove rating")) { index ->
             fun confirm(action:String,rating:Int=0) {
                 BridgeDialogBuilder(this).setTitle("Confirm Trakt account change").setMessage(item.title+"\n"+action+if(rating>0) " "+rating+"/10" else "").setNegativeButton("Cancel",null).setPositiveButton("Confirm") { _,_->
                     lookup("Updating Trakt",{ done -> TraktLibrary.mutate(this,account,item,action,rating,done) }) { message:String -> Toast.makeText(this,message,Toast.LENGTH_LONG).show() }
@@ -2680,36 +2680,38 @@ class MainActivity : ComponentActivity() {
         }
     }
     private fun showSessions(g:ViewingTitle) {
-        val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
-        body.addView(txt("Original viewing sessions are retained. Synced viewing events: "+g.sessions.count { it.status=="synced" },14,muted))
-        val dialog=BridgeDialogBuilder(this).setTitle(g.representative.matchLabel.ifBlank { g.representative.title.ifBlank { "Viewing sessions" } }).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close") { _,_->refreshHistory() }.create()
+        val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(8),dp(16),dp(20)) }
+        val r=g.representative
+        val title=if(r.matchType=="episode") r.matchLabel.substringBefore(" — ") else r.matchLabel.ifBlank { r.title.ifBlank { "Viewing details" } }
+        body.addView(txt(g.sessions.size.toString()+" viewing session(s) · "+g.sessions.count { it.status=="synced" }+" synced",13,muted))
+        val dialog=BridgeDialogBuilder(this).setTitle(title).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Done") { _,_->refreshHistory() }.create()
         g.sessions.forEach { session ->
             if(!UnifiedTraktHistory.remote(session) && session.id in g.possibleRewatchIds) body.addView(txt("Possible rewatch — review before approving",14,muted))
-            recordCard(body,session,true,g.confirmed || g.queued,onDeleted={ dialog.dismiss() })
+            recordCard(body,session,true,g.confirmed || g.queued,onDeleted={ dialog.dismiss() },onNavigate={ dialog.dismiss() })
         }
         dialog.show()
     }
-    private fun recordCard(parent:LinearLayout,r:WatchRecord,expanded:Boolean,completionAlreadyRecorded:Boolean=false,onDeleted:()->Unit={}) {
+    private fun recordCard(parent:LinearLayout,r:WatchRecord,expanded:Boolean,completionAlreadyRecorded:Boolean=false,onDeleted:()->Unit={},onNavigate:()->Unit={}) {
         if(UnifiedTraktHistory.remote(r)) {
             val row=TitleUi(r.matchLabel,"Trakt account history",java.text.DateFormat.getDateTimeInstance().format(java.util.Date(r.ended)),"Watched on Trakt","Historical watch duration unavailable",null,"","Read-only downloaded watch event",if(r.matchType=="episode") "show" else "movie",if(r.matchType=="episode") r.showId else r.traktId)
             parent.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeTitleCard(violet,row,emptyList()) } }); return
         }
-        val status=when(r.status) { "synced"->"Synced to Trakt"; "active"->"Watching"; "pending"->"Needs review"; "reviewed"->"Ready to confirm"; "restored_audit"->"Restored audit • no upload"; else->r.status.replaceFirstChar { it.uppercase() } }
+        val status=when(r.status) { "synced"->"Synced to Trakt"; "active"->"Watching"; "pending"->"Needs review"; "reviewed"->if(completionAssessment(r).suggested) "Ready to confirm" else "Matched · in progress"; "restored_audit"->"Restored audit • no upload"; else->r.status.replaceFirstChar { it.uppercase() } }
         val progress=if(r.duration>0 && r.position>=0) (r.position.toDouble()/r.duration*100).toInt().coerceIn(0,100) else null
         val evidence=buildString {
             if(r.status in setOf("pending","reviewed")) { val a=completionAssessment(r); append("Completion evidence: "+(a.percent?.let { it.toString()+"% • " } ?: "")+a.reason) }
             if(r.seeks>0 || r.bufferingMs>0 || r.pausedMs>0 || r.uncertainMs>0) append("\nPaused: "+durationText(r.pausedMs)+" • Buffering: "+durationText(r.bufferingMs)+" • Seeks: "+r.seeks+" (rewinds "+r.rewinds+") • Uncertain: "+durationText(r.uncertainMs))
-            if(expanded && r.traktId>0) append("\nMatched: "+r.matchLabel+" • Trakt ID "+r.traktId)
+            if(expanded && r.traktId>0) append("\nTrakt ID "+r.traktId)
             if(expanded && r.status in setOf("queued","uncertain","blocked","synced")) append("\nSync: "+r.status+" — "+history.syncMessage(r.id))
         }
-        val row=TitleUi(r.matchLabel.ifBlank { r.title.ifBlank { "Unidentified video" } },r.subtitle.ifBlank { appLabel(r.source) },appLabel(r.source)+" • "+java.text.DateFormat.getDateInstance().format(java.util.Date(r.started)),status,if(r.watched<=0) "Watch time unknown" else durationText(r.watched)+" sampled",progress,if(progress!=null) durationText(r.position)+" / "+durationText(r.duration) else "",evidence,if(r.matchType=="episode") "show" else "movie",if(r.matchType=="episode") r.showId else r.traktId)
+        val row=TitleUi(r.matchLabel.ifBlank { r.title.ifBlank { "Unidentified video" } },r.subtitle.takeUnless { it.equals(appLabel(r.source),true) }.orEmpty(),appLabel(r.source)+" • "+java.text.DateFormat.getDateInstance().format(java.util.Date(r.started)),status,if(r.watched<=0) "Watch time unknown" else durationText(r.watched)+" sampled",progress,if(progress!=null) durationText(r.position)+" / "+durationText(r.duration) else "",evidence,if(r.matchType=="episode") "show" else "movie",if(r.matchType=="episode") r.showId else r.traktId)
         val actions=mutableListOf<UiAction>()
         if(!expanded) actions.add(UiAction("View details") { BridgeDialogBuilder(this).setTitle("Viewing details").setMessage(r.matchLabel.ifBlank { r.title.ifBlank { "Unidentified video" } }+"\n"+r.subtitle).setNegativeButton("Close",null).setPositiveButton("Open history") { _,_->showTab(1) }.show() })
         else {
             if(r.traktId>0) actions.add(UiAction("Trakt watchlist / rating") { lookup("Checking account",{ done -> TraktLibrary.accountId(this,done) }) { account:String -> remoteActions(RemoteItem(r.matchType,r.traktId,r.matchLabel,r.showId,r.season,r.episode),account) } })
             if(r.id.startsWith("import:") && r.status=="pending") actions.add(UiAction("Reconcile with local history") { reconcileImported(r) })
             if(r.status in setOf("pending","reviewed")) actions.add(UiAction(if(r.traktId>0) "Change Trakt match" else "Identify on Trakt") { identify(r) })
-            if(r.traktId>0 && r.status in setOf("pending","reviewed")) actions.add(UiAction("Remove Trakt match") { history.clearMatch(r.id); refreshHistory() })
+            if(r.traktId>0 && r.status in setOf("pending","reviewed")) actions.add(UiAction("Remove Trakt match") { history.clearMatch(r.id); onNavigate(); refreshHistory() })
             if(r.status=="reviewed" && r.traktId>0) actions.add(UiAction(if(completionAlreadyRecorded) "Confirm separate rewatch" else "Mark watched on Trakt") { approveUpload(r,completionAlreadyRecorded) })
             if(r.status=="blocked") actions.add(UiAction("Retry blocked upload") { history.retryBlocked(r.id); HistorySync.schedule(this); refreshHistory() })
             if(r.status in setOf("queued","blocked")) actions.add(UiAction("Cancel queued upload") { history.cancelQueued(r.id); refreshHistory() })
@@ -2736,7 +2738,15 @@ class MainActivity : ComponentActivity() {
                 }.show()
             })
         }
-        parent.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeTitleCard(violet,row,actions) } })
+        if(expanded) {
+            val primary=actions.firstOrNull { it.label in setOf("Mark watched on Trakt","Confirm separate rewatch","Identify on Trakt","Retry blocked upload") }
+            val menu=actions.filter { it!==primary }
+            val item=PosterLibraryItem(r.matchLabel.ifBlank { r.title },r.subtitle.takeUnless { it.equals(appLabel(r.source),true) }.orEmpty(),"",if(r.matchType=="episode") "show" else "movie",if(r.matchType=="episode") r.showId else r.traktId,{},{},progress?.div(100f))
+            parent.addView(ComposeView(this).apply {
+                setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
+                setContent { ModernSessionDetails(violet,item,status,appLabel(r.source)+" · "+java.text.DateFormat.getDateInstance().format(java.util.Date(r.started)),if(r.watched<=0) "Watch time unknown" else durationText(r.watched)+" sampled",if(progress!=null) durationText(r.position)+" / "+durationText(r.duration) else "",evidence,primary?.let { action -> UiAction(action.label) { onNavigate(); action.run() } },menu.map { action -> UiAction(action.label) { onNavigate(); action.run() } }) }
+            })
+        } else parent.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeTitleCard(violet,row,actions) } })
     }
     private fun appLabel(pkg: String): String = mapOf(UnifiedTraktHistory.SOURCE to "Trakt history","server.plex" to "Plex server","server.jellyfin" to "Jellyfin server","server.emby" to "Emby server","server.kodi" to "Kodi server")[pkg] ?: apps.entries.firstOrNull { it.value == pkg }?.key ?: runCatching {
         packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg,0)).toString()
@@ -2780,28 +2790,21 @@ class MainActivity : ComponentActivity() {
             }.show()
     }
     private fun identify(r: WatchRecord) {
-        val field = EditText(this).apply { setText(RecognitionEngine.query(r.title)); hint = "Movie, show or anime title"; setSingleLine(true) }
-        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(24,12,24,12); addView(field); addView(TextView(this@MainActivity).apply { text = "Search sends this title to Trakt. Select the exact movie or episode; nothing is uploaded to your history." }) }
-        box.addView(actionButton("Search by IMDb / TMDB ID") { externalIdentity(r) })
-        val learned=history.learned(r)
-        if(learned!=null && r.traktId==0L) box.addView(actionButton("Use learned match: "+learned.label()) { confirmMatch(r,learned) })
-        val dialog = BridgeDialogBuilder(this).setTitle("Identify viewing record").setView(box).setNegativeButton("Cancel",null).setNeutralButton("TV / Anime",null).setPositiveButton("Movie",null).create()
-        dialog.setOnShowListener {
-            fun launch(type: String) {
-                val q = field.text.toString().trim()
-                if (q.isBlank()) { field.error = "Enter a title"; return }
-                dialog.dismiss()
-                lookup("Searching Trakt", { done -> TraktCatalogue.search(q,type,done) }) { results: List<CatalogueItem> ->
-                    val ranked=RecognitionEngine.rank(if(q==RecognitionEngine.query(r.title)) r.title else q,r.subtitle,r.duration,results)
-                    choose("Select title • evidence score",ranked.map { it.item.label()+" • "+it.score+"/100\n"+it.reason }) { index ->
-                        val item = ranked[index].item
-                        if (item.type == "movie") confirmMatch(r,item) else selectSuggestedEpisode(r,item)
-                    }
+        val initial=RecognitionEngine.query(r.title)
+        val learned=history.learned(r)?.takeIf { r.traktId==0L }
+        val view=ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow) }
+        val dialog=BridgeDialogBuilder(this).setView(view).create()
+        fun search(q:String,type:String) {
+            dialog.dismiss()
+            lookup("Searching Trakt", { done -> TraktCatalogue.search(q,type,done) }) { results: List<CatalogueItem> ->
+                val ranked=RecognitionEngine.rank(if(q==initial) r.title else q,r.subtitle,r.duration,results)
+                choose("Select title",ranked.map { it.item.label()+" · "+it.score+"/100\n"+it.reason }) { index ->
+                    val item=ranked[index].item
+                    if(item.type=="movie") confirmMatch(r,item) else selectSuggestedEpisode(r,item)
                 }
             }
-            dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener { launch("movie") }
-            dialog.getButton(android.app.AlertDialog.BUTTON_NEUTRAL).setOnClickListener { launch("show") }
         }
+        view.setContent { ModernIdentifyDialog(violet,initial,{q,type->search(q,type)},{dialog.dismiss();externalIdentity(r)},learned?.let { item -> UiAction("Use learned match: "+item.label()){dialog.dismiss();confirmMatch(r,item)} },{dialog.dismiss()}) }
         dialog.show()
     }
     private fun <T> lookup(label: String, request: ((Result<T>) -> Unit) -> Unit, success: (T) -> Unit) {
@@ -2813,6 +2816,12 @@ class MainActivity : ComponentActivity() {
                 try { result.getOrThrow().let(success) } catch(e:Exception) { DebugTrace.failure("catalogue-ui",e); BridgeDialogBuilder(this).setTitle("Catalogue unavailable").setMessage("Unable to complete this request. Try again later.").setPositiveButton("OK",null).show() }
             }
         } } catch(e:Exception) { progress.dismiss(); DebugTrace.failure("catalogue-request",e); if(!isFinishing && !isDestroyed) Toast.makeText(this,"Unable to start request. Try again.",Toast.LENGTH_LONG).show() }
+    }
+    private fun modernActionDialog(title:String,detail:String,labels:List<String>,selected:(Int)->Unit) {
+        val view=ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow) }
+        val dialog=BridgeDialogBuilder(this).setView(view).create()
+        view.setContent { ModernActionDialog(violet,title,detail,labels,{ index -> dialog.dismiss(); selected(index) },{dialog.dismiss()}) }
+        dialog.show()
     }
     private fun choose(title: String, labels: List<String>, selected: (Int) -> Unit) {
         if (labels.isEmpty()) { BridgeDialogBuilder(this).setTitle(title).setMessage("No results. Try another title or spelling.").setPositiveButton("OK",null).show(); return }
