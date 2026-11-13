@@ -683,7 +683,7 @@ class MainActivity : ComponentActivity() {
                     refresh(); updateSettingsStatus()
                 }
                 val selected=PlaybackDetectors.selected(prefs.getStringSet("allowed",emptySet()).orEmpty())
-                settingRow(group ?: root,"Tracked apps",if(selected.isEmpty()) "No apps selected" else "YouTube • regular videos only") { chooseInstalledApps() }
+                settingRow(group ?: root,"Tracked apps",if(selected.isEmpty()) "No apps selected" else selected.joinToString(" · ") { appLabel(it) }) { chooseInstalledApps() }
                 settingToggle(group ?: root,"Automatically sync completed rewatches","Only after sufficient measured playback; original watched dates stay unchanged",prefs.getBoolean("auto_rewatch_sync",false)) { _,checked -> prefs.edit().putBoolean("auto_rewatch_sync",checked).apply(); RewatchAutomation.request(this) }
                 settingRow(group ?: root,"Completion review threshold",CompletionPolicy.threshold(prefs.getInt("completion_threshold",CompletionPolicy.DEFAULT_THRESHOLD)).toString()+"% • confirmation still required") { configureCompletionThreshold() }
                 heading("YouTube player identification")
@@ -2814,7 +2814,7 @@ class MainActivity : ComponentActivity() {
         val selected=PlaybackDetectors.selected(prefs.getStringSet("allowed",emptySet()).orEmpty()).toMutableSet()
         val checked=packages.map { it in selected }.toBooleanArray()
         BridgeDialogBuilder(this).setTitle("Supported playback apps")
-            .setMultiChoiceItems(packages.map { appLabel(it)+" — regular videos only" }.toTypedArray(),checked) { _,index,enabled ->
+            .setMultiChoiceItems(packages.map { appLabel(it)+if(it==HotstarPlayback.PACKAGE) " — experimental media tracking" else " — regular videos only" }.toTypedArray(),checked) { _,index,enabled ->
                 if(enabled) selected.add(packages[index]) else selected.remove(packages[index])
             }.setNegativeButton("Cancel",null).setPositiveButton("Save") { _,_ ->
                 prefs.edit().putStringSet("allowed",selected).apply(); PlaybackListener.wake(); recreate()

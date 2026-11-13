@@ -15,9 +15,9 @@ class TitleAccessibility: AccessibilityService() {
         DebugTrace.event("title","YouTube player identification connected")
     }
     override fun onAccessibilityEvent(event:AccessibilityEvent?) {
-        if(!prefs.getBoolean("enabled",false) || !prefs.getBoolean("title_optin",false)) return
         val pkg=event?.packageName?.toString() ?: return
-        if(pkg!=YouTubePlayback.PACKAGE || pkg !in PlaybackDetectors.selected(prefs.getStringSet("allowed",emptySet()).orEmpty())) return
+        val hotstar=pkg==HotstarPlayback.PACKAGE && HotstarProbe.enabled(this)
+        if(!hotstar && (!prefs.getBoolean("enabled",false) || !prefs.getBoolean("title_optin",false) || pkg!=YouTubePlayback.PACKAGE || pkg !in PlaybackDetectors.selected(prefs.getStringSet("allowed",emptySet()).orEmpty()))) return
         val now=System.currentTimeMillis()
         if(now-lastScan in 0..249) return
         val root=rootInActiveWindow ?: return
@@ -34,6 +34,7 @@ class TitleAccessibility: AccessibilityService() {
             for(i in 0 until node.childCount) node.getChild(i)?.let { walk(it,depth+1) }
         }
         walk(root,0)
+        if(hotstar) { HotstarProbe.screen(this,ids.filter { PlayerRules.inspectId(it) }.toSet()); return }
         val mode=YouTubePlayback.mode(ids,PlaybackSegment.UNKNOWN)
         val segment=if(mode==YouTubePlayback.Mode.ADVERTISEMENT) PlaybackSegment.ADVERTISEMENT else PlaybackSegment.UNKNOWN
         prefs.edit().putString("segment:"+pkg,segment.name).putLong("segment_time:"+pkg,now).apply()
