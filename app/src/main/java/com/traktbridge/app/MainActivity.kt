@@ -602,7 +602,7 @@ class MainActivity : ComponentActivity() {
     private fun refreshDeviceSettings() = refreshSettingsState("devices")
     private fun disableTitleDetection() {
         val edit=prefs.edit().putLong("ocr_generation",prefs.getLong("ocr_generation",0)+1).putBoolean("title_optin",false).remove("ocr_target").remove("ocr_after").remove("ocr_until").remove("ocr_choices").remove("ocr_source").remove("ocr_captured").remove("ocr_status")
-                    prefs.all.keys.filter { it.startsWith("title_hint:") || it.startsWith("title_detail:") || it.startsWith("title_time:") }.forEach { edit.remove(it) }
+        prefs.all.keys.filter { it.startsWith("title_hint:") || it.startsWith("title_detail:") || it.startsWith("title_time:") }.forEach { edit.remove(it) }
                     edit.apply(); startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         recreate()
     }

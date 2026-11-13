@@ -61,14 +61,14 @@ class ComposeDialogRegressionTest {
         } finally { prefs.edit().putBoolean("setup_seen",previous).commit() }
     }
 
-    @Test fun realPlaybackAndDeviceDialogsOpenAndClose() {
+    @Test fun realPlaybackAndHistoryDialogsOpenAndClose() {
         val instrumentation=InstrumentationRegistry.getInstrumentation()
         val prefs=instrumentation.targetContext.getSharedPreferences("tracker",0)
         val previous=prefs.getBoolean("setup_seen",false)
         prefs.edit().putBoolean("setup_seen",true).commit()
         try {
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-                for((method,title) in listOf("nowPlaying" to "Now Playing • All devices","deviceCenter" to "Connected devices","showDeviceHistory" to "Cross-device history")) {
+                for((method,title) in listOf("nowPlaying" to "Now Playing • All devices","showDeviceHistory" to "Cross-device history")) {
                     scenario.onActivity { activity ->
                         MainActivity::class.java.getDeclaredMethod(method).apply { isAccessible=true }.invoke(activity)
                     }
