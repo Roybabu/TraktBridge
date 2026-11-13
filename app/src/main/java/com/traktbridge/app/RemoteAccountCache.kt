@@ -25,6 +25,7 @@ object RemoteAccountCache {
         }
         return meta(c).getLong(GENERATION,0)
     }
+    fun generation(c:Context):Long=meta(c).getLong(GENERATION,0)
     @Synchronized fun current(c:Context,account:String,generation:Long)=active(c)==account && meta(c).getLong(GENERATION,0)==generation
     @Synchronized fun clear(c:Context) {
         val next=meta(c).getLong(GENERATION,0)+1
