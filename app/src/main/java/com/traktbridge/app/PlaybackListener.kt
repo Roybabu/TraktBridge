@@ -125,6 +125,16 @@ class PlaybackListener : NotificationListenerService() {
             runCatching { android.media.session.MediaController(this,token) }.getOrNull()?.takeIf { it.packageName==n.packageName }
         } }.getOrDefault(emptyList())
         val sessions=(active+notificationControllers).distinctBy { it.sessionToken }
+        if(YouTubeProbeState.active(wallNow) && YouTubeTitleProbe.PACKAGE in allowed) {
+            val youtube=sessions.filter { it.packageName==YouTubeTitleProbe.PACKAGE }
+            val titles=youtube.mapNotNull { controller ->
+                val metadata=controller.metadata
+                metadata?.getString(MediaMetadata.METADATA_KEY_TITLE)?.takeIf { YouTubeTitleProbe.clean(it)!=null }
+                    ?: metadata?.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE)
+            }
+            val notes=runCatching { activeNotifications.orEmpty().filter { it.packageName==YouTubeTitleProbe.PACKAGE && it.notification.extras.containsKey(android.app.Notification.EXTRA_MEDIA_SESSION) }.mapNotNull { it.notification.extras.getCharSequence(android.app.Notification.EXTRA_TITLE)?.toString() } }.getOrDefault(emptyList())
+            YouTubeProbeState.observeMedia(wallNow,titles,notes,youtube.size)
+        }
         DebugTrace.event("sampling","notificationControllers="+notificationControllers.size)
         DebugTrace.event("sampling","all="+sessions.size+" selected="+sessions.count { it.packageName in allowed }+" allowed="+allowed.size)
         val rows = JSONArray()
