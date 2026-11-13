@@ -38,7 +38,6 @@ class TitleAccessibility: AccessibilityService() {
         val segment=if(mode==YouTubePlayback.Mode.ADVERTISEMENT) PlaybackSegment.ADVERTISEMENT else PlaybackSegment.UNKNOWN
         prefs.edit().putString("segment:"+pkg,segment.name).putLong("segment_time:"+pkg,now).apply()
         if(YouTubePlayback.observe(mode,now)) PlaybackListener.wake()
-        if(prefs.getBoolean("player_inspector",false)) DebugTrace.event("inspector","YouTube mode="+mode+" ids="+ids.take(60).joinToString(","))
     }
     override fun onInterrupt() { YouTubePlayback.clear(); DebugTrace.event("title","interrupted") }
     override fun onDestroy() { YouTubePlayback.clear(); prefs.edit().putBoolean("title_connected",false).apply(); super.onDestroy() }
