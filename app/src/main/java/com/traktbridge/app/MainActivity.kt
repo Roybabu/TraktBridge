@@ -1401,7 +1401,7 @@ class MainActivity : ComponentActivity() {
         val allGroups=if(tab==0) ViewingGroups.build(unified) else groups
         dashboard.removeAllViews()
         val pending=allGroups.count { it.queued || (it.pending && !it.rewatching) }
-        if(tab==2) requestReviewSuggestions(records)
+        if(tab in 0..2) requestReviewSuggestions(records)
         when(tab) {
             0 -> renderModernHome(records,allGroups,pending)
             1 -> renderPosterLibrary(unified)
@@ -1420,7 +1420,7 @@ class MainActivity : ComponentActivity() {
         val hidden=DashboardPreferences.visible(prefs.getString("dashboard_hidden","").orEmpty())
         val active=groups.filter { it.active }
         val continuing=SeriesLibrary.continueWatching(groups)
-        val continuingKeys=continuing.take(7).map { it.key }.toSet()
+        val continuingKeys=continuing.map { it.key }.toSet()
         val recent=groups.filter { !it.active && it.key !in continuingKeys }.take(5)
         for(key in DashboardPreferences.order(prefs.getString("dashboard_order","").orEmpty())) when(key) {
             "now" -> {
@@ -1432,7 +1432,7 @@ class MainActivity : ComponentActivity() {
             "continue" -> {
         if("continue" !in hidden && continuing.isNotEmpty()) {
             section(dashboard,"Continue watching")
-            val items=continuing.take(7).map { groupPoster(it) }
+            val items=continueCards(groups,limit=7)
             modernContent { PosterLibraryShelf(violet,items) }
         }
         if("continue" !in hidden) {
@@ -2339,15 +2339,56 @@ class MainActivity : ComponentActivity() {
         val launchable=sources.filter { runCatching { packageManager.getLaunchIntentForPackage(it)!=null }.getOrDefault(false) }
         return if(launchable.isEmpty()) null else { { openPlaybackApp(launchable) } }
     }
+    // Presentation identity only: a suggestion never changes the record or authorizes an upload.
+    private fun posterCandidate(g:ViewingTitle):CatalogueItem? =
+        g.representative.takeIf { AutoMatchSuggestions.eligible(it) }?.let { r ->
+            AutoMatchSuggestions.read(this,r).takeIf { it.status=="ready" }?.matches?.firstOrNull()?.item
+        }
+    private fun continueIdentity(g:ViewingTitle):String {
+        val r=g.representative
+        if(r.matchType=="episode" && r.showId>0) return "show:"+r.showId
+        if(r.matchType=="movie" && r.traktId>0) return "movie:"+r.traktId
+        val candidate=posterCandidate(g)
+        return when {
+            candidate?.type=="episode" && candidate.showId>0 -> "show:"+candidate.showId
+            candidate?.type=="show" -> "show:"+candidate.id
+            candidate?.type=="movie" -> "movie:"+candidate.id
+            else -> g.key
+        }
+    }
+    private fun continueCards(groups:List<ViewingTitle>,category:String="All",limit:Int=10):List<PosterLibraryItem> {
+        val continuing=SeriesLibrary.continueWatching(groups)
+        val buckets=continuing.groupBy { continueIdentity(it) }
+        return buckets.entries.filter { (key,_) ->
+            category=="All" || category=="Movies" && key.startsWith("movie:") || category=="Series" && key.startsWith("show:") || category=="Unidentified" && key.startsWith("session:")
+        }.take(limit).map { (key,episodes) ->
+            // Prefer most recently played unfinished episode, not historical completion.
+            val current=episodes.first()
+            val poster=groupPoster(current)
+            if(key.startsWith("show:") && episodes.size>1) poster.copy(
+                subtitle=poster.subtitle+" · "+episodes.size+" in progress",
+                open={ showContinueEpisodes(poster.title,episodes) },
+                menu={ showContinueEpisodes(poster.title,episodes) }
+            ) else poster
+        }
+    }
+    private fun showContinueEpisodes(title:String,episodes:List<ViewingTitle>) {
+        modernDetailWindow { close -> ModernContinueEpisodes(violet,title,episodes.map { groupPoster(it) },{ index -> close(); showSessions(episodes[index]) },close) }
+    }
     private fun groupPoster(g:ViewingTitle):PosterLibraryItem {
         val r=g.representative
-        val episode=r.matchType=="episode" && r.showId>0
-        val name=if(episode) r.matchLabel.substringBefore(" — ") else r.matchLabel.ifBlank { r.title.ifBlank { "Unidentified video" } }
-        val detail=(if(episode) "S"+r.season+" E"+r.episode+" · " else "")+(if(g.rewatching) "Rewatch · "+(if(g.remainingMs>0) durationText(g.remainingMs)+" left" else "In progress") else if(g.confirmed) java.text.DateFormat.getDateTimeInstance().format(java.util.Date(g.sessions.filter { it.status=="synced" }.maxOf { it.ended })) else if(g.remainingMs>0) durationText(g.remainingMs)+" left" else g.platforms.joinToString(" • ") { appLabel(it) })
+        val candidate=posterCandidate(g)
+        val episode=r.matchType=="episode" && r.showId>0 || candidate?.type=="episode" && candidate.showId>0
+        val showId=if(r.showId>0 && r.matchType=="episode") r.showId else candidate?.let { if(it.type=="episode") it.showId else if(it.type=="show") it.id else 0L } ?: 0L
+        val name=if(episode || showId>0) (candidate?.title ?: r.matchLabel).substringBefore(" — ").substringBefore(" • S").ifBlank { r.title } else candidate?.title ?: r.matchLabel.ifBlank { r.title.ifBlank { "Unidentified video" } }
+        val season=if(r.season>=0) r.season else candidate?.season ?: -1
+        val number=if(r.episode>0) r.episode else candidate?.episode ?: -1
+        val prefix=if(episode && season>=0 && number>0) "S"+season+" E"+number+" · " else ""
+        val detail=prefix+(if(g.rewatching) "Rewatch · "+(if(g.remainingMs>0) durationText(g.remainingMs)+" left" else "In progress") else if(g.confirmed) java.text.DateFormat.getDateInstance().format(java.util.Date(g.sessions.filter { it.status=="synced" }.maxOf { it.ended })) else if(g.remainingMs>0) durationText(g.remainingMs)+" left" else g.platforms.joinToString(" • ") { appLabel(it) })
         val progress=if(g.durationMs>0 && g.positionMs>=0) (g.positionMs.toDouble()/g.durationMs).toFloat().coerceIn(0f,1f) else null
-        val open:()->Unit={ if(episode) showSeries(r.showId) else showSessions(g) }
+        val open:()->Unit={ if(r.matchType=="episode" && r.showId>0) showSeries(r.showId) else showSessions(g) }
         val play=playbackAction(g)
-        return PosterLibraryItem(name,detail,when { g.rewatching->"Rewatching"; g.confirmed->"Watched"; g.queued->"Awaiting sync"; r.traktId<=0->"Needs match"; else->"In progress" },if(episode) "show" else "movie",if(episode) r.showId else r.traktId,open,{ showSessions(g) },progress,play)
+        return PosterLibraryItem(name,detail,when { g.rewatching->"Rewatching"; g.confirmed->"Watched"; g.queued->"Awaiting sync"; candidate!=null->"Suggested match"; r.traktId<=0->"Needs match"; else->"In progress" },if(showId>0) "show" else "movie",if(showId>0) showId else if(r.traktId>0) r.traktId else candidate?.id ?: 0L,open,{ showSessions(g) },progress,play)
     }
     private fun renderPosterLibrary(records:List<WatchRecord>) {
         val accountId=RemoteAccountCache.active(this)
@@ -2358,7 +2399,7 @@ class MainActivity : ComponentActivity() {
         val other=groups.filter { it.representative.matchType!="movie" && !(it.representative.matchType=="episode" && it.representative.showId>0 && it.representative.season>=0 && it.representative.episode>0) }
         val anime=personalStore("anime_progress").all.values.mapNotNull { value -> runCatching { org.json.JSONObject(value.toString()) }.getOrNull() }.filter { it.optInt("id")>0 && it.optString("title").isNotBlank() && (historyFilter.query.isBlank() || it.optString("title").contains(historyFilter.query,true)) }.sortedBy { it.optString("title") }
         val category=libraryCategory
-        val continuing=SeriesLibrary.continueWatching(groups).filter { it.representative.traktId>0 && (category=="All" || (category=="Movies" && it.representative.matchType=="movie") || (category=="Series" && it.representative.matchType=="episode")) }.distinctBy { if(it.representative.showId>0) "show:"+it.representative.showId else "movie:"+it.representative.traktId }.take(10)
+        val continuing=continueCards(groups,category,10)
         val sections=mutableListOf<PosterGridSection>()
         if(category in setOf("All","Series") && series.isNotEmpty()) sections.add(PosterGridSection("Your series",series.size) { index ->
             val item=series[index]
@@ -2375,7 +2416,7 @@ class MainActivity : ComponentActivity() {
         if(category in setOf("All","Unidentified") && other.isNotEmpty()) sections.add(PosterGridSection("Unidentified viewing",other.size){groupPoster(other[it])})
         val columns=if(resources.configuration.fontScale>=1.5f) 1 else maxOf(2,adaptiveLayout.columns)
         libraryContent={
-            ModernLazyLibrary(violet,columns,category,sections,continuing.map { groupPoster(it) },
+            ModernLazyLibrary(violet,columns,category,sections,continuing,
                 if(syncStatus==null) "Sync Trakt history" else if(syncStatus.complete) "Trakt history synchronized" else "Trakt history partially downloaded",
                 syncStatus?.let { it.count.toString()+" watch events" } ?: "Bring your existing movies and episodes into Library",
                 historyFilter!=HistoryFilter(),{ selected -> libraryCategory=selected;refreshHistory() },{universalSearch()},{editHistoryFilter(records)},{libraryMenu()},{offerTraktSync()},{manualLog()},{animeSearch()})
@@ -2629,13 +2670,13 @@ class MainActivity : ComponentActivity() {
         return if(min>=60) (min/60).toString()+"h "+(min%60)+"m" else if(min==0L && ms>0) (ms/1000).toString()+"s" else min.toString()+" min"
     }
     private val suggestionListener=android.content.SharedPreferences.OnSharedPreferenceChangeListener { _,_ ->
-        if(!isDestroyed && !isFinishing && tab==2 && ::contentPage.isInitialized && (!prefs.getBoolean("privacy_lock",false) || unlocked)) {
+        if(!isDestroyed && !isFinishing && tab in 0..2 && ::contentPage.isInitialized && (!prefs.getBoolean("privacy_lock",false) || unlocked)) {
             restoreScrollY=contentPage.scrollY
             refreshHistory()
         }
     }
     private fun requestReviewSuggestions(records:List<WatchRecord>) {
-        if(tab!=2 || (prefs.getBoolean("privacy_lock",false) && !unlocked)) return
+        if(tab !in 0..2 || (prefs.getBoolean("privacy_lock",false) && !unlocked)) return
         RewatchAutomation.request(this)
         AutoMatchSuggestions.enqueue(this,records)
     }

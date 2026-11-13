@@ -155,3 +155,26 @@ fun ModernSeriesDetails(accent:Int,series:SeriesGroup,onProgress:()->Unit,onCata
         }
     }
 }
+
+@Composable
+fun ModernContinueEpisodes(accent:Int,title:String,episodes:List<PosterLibraryItem>,onSelect:(Int)->Unit,onClose:()->Unit) {
+    ModernToolPage(accent,title,onClose) {
+        LazyColumn(Modifier.fillMaxSize(),contentPadding=PaddingValues(16.dp),verticalArrangement=Arrangement.spacedBy(10.dp)) {
+            item { Text("Episodes in progress",style=MaterialTheme.typography.titleLarge) }
+            items(episodes.size) { index ->
+                val episode=episodes[index]
+                Surface(shape=RoundedCornerShape(12.dp),color=MaterialTheme.colorScheme.surface) {
+                    Row(Modifier.fillMaxWidth().clickable { onSelect(index) }.padding(12.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+                        LibraryPoster(episode,Modifier.width(56.dp).aspectRatio(2f/3f).clip(RoundedCornerShape(8.dp)))
+                        Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(6.dp)) {
+                            Text(episode.subtitle,style=MaterialTheme.typography.titleMedium)
+                            Text(episode.status,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                            episode.progress?.let { value -> LinearProgressIndicator(progress={value.coerceIn(0f,1f)},modifier=Modifier.fillMaxWidth()) }
+                        }
+                        Text("›",color=MaterialTheme.colorScheme.primary)
+                    }
+                }
+            }
+        }
+    }
+}
