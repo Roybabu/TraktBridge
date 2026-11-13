@@ -2,6 +2,15 @@ package com.traktbridge.app
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.foundation.Image
 import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -51,7 +60,7 @@ fun BridgeTheme(accent:Int,content:@Composable ()->Unit) {
 fun BridgeHeader(accent:Int,onSearch:()->Unit) {
     BridgeTheme(accent) {
         Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background).padding(horizontal=20.dp,vertical=12.dp),verticalAlignment=Alignment.CenterVertically) {
-            Image(painterResource(R.drawable.bridge_logo),contentDescription=null,modifier=Modifier.size(46.dp))
+            Image(painterResource(R.drawable.bridge_generated),contentDescription=null,modifier=Modifier.size(46.dp))
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Text("TRAKTBRIDGE",color=MaterialTheme.colorScheme.primary,fontSize=11.sp,fontWeight=FontWeight.Bold)
@@ -108,10 +117,75 @@ fun BridgeNavigation(accent:Int,labels:List<String>,selected:Int,wide:Boolean,on
                 }
             }
         } else {
-            NavigationBar(containerColor=MaterialTheme.colorScheme.surface) {
+            Row(
+                Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background)
+                    .selectableGroup().navigationBarsPadding().padding(horizontal=4.dp,vertical=6.dp),
+                verticalAlignment=Alignment.CenterVertically
+            ) {
                 labels.forEachIndexed { index,label ->
-                    NavigationBarItem(selected=index==selected,onClick=hapticClick { onSelect(index) },icon={ Text(listOf("⌂","▤","✓","▥","⚙")[index],fontSize=20.sp) },label={ Text(label,fontSize=11.sp,maxLines=2,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis) },alwaysShowLabel=true)
+                    val active=index==selected
+                    val tint=if(active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha=0.68f)
+                    val click=hapticClick { onSelect(index) }
+                    Column(
+                        Modifier.weight(1f).heightIn(min=56.dp).selectable(selected=active,onClick=click,role=Role.Tab).padding(vertical=6.dp),
+                        horizontalAlignment=Alignment.CenterHorizontally,
+                        verticalArrangement=Arrangement.Center
+                    ) {
+                        BridgeNavIcon(index,tint)
+                        Spacer(Modifier.height(5.dp))
+                        Text(label,color=tint,fontSize=11.sp,fontWeight=if(active) FontWeight.Medium else FontWeight.Normal,
+                            maxLines=2,textAlign=androidx.compose.ui.text.style.TextAlign.Center,
+                            overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                    }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BridgeNavIcon(index:Int,tint:Color) {
+    Canvas(Modifier.size(24.dp)) {
+        val unit=size.minDimension/24f
+        fun point(x:Float,y:Float)=Offset(x*unit,y*unit)
+        val stroke=Stroke(width=1.8f*unit,cap=StrokeCap.Round,join=StrokeJoin.Round)
+        fun line(x1:Float,y1:Float,x2:Float,y2:Float) {
+            drawLine(tint,point(x1,y1),point(x2,y2),strokeWidth=1.8f*unit,cap=StrokeCap.Round)
+        }
+        fun path(vararg coordinates:Float,closed:Boolean=false) {
+            val p=Path().apply {
+                moveTo(coordinates[0]*unit,coordinates[1]*unit)
+                for(i in 2 until coordinates.size step 2) lineTo(coordinates[i]*unit,coordinates[i+1]*unit)
+                if(closed) close()
+            }
+            drawPath(p,tint,style=stroke)
+        }
+        fun circle(x:Float,y:Float,r:Float) { drawCircle(tint,r*unit,point(x,y),style=stroke) }
+        when(index) {
+            0 -> {
+                path(3f,10f,12f,3f,21f,10f,21f,21f,15f,21f,15f,14f,9f,14f,9f,21f,3f,21f,closed=true)
+            }
+            1 -> {
+                path(4f,4f,8f,4f,8f,20f,4f,20f,closed=true)
+                path(10f,4f,14f,4f,14f,20f,10f,20f,closed=true)
+                path(16f,5f,19f,4f,23f,19f,19f,20f,closed=true)
+            }
+            2 -> { circle(12f,12f,9f); path(8f,12f,11f,15f,16f,9f) }
+            3 -> {
+                line(4f,20f,4f,11f); line(9f,20f,9f,5f); line(14f,20f,14f,9f); line(19f,20f,19f,3f)
+            }
+            else -> {
+                val p=Path()
+                for(i in 0 until 32) {
+                    val angle=(i*2.0*Math.PI/32.0)-Math.PI/2
+                    val radius=if(i%4==0 || i%4==3) 10.0 else 7.7
+                    val x=(12+radius*kotlin.math.cos(angle)).toFloat()*unit
+                    val y=(12+radius*kotlin.math.sin(angle)).toFloat()*unit
+                    if(i==0) p.moveTo(x,y) else p.lineTo(x,y)
+                }
+                p.close()
+                drawPath(p,tint,style=stroke)
+                circle(12f,12f,3.2f)
             }
         }
     }
