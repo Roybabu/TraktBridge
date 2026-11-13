@@ -657,42 +657,40 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 settingRow(group ?: root,"About Trakt sync","Data usage and upload permissions") {
-                    BridgeDialogBuilder(this).setTitle("About Trakt sync").setMessage("Uses Trakt but is not endorsed or certified by Trakt. Only selected apps are tracked locally. Catalogue search sends only the search text you choose to Trakt. Only explicitly approved completed watches are uploaded. Downloaded account history is separate from measured local viewing.").setPositiveButton("Close",null).show()
+                    BridgeDialogBuilder(this).setTitle("About Trakt sync").setMessage("Uses Trakt but is not endorsed or certified by Trakt. Only selected apps are tracked locally. Automatic and manual catalogue searches send title queries to Trakt to identify viewing records. Suggestions do not upload watches. Only explicitly approved completed watches are uploaded. Downloaded account history is separate from measured local viewing.").setPositiveButton("Close",null).show()
                 }
             }
             "tracking" -> {
-                heading("Tracking preferences")
-                settingRow(group ?: root,"Guided tracking setup","Walk through app selection and Android permissions") { setupGuide() }
-                button("Completion review threshold") { configureCompletionThreshold() }
-                heading("Permissions & notifications")
-                button("Grant notification access") { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
-                button("Reconnect playback listener") { runCatching { android.service.notification.NotificationListenerService.requestRebind(android.content.ComponentName(this,PlaybackListener::class.java)) }; refresh() }
-                (group ?: root).addView(Switch(this).apply {
-                    text="Viewing review notifications"; isChecked=prefs.getBoolean("review_notifications",false)
-                    setOnCheckedChangeListener { _, checked ->
-                        prefs.edit().putBoolean("review_notifications",checked).apply()
-                        if (checked && android.os.Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),41)
-                        if (!checked) history.records().forEach { ViewingNotifications.cancel(this@MainActivity,it.id) }
-                    }
-                })
-                button("Notification settings") { startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE,packageName)) }
-                (group ?: root).addView(Switch(this).apply {
-                    text="Playback tracking"; isChecked=prefs.getBoolean("enabled",false)
-                    setOnCheckedChangeListener { _, checked -> prefs.edit().putBoolean("enabled",checked).apply(); if(checked) startTracking() else stopService(Intent(this@MainActivity,TrackingService::class.java)); refresh() }
-                })
-                button("Battery optimization settings") { runCatching { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) } }
+                heading("Playback")
+                settingToggle(group ?: root,"Playback tracking","Record viewing from supported apps",prefs.getBoolean("enabled",false)) { _,checked ->
+                    prefs.edit().putBoolean("enabled",checked).apply()
+                    if(checked) startTracking() else stopService(Intent(this@MainActivity,TrackingService::class.java))
+                    refresh(); updateSettingsStatus()
+                }
+                val selected=PlaybackDetectors.selected(prefs.getStringSet("allowed",emptySet()).orEmpty())
+                settingRow(group ?: root,"Tracked apps",if(selected.isEmpty()) "No apps selected" else "YouTube • regular videos only") { chooseInstalledApps() }
+                settingRow(group ?: root,"Completion review threshold",CompletionPolicy.threshold(prefs.getInt("completion_threshold",CompletionPolicy.DEFAULT_THRESHOLD)).toString()+"% • confirmation still required") { configureCompletionThreshold() }
                 heading("YouTube player identification")
-                label("YouTube titles come from Android media metadata. Accessibility reads only YouTube player control IDs to exclude Shorts and ads.")
-                button(if(prefs.getBoolean("title_optin",false)) "YouTube player identification • On" else "YouTube player identification • Off") {
+                settingRow(group ?: root,"Accessibility access",if(!prefs.getBoolean("title_optin",false)) "Off • needed to distinguish Shorts and ads when metadata is incomplete" else if(prefs.getBoolean("title_connected",false)) "On • reads player control IDs only" else "Enabled in app • connect in Android settings") {
                     if(prefs.getBoolean("title_optin",false)) {
                         choose("YouTube player identification",listOf("Open Android Accessibility settings","Turn off player identification")) { i -> if(i==0) startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) else disableTitleDetection() }
                     } else {
                         BridgeDialogBuilder(this).setTitle("YouTube player identification").setMessage("Allow TraktBridge to read visible YouTube player control IDs to distinguish regular videos from Shorts and ads. It does not read screen titles or capture screenshots.").setNegativeButton("Cancel",null).setPositiveButton("Agree and open settings") { _,_ -> prefs.edit().putBoolean("title_optin",true).apply(); startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }.show()
                     }
                 }
-                heading("Tracked apps")
-                label("Only regular YouTube videos are currently supported. Other apps will be added individually.")
-                button("Choose apps to track") { chooseInstalledApps() }
+                heading("Android permissions")
+                settingRow(group ?: root,"Notification access",if(TrackingRecovery.listenerGranted(this)) "Granted" else "Required for MediaSession tracking") { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
+                settingRow(group ?: root,"Battery optimization",if(getSystemService(android.os.PowerManager::class.java).isIgnoringBatteryOptimizations(packageName)) "Exempt • background tracking allowed" else "Manage background battery restrictions") { runCatching { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) } }
+                heading("Notifications")
+                settingToggle(group ?: root,"Viewing review notifications","Notify when a viewing record needs attention",prefs.getBoolean("review_notifications",false)) { _,checked ->
+                    prefs.edit().putBoolean("review_notifications",checked).apply()
+                    if(checked && android.os.Build.VERSION.SDK_INT>=33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)!=android.content.pm.PackageManager.PERMISSION_GRANTED) requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),41)
+                    if(!checked) history.records().forEach { ViewingNotifications.cancel(this@MainActivity,it.id) }
+                }
+                settingRow(group ?: root,"Android notification settings","Manage channels and notification permissions") { startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE,packageName)) }
+                heading("Setup & troubleshooting")
+                settingRow(group ?: root,"Guided tracking setup","Step-by-step permission and app setup") { setupGuide() }
+                settingRow(group ?: root,"Reconnect playback listener",if(PlaybackListener.liveConnected()) "Connected" else "Disconnected") { runCatching { android.service.notification.NotificationListenerService.requestRebind(android.content.ComponentName(this,PlaybackListener::class.java)) }; refresh(); updateSettingsStatus() }
             }
 
             "devices" -> {
@@ -754,32 +752,9 @@ class MainActivity : ComponentActivity() {
                     settingRow(group ?: root,title,detail,action)
                 }
                 fun appearanceToggle(title:String,detail:String,key:String,default:Boolean,onChange:(android.view.View,Boolean)->Unit={ _,_-> }) {
-                    val parent=group ?: root
-                    if(parent.childCount>0) parent.addView(android.view.View(this).apply { setBackgroundColor(0x227F7F7F) },LinearLayout.LayoutParams(-1,dp(1)))
-                    val row=LinearLayout(this).apply {
-                        orientation=LinearLayout.HORIZONTAL
-                        gravity=android.view.Gravity.CENTER_VERTICAL
-                        minimumHeight=dp(adaptiveLayout.touch)
-                        setPadding(dp(4),dp(10),dp(4),dp(10))
+                    settingToggle(group ?: root,title,detail,prefs.getBoolean(key,default)) { view,checked ->
+                        prefs.edit().putBoolean(key,checked).apply(); onChange(view,checked)
                     }
-                    val labels=LinearLayout(this).apply {
-                        orientation=LinearLayout.VERTICAL
-                        addView(txt(title,16,ink,true))
-                        addView(txt(detail,13,muted))
-                    }
-                    row.addView(labels,LinearLayout.LayoutParams(0,-2,1f))
-                    val toggle=Switch(this).apply {
-                        contentDescription="$title. $detail"
-                        isChecked=prefs.getBoolean(key,default)
-                        isFocusable=true
-                        setOnCheckedChangeListener { view,checked ->
-                            prefs.edit().putBoolean(key,checked).apply()
-                            onChange(view,checked)
-                        }
-                    }
-                    row.addView(toggle,LinearLayout.LayoutParams(-2,-2))
-                    labels.setOnClickListener { toggle.isChecked=!toggle.isChecked }
-                    parent.addView(row,LinearLayout.LayoutParams(-1,-2))
                 }
                 heading("Theme & colors")
                 preferenceRow("Theme",themes[themeKeys.indexOf(prefs.getString("appearance_mode","dark").orEmpty()).coerceAtLeast(0)]) { choose("Theme",themes) { prefs.edit().putString("appearance_mode",themeKeys[it]).apply(); recreate() } }
@@ -1232,7 +1207,7 @@ class MainActivity : ComponentActivity() {
         }.onFailure { DebugTrace.failure("foreground",it); Toast.makeText(this,"Unable to start tracking",Toast.LENGTH_LONG).show() }
     }
     override fun onPause() { AutoMatchSuggestions.store(this).unregisterOnSharedPreferenceChangeListener(suggestionListener); super.onPause(); if(prefs.getBoolean("privacy_lock",false) && !privacyPrompt) { unlocked=false; if(::shell.isInitialized) shell.visibility=android.view.View.INVISIBLE } }
-    override fun onResume() { super.onResume(); AutoMatchSuggestions.store(this).registerOnSharedPreferenceChangeListener(suggestionListener); if (::output.isInitialized) refresh(); if (::historyList.isInitialized) refreshHistory(); requirePrivacyUnlock(); recoverTrackingWhenVisible(); if(::settingsOverview.isInitialized && settingsCategory in setOf("devices","tracking","privacy")) refreshSettingsState(settingsCategory) }
+    override fun onResume() { super.onResume(); AutoMatchSuggestions.store(this).registerOnSharedPreferenceChangeListener(suggestionListener); if (::output.isInitialized) refresh(); if (::historyList.isInitialized) refreshHistory(); requirePrivacyUnlock(); recoverTrackingWhenVisible(); if(::settingsOverview.isInitialized) { updateSettingsStatus(); if(settingsCategory in setOf("devices","tracking","privacy")) refreshSettingsState(settingsCategory) } }
     private fun recoverTrackingWhenVisible() {
         val permitted=!prefs.getBoolean("privacy_lock",false) || unlocked
         if(TrackingRecovery.shouldStart(prefs.getBoolean("enabled",false),permitted,TrackingService.running,TrackingRecovery.listenerGranted(this))) startTracking()
