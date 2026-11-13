@@ -1,6 +1,9 @@
 package com.traktbridge.app
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.background
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -38,7 +41,7 @@ fun ModernSessionDetails(accent:Int,item:PosterLibraryItem,status:String,metadat
                 }
                 item.progress?.let { progress ->
                     LinearProgressIndicator(progress={progress.coerceIn(0f,1f)},modifier=Modifier.fillMaxWidth().height(5.dp))
-                    Text(position,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) { Text(position,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant); Text((progress*100).toInt().toString()+"%",color=MaterialTheme.colorScheme.primary) }
                 }
                 if(primary!=null) Button(onClick=primary.run,modifier=Modifier.fillMaxWidth()) { Text(primary.label) }
                 if(evidence.isNotBlank()) {
@@ -77,18 +80,12 @@ fun ModernIdentifyDialog(accent:Int,initial:String,onSearch:(String,String)->Uni
 @Composable
 fun ModernActionDialog(accent:Int,title:String,detail:String,labels:List<String>,onSelect:(Int)->Unit,onClose:()->Unit) {
     BridgeTheme(accent) {
-        Surface(color=MaterialTheme.colorScheme.surface) {
-            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(20.dp),verticalArrangement=Arrangement.spacedBy(6.dp)) {
-                Text(title,style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.SemiBold)
-                Text(detail,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.height(6.dp))
-                labels.forEachIndexed { index,label ->
-                    Row(Modifier.fillMaxWidth().heightIn(min=48.dp).clickable { onSelect(index) }.padding(vertical=10.dp),verticalAlignment=Alignment.CenterVertically) {
-                        Text(label,Modifier.weight(1f),color=if(label.startsWith("Remove")) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
-                        Text("›",color=MaterialTheme.colorScheme.primary)
-                    }
-                    if(index<labels.lastIndex) HorizontalDivider(color=MaterialTheme.colorScheme.outlineVariant)
-                }
+        Surface(color=MaterialTheme.colorScheme.surface,shape=RoundedCornerShape(topStart=24.dp,topEnd=24.dp)) {
+            Column(Modifier.fillMaxWidth().heightIn(max=620.dp).verticalScroll(rememberScrollState()).padding(20.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+                Box(Modifier.align(Alignment.CenterHorizontally).width(36.dp).height(4.dp).clip(RoundedCornerShape(4.dp)).background(MaterialTheme.colorScheme.onSurfaceVariant))
+                Text(title,style=MaterialTheme.typography.headlineSmall,fontWeight=FontWeight.SemiBold)
+                if(detail.isNotBlank()) Text(detail,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                labels.forEachIndexed { index,label -> ModernDetailAction(label) { onSelect(index) } }
                 TextButton(onClick=onClose,modifier=Modifier.align(Alignment.End)) { Text("Cancel") }
             }
         }

@@ -5,6 +5,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.setViewTreeLifecycleOwner
+import androidx.lifecycle.setViewTreeViewModelStoreOwner
+import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import android.os.Bundle
@@ -1484,7 +1487,7 @@ class MainActivity : ComponentActivity() {
             modernContent { ModernReviewCard(violet,item,evidence,primary,secondary,manual) {
                 val options=titleEntry(g,true).actions.filter { it.label !in setOf("Yes, correct","No, incorrect","Search manually","Open playback app","Open player") || item.play==null }
                 val menu=options+if(r.status in setOf("pending","reviewed")) listOf(UiAction("Delete viewing record"){deleteFromReview(r)}) else emptyList()
-                choose("Viewing record",menu.map { it.label }) { menu[it].run() }
+                modernActionDialog("Viewing record",item.title,menu.map { it.label }) { menu[it].run() }
             } }
         }
         if(visible.size>historyLimit && historyLimit<1000) dashboard.addView(actionButton("Show more"){historyLimit=MemoryPolicy.nextPage(historyLimit,MemoryPolicy.pageSize(lowRam));refreshHistory()})
@@ -2184,27 +2187,21 @@ class MainActivity : ComponentActivity() {
                 val d=result.getOrThrow(); if(cache.all.size>=200 && !cache.contains(key)) cache.edit().clear().apply(); cache.edit().putString(key,org.json.JSONObject().put("savedAt",System.currentTimeMillis()).put("title",d.title).put("overview",d.overview).put("year",d.year).put("runtime",d.runtime).put("rating",d.rating).put("genres",d.genres).put("trailer",d.trailer).put("released",d.released).toString()).apply(); done(result)
             } else if(cached!=null) done(Result.success(TitleDetails(cached.optString("title"),cached.optString("overview"),cached.optInt("year"),cached.optInt("runtime"),cached.optDouble("rating",0.0),cached.optString("genres"),cached.optString("trailer"),cached.optString("released")))) else done(result)
         } }) { d:TitleDetails ->
-            val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(12),dp(16),dp(12)) }
-            val image=ImageView(this).apply { scaleType=ImageView.ScaleType.FIT_CENTER; contentDescription="Poster for "+d.title; setImageResource(android.R.drawable.ic_media_play); setBackgroundColor(surface) }
-            body.addView(image,LinearLayout.LayoutParams(-1,dp(if(tvMode) 320 else 240))); Artwork.load(this,type,id,image)
-            val metadata=listOf(d.year.takeIf { it>0 }?.toString().orEmpty(),d.runtime.takeIf { it>0 }?.let { it.toString()+" min" }.orEmpty(),d.genres).filter { it.isNotBlank() }.joinToString(" • ")
-            body.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeTitleSummary(violet,d.title.ifBlank { label },metadata,d.rating,d.released,d.overview,prefs.getBoolean("hide_spoilers",true)) } })
-            val groups=ViewingGroups.build(history.records(0)).filter { g -> val row=g.representative; if(type=="movie") row.matchType=="movie" && row.traktId==id else row.matchType=="episode" && row.showId==id }
-            if(groups.isNotEmpty()) {
-                section(body,"Your viewing history")
-                body.addView(txt(groups.count { it.confirmed }.toString()+" completed titles • "+durationText(groups.sumOf { it.sampledMs })+" sampled",14,muted))
-                body.addView(actionButton("View matching sessions") { if(type=="show") showSeries(id) else showSessions(groups.first()) })
-            }
-            body.addView(actionButton("Related titles") {
-                lookup("Loading related titles",{ done -> TraktCatalogue.related(type,id,done) }) { rows:List<CatalogueItem> ->
-                    choose("Related titles",rows.take(40).map { it.label() }) { index -> val item=rows[index]; titleDetails(item.type,item.id,item.title) }
-                }
+            val groups=ViewingGroups.build(unifiedRows.ifEmpty { history.records(0) }).filter { g -> val row=g.representative; if(type=="movie") row.matchType=="movie" && row.traktId==id else row.matchType=="episode" && row.showId==id }
+            val actions=mutableListOf<UiAction>()
+            if(groups.isNotEmpty()) actions.add(UiAction("View matching sessions"){ if(type=="show") showSeries(id) else showSessions(groups.first()) })
+            actions.add(UiAction("Related titles") {
+                lookup("Loading related titles",{ done -> TraktCatalogue.related(type,id,done) }) { rows:List<CatalogueItem> -> showRelatedTitles(rows) }
             })
-            body.addView(actionButton("Cast and directors") { lookup("Loading credits",{ done -> TraktCatalogue.credits(type,id,done) }) { names:List<String> -> BridgeDialogBuilder(this).setTitle("Cast and crew").setMessage(names.joinToString("\n").ifBlank { "No credits returned" }).setPositiveButton("Close",null).show() } })
-            body.addView(actionButton("Where to watch • regional availability") { streamingAvailability(type,id,d.title.ifBlank { label }) })
-            body.addView(actionButton("Watchlist / rating") { lookup("Checking account",{ done -> TraktLibrary.accountId(this,done) }) { account:String -> remoteActions(RemoteItem(type,id,d.title),account) } })
-            TitleDetailPolicy.trailer(d.trailer)?.let { url -> body.addView(actionButton("Watch trailer on YouTube") { runCatching { startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse(url))) }.onFailure { Toast.makeText(this,"No compatible app",Toast.LENGTH_LONG).show() } }) }
-            BridgeDialogBuilder(this).setTitle("Title details").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
+            actions.add(UiAction("Watchlist / rating"){ lookup("Checking account",{ done -> TraktLibrary.accountId(this,done) }) { account:String -> remoteActions(RemoteItem(type,id,d.title),account) } })
+            actions.add(UiAction("Where to watch"){ streamingAvailability(type,id,d.title.ifBlank { label }) })
+            actions.add(UiAction("Cast and directors"){ lookup("Loading credits",{ done -> TraktCatalogue.credits(type,id,done) }) { names:List<String> -> BridgeDialogBuilder(this).setTitle("Cast and crew").setMessage(names.joinToString("\n").ifBlank { "No credits returned" }).setPositiveButton("Close",null).show() } })
+            TitleDetailPolicy.trailer(d.trailer)?.let { url -> actions.add(UiAction("Watch trailer"){ runCatching { startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse(url))) }.onFailure { Toast.makeText(this,"No compatible app",Toast.LENGTH_LONG).show() } }) }
+            modernDetailWindow { close ->
+                ModernCatalogueDetails(violet,d.copy(title=d.title.ifBlank { label }),type,id,prefs.getBoolean("hide_spoilers",true),
+                    if(groups.isEmpty()) "" else groups.count { it.confirmed }.toString()+" completed · "+durationText(groups.sumOf { it.sampledMs })+" sampled",
+                    actions.map { action -> UiAction(action.label){close();action.run()} },close)
+            }
         }
     }
     private fun heroCard(parent:LinearLayout,g:ViewingTitle) {
@@ -2319,7 +2316,7 @@ class MainActivity : ComponentActivity() {
         }
     }
     private fun seriesMenu(series:SeriesGroup) {
-        choose(series.title,listOf("Browse seasons and episodes","Series details",if(isFavorite("show",series.id)) "Remove favorite" else "Add favorite","Personal status: "+libraryStatus("show",series.id).ifBlank { "Not set" },"Notes and tags","Add to collection","Trakt series progress")) { i ->
+        modernActionDialog(series.title,"Manage series",listOf("Browse seasons and episodes","Series details",if(isFavorite("show",series.id)) "Remove favorite" else "Add favorite","Personal status: "+libraryStatus("show",series.id).ifBlank { "Not set" },"Notes and tags","Add to collection","Trakt series progress")) { i ->
             when(i) {
                 0->showSeries(series.id)
                 1->titleDetails("show",series.id,series.title)
@@ -2397,29 +2394,19 @@ class MainActivity : ComponentActivity() {
     }
     private fun showSeries(id:Long) {
         val series=SeriesLibrary.build(ViewingGroups.build(if(RemoteAccountCache.active(this)!=null) unifiedRows.ifEmpty { history.records(0) } else history.records(0))).firstOrNull { it.id==id } ?: return
-        val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
-        body.addView(txt(series.completed.toString()+" episodes synced to Trakt. Includes downloaded Trakt history and identified local episodes; not the full catalogue.",14,muted))
-        var dialog:android.app.AlertDialog?=null
         val show=CatalogueItem("show",series.id,series.title)
-        body.addView(actionButton("Check account series progress") { dialog?.dismiss(); remoteSeriesProgress(series.id,series.title) })
-        body.addView(actionButton("Load all catalogue seasons") {
-            dialog?.dismiss()
-            lookup("Loading catalogue seasons",{ done -> TraktCatalogue.seasons(show,done) }) { seasons:List<CatalogueSeason> ->
-                choose(series.title,seasons.map { if(it.number==0) "Specials" else "Season "+it.number }) { index -> showCatalogueSeason(series.id,seasons[index].number) }
-            }
-        })
-        for(season in series.seasons) {
-            val label=if(season.number==0) "Specials" else "Season "+season.number
-            section(body,label)
-            body.addView(txt(season.completed.toString()+" synced / "+season.episodes.size+" identified episodes",13,muted))
-            body.addView(actionButton("View full "+label.lowercase()) { dialog?.dismiss(); showCatalogueSeason(series.id,season.number) })
-            for(episode in season.episodes) titleCard(body,episode,true)
+        modernDetailWindow { close ->
+            ModernSeriesDetails(violet,series,
+                { close(); remoteSeriesProgress(series.id,series.title) },
+                { close(); lookup("Loading catalogue seasons",{ done -> TraktCatalogue.seasons(show,done) }) { seasons:List<CatalogueSeason> ->
+                    modernActionDialog(series.title,"Choose a catalogue season",seasons.map { if(it.number==0) "Specials" else "Season "+it.number }) { index -> showCatalogueSeason(series.id,seasons[index].number) }
+                } },
+                { season -> close();showCatalogueSeason(series.id,season) },
+                { episode -> close();showSessions(episode) },close)
         }
-        dialog=BridgeDialogBuilder(this).setTitle(series.title).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close") { _,_->refreshHistory() }.create()
-        dialog.show()
     }
     private fun showCatalogueSeason(id:Long,season:Int) {
-        val series=SeriesLibrary.build(ViewingGroups.build(history.records(0))).firstOrNull { it.id==id } ?: return
+        val series=SeriesLibrary.build(ViewingGroups.build(if(RemoteAccountCache.active(this)!=null) unifiedRows.ifEmpty { history.records(0) } else history.records(0))).firstOrNull { it.id==id } ?: return
         val show=CatalogueItem("show",series.id,series.title)
         lookup("Loading episodes",{ done -> TraktCatalogue.episodes(show,season,done) }) { catalogue:List<CatalogueItem> ->
             val rows=SeriesLibrary.seasonRows(series,season,catalogue)
@@ -2687,7 +2674,7 @@ class MainActivity : ComponentActivity() {
         if(!g.confirmed) actions.add(UiAction("Open playback app") { openPlaybackApp(g.platforms) })
         if(r.traktId>0) actions.add(UiAction("Review possible duplicate titles") { duplicateTitles(r) })
         if(r.traktId>0) actions.add(UiAction("More title actions") {
-            choose("Manage title",listOf("Personal status: "+libraryStatus(r.matchType,r.traktId).ifBlank { "Not set" },if(isFavorite(r.matchType,r.traktId)) "Remove favorite" else "Add favorite","Notes and tags","Add to collection")) { action ->
+            modernActionDialog("Manage title",r.matchLabel,listOf("Personal status: "+libraryStatus(r.matchType,r.traktId).ifBlank { "Not set" },if(isFavorite(r.matchType,r.traktId)) "Remove favorite" else "Add favorite","Notes and tags","Add to collection")) { action ->
                 when(action) { 0->setLibraryStatus(r.matchType,r.traktId,r.matchLabel); 1->{ toggleFavorite(r.matchType,r.traktId,r.matchLabel); refreshHistory() }; 2->editTitleNotes(r.matchType,r.traktId,r.matchLabel); 3->addCollection(r.matchType,r.traktId,r.matchLabel) }
             }
         })
@@ -2850,11 +2837,35 @@ class MainActivity : ComponentActivity() {
             }
         } } catch(e:Exception) { progress.dismiss(); DebugTrace.failure("catalogue-request",e); if(!isFinishing && !isDestroyed) Toast.makeText(this,"Unable to start request. Try again.",Toast.LENGTH_LONG).show() }
     }
+    private fun modernDetailWindow(content:@androidx.compose.runtime.Composable (()->Unit)->Unit) {
+        if(isFinishing || isDestroyed) return
+        val dialog=android.app.Dialog(this)
+        val view=ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow) }
+        val decor=requireNotNull(dialog.window).decorView
+        decor.setViewTreeLifecycleOwner(this)
+        decor.setViewTreeViewModelStoreOwner(this)
+        decor.setViewTreeSavedStateRegistryOwner(this)
+        dialog.setContentView(view)
+        view.setContent { content { dialog.dismiss() } }
+        dialog.show()
+        dialog.window?.apply {
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(bg))
+            setLayout(if(wide) dp(640).coerceAtMost(resources.displayMetrics.widthPixels) else -1,-1)
+        }
+    }
+    private fun showRelatedTitles(rows:List<CatalogueItem>) {
+        modernDetailWindow { close -> ModernRelatedTitles(violet,rows,{ item -> close(); titleDetails(item.type,item.id,item.title) },close) }
+    }
     private fun modernActionDialog(title:String,detail:String,labels:List<String>,selected:(Int)->Unit) {
         val view=ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow) }
         val dialog=BridgeDialogBuilder(this).setView(view).create()
         view.setContent { ModernActionDialog(violet,title,detail,labels,{ index -> dialog.dismiss(); selected(index) },{dialog.dismiss()}) }
         dialog.show()
+        dialog.window?.apply {
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
+            setGravity(android.view.Gravity.BOTTOM)
+            setLayout(if(wide) dp(560).coerceAtMost(resources.displayMetrics.widthPixels) else -1,-2)
+        }
     }
     private fun choose(title: String, labels: List<String>, selected: (Int) -> Unit) {
         if (labels.isEmpty()) { BridgeDialogBuilder(this).setTitle(title).setMessage("No results. Try another title or spelling.").setPositiveButton("OK",null).show(); return }
