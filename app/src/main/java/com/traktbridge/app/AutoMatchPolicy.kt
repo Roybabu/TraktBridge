@@ -31,12 +31,14 @@ object AutoMatchPolicy {
             RankedMatch(item,if(exact) ranked.score.coerceAtLeast(75) else (overlap*70).toInt(),if(exact) "Title agrees" else "Close title")
         }.sortedByDescending { it.score }.take(3)
     }
+    private val chapterPrefix=Regex("(?i)^\\s*(?:chapter|part|episode|ep\\.?)\\s+(?:\\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|[ivxlcdm]+)\\s*[:.\\-–—]\\s*")
+    private fun episodeName(value:String):String=RecognitionEngine.normalized(value.replace(chapterPrefix,""))
     fun episodeMatches(q:Query,episodes:List<CatalogueItem>):CatalogueItem? {
         val number=q.episode ?: return null
         val candidates=episodes.filter { it.type=="episode" && it.episode==number && (q.season==null || it.season==q.season) }
         if(q.episodeTitle.isNotBlank()) {
-            val expected=RecognitionEngine.normalized(q.episodeTitle)
-            val named=candidates.filter { RecognitionEngine.normalized(it.title.substringAfter(" — ",it.title))==expected }
+            val expected=episodeName(q.episodeTitle)
+            val named=candidates.filter { expected.isNotBlank() && episodeName(it.title.substringAfter(" — ",it.title))==expected }
             if(named.size==1) return named.single()
             return null
         }
