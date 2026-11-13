@@ -2429,13 +2429,14 @@ class MainActivity : ComponentActivity() {
     private fun showSessions(g:ViewingTitle) {
         val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
         body.addView(txt("Original viewing sessions are retained. Synced viewing events: "+g.sessions.count { it.status=="synced" },14,muted))
+        val dialog=BridgeDialogBuilder(this).setTitle(g.representative.matchLabel.ifBlank { g.representative.title.ifBlank { "Viewing sessions" } }).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close") { _,_->refreshHistory() }.create()
         g.sessions.forEach { session ->
             if(session.id in g.possibleRewatchIds) body.addView(txt("Possible rewatch — review before approving",14,muted))
-            recordCard(body,session,true,g.confirmed || g.queued)
+            recordCard(body,session,true,g.confirmed || g.queued,onDeleted={ dialog.dismiss() })
         }
-        BridgeDialogBuilder(this).setTitle(g.representative.matchLabel.ifBlank { g.representative.title.ifBlank { "Viewing sessions" } }).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close") { _,_->refreshHistory() }.show()
+        dialog.show()
     }
-    private fun recordCard(parent:LinearLayout,r:WatchRecord,expanded:Boolean,completionAlreadyRecorded:Boolean=false) {
+    private fun recordCard(parent:LinearLayout,r:WatchRecord,expanded:Boolean,completionAlreadyRecorded:Boolean=false,onDeleted:()->Unit={}) {
         val status=when(r.status) { "synced"->"Synced to Trakt"; "active"->"Watching"; "pending"->"Needs review"; "reviewed"->"Ready to confirm"; "restored_audit"->"Restored audit • no upload"; else->r.status.replaceFirstChar { it.uppercase() } }
         val progress=if(r.duration>0 && r.position>=0) (r.position.toDouble()/r.duration*100).toInt().coerceIn(0,100) else null
         val evidence=buildString {
@@ -2462,7 +2463,20 @@ class MainActivity : ComponentActivity() {
                     val title=field.text.toString().trim(); if(title.isNotEmpty()) { history.review(r.id,title); ViewingNotifications.cancel(this,r.id); refreshHistory() }
                 }.show()
             })
-            if(r.status in setOf("pending","reviewed")) actions.add(UiAction("Delete viewing record") { BridgeDialogBuilder(this).setTitle("Delete this local record?").setNegativeButton("Cancel",null).setPositiveButton("Delete") { _,_-> history.trash(r.id); ViewingNotifications.cancel(this,r.id); refreshHistory() }.show() })
+            if(r.status in setOf("pending","reviewed")) actions.add(UiAction("Delete viewing record") {
+                BridgeDialogBuilder(this).setTitle("Delete this local record?").setNegativeButton("Cancel",null).setPositiveButton("Delete") { _,_->
+                    val deleted=runCatching { history.trash(r.id) }.getOrDefault(false)
+                    if(deleted) {
+                        ViewingNotifications.cancel(this,r.id)
+                        onDeleted()
+                        refreshHistory()
+                        Toast.makeText(this,"Viewing record deleted",Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(this,"Record could not be deleted; refresh and try again",Toast.LENGTH_LONG).show()
+                        refreshHistory()
+                    }
+                }.show()
+            })
         }
         parent.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeTitleCard(violet,row,actions) } })
     }
