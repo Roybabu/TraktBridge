@@ -28,7 +28,7 @@ class DebugActivity: Activity() {
         root.addView(Switch(this).apply {
             text="JioHotstar title detection debugger"; isChecked=HotstarProbe.enabled(this@DebugActivity)
             setOnCheckedChangeListener { toggle,checked ->
-                if(checked) android.app.AlertDialog.Builder(this@DebugActivity).setTitle("Capture JioHotstar titles?").setMessage("Records only JioHotstar playback metadata and player control IDs locally for 15 minutes. Actual title text may appear in the separate report. No screenshots, URLs, account data or uploads.").setNegativeButton("Cancel"){_,_->toggle.isChecked=false}.setOnCancelListener { toggle.isChecked=false }.setPositiveButton("Start"){_,_->HotstarProbe.start(this@DebugActivity);PlaybackListener.wake();refresh()}.show()
+                if(checked) android.app.AlertDialog.Builder(this@DebugActivity).setTitle("Capture JioHotstar titles?").setMessage("Records JioHotstar media and transport notification metadata, visible player control IDs and candidate player title labels, recent app usage events and global audio activity locally for 15 minutes. Title text may appear in the separate report. No screenshots or automatic uploads.").setNegativeButton("Cancel"){_,_->toggle.isChecked=false}.setOnCancelListener { toggle.isChecked=false }.setPositiveButton("Start"){_,_->HotstarProbe.start(this@DebugActivity);PlaybackListener.wake();refresh()}.show()
                 else { HotstarProbe.stop(this@DebugActivity);refresh() }
             }
         })
