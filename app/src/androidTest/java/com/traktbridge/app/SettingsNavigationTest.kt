@@ -33,6 +33,13 @@ class SettingsNavigationTest {
                         assertTrue(pages.getValue(id).childCount>3)
                     }
                     fun labels(view:View):List<String> = if(view is android.view.ViewGroup) (0 until view.childCount).flatMap { labels(view.getChildAt(it)) } else if(view is TextView) listOf(view.text.toString()) else emptyList()
+                    val overviewLabels=labels(overview)
+                    for(category in SettingsCatalog.categories) assertEquals(1,overviewLabels.count { it==category.title })
+                    for(group in listOf("Account & playback","Personalization","Privacy & data","Help & support")) assertTrue(overviewLabels.contains(group))
+                    assertFalse(overviewLabels.contains("Quick actions"))
+                    assertFalse(overviewLabels.contains("Guided tracking setup"))
+                    assertFalse(overviewLabels.contains("Now Playing • All devices"))
+                    assertEquals(1,labels(pages.getValue("tracking")).count { it=="Guided tracking setup" })
                     val deviceLabels=labels(pages.getValue("devices"))
                     assertEquals(1,deviceLabels.count { it=="Pair a device" })
                     assertEquals(1,deviceLabels.count { it=="Live playback sharing" })
