@@ -59,7 +59,7 @@ class PlaybackListener : NotificationListenerService() {
     private val poll = object : Runnable {
         override fun run() {
             if(!connected) return
-            try { capture(); requestCatalogueSuggestions(); notifyPending(); consecutiveFailures=0 } catch (e: Exception) { consecutiveFailures=(consecutiveFailures+1).coerceAtMost(3); DebugTrace.failure("poll",e); prefs.edit().putString("sample_error",e.javaClass.simpleName).apply(); runCatching { history.finishAll() } } finally { if(connected) handler.postDelayed(this, ResourcePolicy.pollDelay(prefs.getBoolean("enabled",false),prefs.getInt("tracked_session_count",0)>0,consecutiveFailures,getSystemService(android.os.PowerManager::class.java).isPowerSaveMode,android.os.Build.VERSION.SDK_INT>=28 && getSystemService(android.app.ActivityManager::class.java).isBackgroundRestricted)) }
+            try { capture(); requestCatalogueSuggestions(); RewatchAutomation.request(this); notifyPending(); consecutiveFailures=0 } catch (e: Exception) { consecutiveFailures=(consecutiveFailures+1).coerceAtMost(3); DebugTrace.failure("poll",e); prefs.edit().putString("sample_error",e.javaClass.simpleName).apply(); runCatching { history.finishAll() } } finally { if(connected) handler.postDelayed(this, ResourcePolicy.pollDelay(prefs.getBoolean("enabled",false),prefs.getInt("tracked_session_count",0)>0,consecutiveFailures,getSystemService(android.os.PowerManager::class.java).isPowerSaveMode,android.os.Build.VERSION.SDK_INT>=28 && getSystemService(android.app.ActivityManager::class.java).isBackgroundRestricted)) }
         }
     }
     override fun onListenerConnected() { super.onListenerConnected(); connected=true; instance=this; if(!sessionCallbackRegistered) runCatching { getSystemService(MediaSessionManager::class.java).addOnActiveSessionsChangedListener(sessionCallback,ComponentName(this,PlaybackListener::class.java),handler); sessionCallbackRegistered=true }.onFailure { DebugTrace.failure("session-callback",it) }; DeviceControl.dispatch={ session,action -> runCatching { remoteCommand(session,action) }.getOrDefault(false) }; DebugTrace.event("listener","connected"); prefs.edit().putBoolean("listener_connected",true).apply(); handler.removeCallbacks(poll); handler.post(poll) }
@@ -80,6 +80,7 @@ class PlaybackListener : NotificationListenerService() {
     private fun notifyPending() {
         if (!getSharedPreferences("tracker",MODE_PRIVATE).getBoolean("enabled",false) || !ViewingNotifications.enabled(this)) return
         for (record in history.pendingNotifications().take(3)) {
+            if(RewatchAutomation.isKnownRewatch(this,record)) { history.markNotified(record.id); continue }
             val posted=ViewingNotifications.post(this,record); DebugTrace.event("notification","viewing review posted="+posted); if(posted) history.markNotified(record.id)
         }
     }
