@@ -744,7 +744,7 @@ class MainActivity : ComponentActivity() {
                 fun preferenceRow(title:String,detail:String,action:()->Unit) {
                     settingRow(group ?: root,title,detail,action)
                 }
-                fun appearanceToggle(title:String,detail:String,key:String,default:Boolean,onChange:(View,Boolean)->Unit={ _,_-> }) {
+                fun appearanceToggle(title:String,detail:String,key:String,default:Boolean,onChange:(android.view.View,Boolean)->Unit={ _,_-> }) {
                     val parent=group ?: root
                     if(parent.childCount>0) parent.addView(android.view.View(this).apply { setBackgroundColor(0x227F7F7F) },LinearLayout.LayoutParams(-1,dp(1)))
                     val row=LinearLayout(this).apply {
@@ -773,8 +773,8 @@ class MainActivity : ComponentActivity() {
                     parent.addView(row,LinearLayout.LayoutParams(-1,-2))
                 }
                 heading("Theme & colors")
-                preferenceRow("Theme",themes[themeKeys.indexOf(prefs.getString("appearance_mode","dark")).coerceAtLeast(0)]) { choose("Theme",themes) { prefs.edit().putString("appearance_mode",themeKeys[it]).apply(); recreate() } }
-                preferenceRow("Accent color",accents[accentKeys.indexOf(prefs.getString("accent","violet")).coerceAtLeast(0)]) { choose("Accent color",accents) { prefs.edit().putString("accent",accentKeys[it]).apply(); recreate() } }
+                preferenceRow("Theme",themes[themeKeys.indexOf(prefs.getString("appearance_mode","dark").orEmpty()).coerceAtLeast(0)]) { choose("Theme",themes) { prefs.edit().putString("appearance_mode",themeKeys[it]).apply(); recreate() } }
+                preferenceRow("Accent color",accents[accentKeys.indexOf(prefs.getString("accent","violet").orEmpty()).coerceAtLeast(0)]) { choose("Accent color",accents) { prefs.edit().putString("accent",accentKeys[it]).apply(); recreate() } }
                 heading("Display")
                 preferenceRow("Text size",sizes[prefs.getInt("reading_size",0).coerceIn(0,sizes.lastIndex)]) { choose("Reading size",sizes) { prefs.edit().putInt("reading_size",it).apply(); recreate() } }
                 appearanceToggle("High contrast text","Improve text visibility","high_contrast",false) { _,_-> recreate() }
