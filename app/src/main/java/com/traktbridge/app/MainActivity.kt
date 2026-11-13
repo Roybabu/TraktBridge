@@ -38,6 +38,7 @@ class MainActivity : ComponentActivity() {
     private val lowRam get()=getSystemService(android.app.ActivityManager::class.java).isLowRamDevice
     private var historyLimit=100
     private var librarySelection=""
+    private var libraryCategory="All"
     private var restoreContentFocus=false
     private var restoreScrollY=0
     private var analyticsPeriod=30
@@ -382,6 +383,7 @@ class MainActivity : ComponentActivity() {
         tab=(savedInstanceState?.getInt("tab") ?: DashboardPreferences.startTab(prefs.getInt("startup_tab",0))).coerceIn(0,4)
         settingsCategory=savedInstanceState?.getString("settings_category").orEmpty()
         librarySelection=savedInstanceState?.getString("library_selection").orEmpty()
+        libraryCategory=savedInstanceState?.getString("library_category") ?: "All"
         restoreContentFocus=savedInstanceState?.getBoolean("content_focus",false) ?: false
         restoreScrollY=savedInstanceState?.getInt("content_scroll",0) ?: 0
         importSource=savedInstanceState?.getString("import_source") ?: "com.netflix.mediaclient"
@@ -1195,7 +1197,7 @@ class MainActivity : ComponentActivity() {
         runCatching { startActivityForResult(intent,96) }.onFailure { privacyPrompt=false; finish() }
     }
     override fun onDestroy() { bridgeModel.cancel(); if (::history.isInitialized) history.close(); super.onDestroy() }
-    override fun onSaveInstanceState(outState: Bundle) { outState.putInt("content_scroll",if(::contentPage.isInitialized) (if(tab==4) settingsPage else contentPage).scrollY else 0); outState.putBoolean("content_focus",tvMode && ::nav.isInitialized && !nav.hasFocus()); outState.putString("settings_category",settingsCategory); outState.putString("library_selection",librarySelection); outState.putInt("tab",tab); outState.putString("import_source",importSource); outState.putString("filter_q",historyFilter.query); outState.putString("filter_source",historyFilter.source); outState.putInt("filter_period",historyFilter.period); outState.putString("filter_type",historyFilter.type); outState.putString("filter_status",historyFilter.status); outState.putString("filter_sort",historyFilter.sort); outState.putInt("analytics_period",analyticsPeriod); outState.putString("analytics_source",analyticsSource); outState.putString("calendar_month",calendarMonth.toString()); super.onSaveInstanceState(outState) }
+    override fun onSaveInstanceState(outState: Bundle) { outState.putInt("content_scroll",if(::contentPage.isInitialized) (if(tab==4) settingsPage else contentPage).scrollY else 0); outState.putBoolean("content_focus",tvMode && ::nav.isInitialized && !nav.hasFocus()); outState.putString("settings_category",settingsCategory); outState.putString("library_selection",librarySelection); outState.putString("library_category",libraryCategory); outState.putInt("tab",tab); outState.putString("import_source",importSource); outState.putString("filter_q",historyFilter.query); outState.putString("filter_source",historyFilter.source); outState.putInt("filter_period",historyFilter.period); outState.putString("filter_type",historyFilter.type); outState.putString("filter_status",historyFilter.status); outState.putString("filter_sort",historyFilter.sort); outState.putInt("analytics_period",analyticsPeriod); outState.putString("analytics_source",analyticsSource); outState.putString("calendar_month",calendarMonth.toString()); super.onSaveInstanceState(outState) }
     private fun dp(n:Int)= (n*resources.displayMetrics.density+0.5f).toInt()
     private fun rounded(color:Int,radius:Int=16)=android.graphics.drawable.GradientDrawable().apply { setColor(color); cornerRadius=dp(radius).toFloat() }
     private fun txt(value:String,size:Int=15,color:Int=ink,bold:Boolean=false)=TextView(this).apply {
@@ -1335,38 +1337,15 @@ class MainActivity : ComponentActivity() {
                 }
                 dashboard.addView(actionButton("Customize dashboard") { customizeDashboard() })
             }
-            1,2 -> {
-                if(tab==1) dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeLibraryToolbar(violet,groups.size.toString()+" identified titles and provisional groups",{ universalSearch() },{ editHistoryFilter(records) },{ manualLog() }) } })
-                else { dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeReviewSummary(violet,pending,{ manualLog() },{ HistorySync.schedule(this@MainActivity); refreshHistory() }) } }) }
-                if(tab==1) { dashboard.addView(actionButton("Synced Trakt account library") { openDownloadedTrakt() }); dashboard.addView(actionButton("Unified movie, TV and anime library") { unifiedLibrary() }); dashboard.addView(actionButton("Advanced search • tags and folders") { organizedLibrary() }) }
+            1 -> renderPosterLibrary(records)
+            2 -> {
+                dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeReviewSummary(violet,pending,{ manualLog() },{ HistorySync.schedule(this@MainActivity); refreshHistory() }) } })
                 dashboard.addView(actionButton("Refresh") { refreshHistory() })
-                
-                if(tab==1) {
-                    dashboard.addView(txt("Filters: "+listOfNotNull(historyFilter.query.takeIf { it.isNotBlank() }?.let { "Search: "+it },historyFilter.source.takeIf { it.isNotBlank() }?.let { appLabel(it) },historyFilter.period.takeIf { it>0 }?.let { "Last "+it+" days" },historyFilter.type.takeIf { it.isNotBlank() },historyFilter.status.takeIf { it.isNotBlank() } ).joinToString(" • ").ifBlank { "All viewing" },13,muted))
-                    if(historyFilter!=HistoryFilter()) dashboard.addView(actionButton("Reset filters") { historyFilter=HistoryFilter(); historyLimit=MemoryPolicy.pageSize(lowRam); refreshHistory() })
-                }
-                val items=if(tab==1) ViewingAnalytics.sort(ViewingGroups.build(ViewingAnalytics.filter(records,historyFilter)),historyFilter.sort) else groups.filter { it.queued || it.pending }
-                if(items.isEmpty()) panel(dashboard).addView(txt(if(tab==1) "No viewing records yet." else "You're all caught up.",16,muted))
+                val items=groups.filter { it.queued || it.pending }
+                if(items.isEmpty()) panel(dashboard).addView(txt("You're all caught up.",16,muted))
                 val visible=items.take(historyLimit)
+                lazyTitles(dashboard,visible,true)
                 if(items.size>visible.size && historyLimit<1000) dashboard.addView(actionButton("Show more ("+visible.size+" of "+items.size+")") { historyLimit=MemoryPolicy.nextPage(historyLimit,MemoryPolicy.pageSize(lowRam)); refreshHistory() })
-                else if(items.size>visible.size) dashboard.addView(txt("Showing first 1000 titles. Use filters to narrow the remaining history.",13,muted))
-                if(tab==1 && tvMode && visible.isNotEmpty()) {
-                    val shelf=visible.map { g -> val r=g.representative; TvLibraryItem(r.id,r.matchLabel.ifBlank { r.title },g.platforms.joinToString(" • ") { appLabel(it) },if(r.matchType=="episode") "show" else "movie",if(r.matchType=="episode") r.showId else r.traktId) { showSessions(g) } }
-                    dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeTvShelf(violet,"Your viewing library",shelf) } })
-                }
-                if(tab==1 && adaptiveLayout.mode==AdaptiveUi.Mode.EXPANDED && visible.isNotEmpty()) {
-                    val entries=visible.map { g -> val r=g.representative; LibraryEntry(r.id,r.matchLabel.ifBlank { r.title },g.platforms.joinToString(" • ") { appLabel(it) },g.sessions.size.toString()+" sessions • "+durationText(g.sampledMs)+" sampled") { showSessions(g) } }
-                    dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeMasterDetail(violet,entries,librarySelection) { librarySelection=it } } })
-                    section(dashboard,"Full library")
-                }
-                if(tab==1) {
-                    val series=SeriesLibrary.build(visible)
-                    if(series.isNotEmpty()) { section(dashboard,"Series and anime"); cards(dashboard,series) { parent,item -> seriesCard(parent,item) } }
-                    val movies=visible.filter { it.representative.matchType=="movie" }
-                    if(movies.isNotEmpty()) { section(dashboard,"Movies"); lazyTitles(dashboard,movies,true) }
-                    val other=visible.filter { it.representative.matchType!="movie" && !(it.representative.matchType=="episode" && it.representative.showId>0 && it.representative.season>=0 && it.representative.episode>0) }
-                    if(other.isNotEmpty()) { section(dashboard,"Unidentified viewing"); lazyTitles(dashboard,other,true) }
-                } else lazyTitles(dashboard,visible,true)
             }
             3 -> {
                 section(dashboard,"Viewing activity")
@@ -2171,6 +2150,87 @@ class MainActivity : ComponentActivity() {
         body.addView(txt(durationText(day.sampledMs)+" sampled • "+day.sessions+" sessions",16,ink,true))
         ViewingGroups.build(records.filter { ViewingAnalytics.day(it.ended)==day.date }).forEach { titleCard(body,it,true) }
         BridgeDialogBuilder(this).setTitle(day.date.toString()).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
+    }
+    private fun libraryMenu() {
+        choose("Library options",listOf("Synced Trakt account library","Tags and collections","Log a watch","Refresh","Reset filters")) { i ->
+            when(i) {
+                0->openDownloadedTrakt()
+                1->organizedLibrary()
+                2->manualLog()
+                3->refreshHistory()
+                4->{ historyFilter=HistoryFilter(); libraryCategory="All"; historyLimit=MemoryPolicy.pageSize(lowRam); refreshHistory() }
+            }
+        }
+    }
+    private fun seriesMenu(series:SeriesGroup) {
+        choose(series.title,listOf("Browse seasons and episodes","Series details",if(isFavorite("show",series.id)) "Remove favorite" else "Add favorite","Personal status: "+libraryStatus("show",series.id).ifBlank { "Not set" },"Notes and tags","Add to collection","Trakt series progress")) { i ->
+            when(i) {
+                0->showSeries(series.id)
+                1->titleDetails("show",series.id,series.title)
+                2->{ toggleFavorite("show",series.id,series.title); refreshHistory() }
+                3->setLibraryStatus("show",series.id,series.title)
+                4->editTitleNotes("show",series.id,series.title)
+                5->addCollection("show",series.id,series.title)
+                6->remoteSeriesProgress(series.id,series.title)
+            }
+        }
+    }
+    private fun groupPoster(g:ViewingTitle):PosterLibraryItem {
+        val r=g.representative
+        val episode=r.matchType=="episode" && r.showId>0
+        val name=if(episode) r.matchLabel.substringBefore(" — ") else r.matchLabel.ifBlank { r.title.ifBlank { "Unidentified video" } }
+        val detail=(if(episode) "S"+r.season+" E"+r.episode+" · " else "")+(if(g.remainingMs>0) durationText(g.remainingMs)+" left" else g.platforms.joinToString(" • ") { appLabel(it) })
+        val progress=if(g.durationMs>0 && g.positionMs>=0) (g.positionMs.toDouble()/g.durationMs).toFloat().coerceIn(0f,1f) else null
+        val open:()->Unit={ if(episode) showSeries(r.showId) else showSessions(g) }
+        return PosterLibraryItem(name,detail,when { g.confirmed->"Watched"; g.queued->"Awaiting sync"; r.traktId<=0->"Needs match"; else->"In progress" },if(episode) "show" else "movie",if(episode) r.showId else r.traktId,open,{ showSessions(g) },progress)
+    }
+    private fun posterGrid(items:List<PosterLibraryItem>) {
+        val columns=if(resources.configuration.fontScale>=1.5f) 1 else maxOf(2,adaptiveLayout.columns)
+        items.chunked(columns).forEach { batch ->
+            val row=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=android.view.Gravity.TOP }
+            dashboard.addView(row)
+            batch.forEach { item ->
+                val tile=ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { PosterLibraryTile(violet,item) } }
+                row.addView(tile,LinearLayout.LayoutParams(0,-2,1f).apply { marginEnd=dp(8) })
+            }
+            repeat(columns-batch.size) { row.addView(android.view.View(this),LinearLayout.LayoutParams(0,1,1f)) }
+        }
+    }
+    private fun renderPosterLibrary(records:List<WatchRecord>) {
+        dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent {
+            PosterLibraryHeader(violet,libraryCategory,{ category -> libraryCategory=category; historyLimit=MemoryPolicy.pageSize(lowRam); refreshHistory() },{ universalSearch() },{ editHistoryFilter(records) },{ libraryMenu() })
+        } })
+        if(historyFilter!=HistoryFilter()) dashboard.addView(txt("History filters active • use Filters or Library options to change",12,muted))
+        val groups=ViewingAnalytics.sort(ViewingGroups.build(ViewingAnalytics.filter(records,historyFilter)),historyFilter.sort)
+        val series=SeriesLibrary.build(groups)
+        val movies=groups.filter { it.representative.matchType=="movie" }
+        val other=groups.filter { it.representative.matchType!="movie" && !(it.representative.matchType=="episode" && it.representative.showId>0 && it.representative.season>=0 && it.representative.episode>0) }
+        val anime=personalStore("anime_progress").all.values.mapNotNull { value -> runCatching { org.json.JSONObject(value.toString()) }.getOrNull() }.filter { it.optInt("id")>0 && it.optString("title").isNotBlank() && (historyFilter.query.isBlank() || it.optString("title").contains(historyFilter.query,true)) }.sortedBy { it.optString("title") }
+        val continuing=SeriesLibrary.continueWatching(groups).filter { it.representative.traktId>0 && (libraryCategory=="All" || (libraryCategory=="Movies" && it.representative.matchType=="movie") || (libraryCategory=="Series" && it.representative.matchType=="episode")) }.distinctBy { if(it.representative.showId>0) "show:"+it.representative.showId else "movie:"+it.representative.traktId }.take(10)
+        if(continuing.isNotEmpty()) {
+            section(dashboard,"Continue watching")
+            dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { PosterLibraryShelf(violet,continuing.map { groupPoster(it) }) } })
+        }
+        var shown=0
+        if(libraryCategory in setOf("All","Series") && series.isNotEmpty()) {
+            section(dashboard,"Your series")
+            posterGrid(series.take(historyLimit).map { item ->
+                val resume=item.resume?.representative
+                PosterLibraryItem(item.title,item.episodes.size.toString()+" tracked episode(s)",if(resume!=null) "Continue S"+resume.season+" E"+resume.episode else item.completed.toString()+" watched","show",item.id,{ showSeries(item.id) },{ seriesMenu(item) })
+            }); shown+=series.size
+        }
+        if(libraryCategory in setOf("All","Movies") && movies.isNotEmpty()) { section(dashboard,"Your movies"); posterGrid(movies.take(historyLimit).map { groupPoster(it) }); shown+=movies.size }
+        if(libraryCategory in setOf("All","Anime") && anime.isNotEmpty()) {
+            section(dashboard,"Your anime")
+            anime.take(historyLimit).forEach { item ->
+                val id=item.optInt("id"); val title=item.optString("title"); val episodes=item.optInt("episodes")
+                dashboard.addView(actionButton(title+" · "+item.optInt("progress")+"/"+(if(episodes>0) episodes.toString() else "?")) { editAnimeProgress(id,title,episodes) })
+            }; shown+=anime.size
+        }
+        if(libraryCategory=="Anime") dashboard.addView(actionButton("Find anime") { animeSearch() })
+        if(libraryCategory in setOf("All","Unidentified") && other.isNotEmpty()) { section(dashboard,"Unidentified viewing"); posterGrid(other.take(historyLimit).map { groupPoster(it) }); shown+=other.size }
+        if(shown==0) emptyState(dashboard,"No "+libraryCategory.lowercase().let { if(it=="all") "titles" else it }+" yet","Identified viewing and local library entries appear here.","Log a watch") { manualLog() }
+        if(listOf(series.size,movies.size,anime.size,other.size).any { it>historyLimit } && historyLimit<1000) dashboard.addView(actionButton("Show more") { historyLimit=MemoryPolicy.nextPage(historyLimit,MemoryPolicy.pageSize(lowRam)); refreshHistory() })
     }
     private fun seriesCard(parent:LinearLayout,series:SeriesGroup) {
         val card=panel(parent)
