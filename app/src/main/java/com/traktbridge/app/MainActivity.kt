@@ -571,6 +571,30 @@ class MainActivity : ComponentActivity() {
         if(parent.childCount>0) parent.addView(android.view.View(this).apply { setBackgroundColor(0x227F7F7F) },LinearLayout.LayoutParams(-1,dp(1)))
         parent.addView(row,LinearLayout.LayoutParams(-1,-2))
     }
+    private fun settingToggle(parent:LinearLayout,title:String,detail:String,checked:Boolean,onChange:(Switch,Boolean)->Unit) {
+        if(parent.childCount>0) parent.addView(android.view.View(this).apply { setBackgroundColor(0x227F7F7F) },LinearLayout.LayoutParams(-1,dp(1)))
+        val row=LinearLayout(this).apply {
+            orientation=LinearLayout.HORIZONTAL
+            gravity=android.view.Gravity.CENTER_VERTICAL
+            minimumHeight=dp(adaptiveLayout.touch)
+            setPadding(dp(4),dp(10),dp(4),dp(10))
+        }
+        val labels=LinearLayout(this).apply {
+            orientation=LinearLayout.VERTICAL
+            addView(txt(title,16,ink,true))
+            addView(txt(detail,13,muted))
+        }
+        val toggle=Switch(this).apply {
+            contentDescription="$title. $detail"
+            isChecked=checked
+            isFocusable=true
+        }
+        toggle.setOnCheckedChangeListener { _,value -> onChange(toggle,value) }
+        row.addView(labels,LinearLayout.LayoutParams(0,-2,1f))
+        row.addView(toggle,LinearLayout.LayoutParams(-2,-2))
+        labels.setOnClickListener { toggle.isChecked=!toggle.isChecked }
+        parent.addView(row,LinearLayout.LayoutParams(-1,-2))
+    }
     private fun refreshDeviceSettings() {
         val page=settingsGroups["devices"] ?: return
         if(page.childCount>3) page.removeViews(3,page.childCount-3)
@@ -838,36 +862,85 @@ class MainActivity : ComponentActivity() {
                 }
             }
             "privacy" -> {
-                heading("Privacy controls")
-                button("Privacy dashboard and data controls") { privacyDashboard() }
-                button("Privacy mode • stop tracking now") { privacyMode() }
+                heading("Tracking privacy")
+                val trackingActive=prefs.getBoolean("enabled",false) || prefs.getBoolean("title_optin",false) || prefs.contains("usage_since") || prefs.getBoolean("device_sharing",false) || prefs.getBoolean("device_controls",false) || prefs.getBoolean("device_history",false)
+                settingRow(group ?: root,"Pause all tracking",if(trackingActive) "Tracking or sharing is enabled" else "Tracking and sharing are paused") { privacyMode() }
+                settingRow(group ?: root,"Privacy overview","Review tracking, data storage and account privacy") { privacyDashboard() }
                 heading("App protection")
-                (group ?: root).addView(Switch(this).apply { text="Require biometric or device credential on app resume"; isChecked=prefs.getBoolean("privacy_lock",false); setOnCheckedChangeListener { _,checked -> if(checked && !getSystemService(android.app.KeyguardManager::class.java).isDeviceSecure) { isChecked=false; Toast.makeText(this@MainActivity,"Set a device screen lock first",Toast.LENGTH_LONG).show() } else { prefs.edit().putBoolean("privacy_lock",checked).apply(); if(checked) { unlocked=false; requirePrivacyUnlock() } } } })
-                (group ?: root).addView(Switch(this).apply { text="Protect app screen from screenshots and recent-app previews"; isChecked=prefs.getBoolean("secure_screen",false); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("secure_screen",checked).apply(); applyScreenProtection() } })
+                settingToggle(group ?: root,"App lock","Require device authentication when returning to the app",prefs.getBoolean("privacy_lock",false)) { toggle,checked ->
+                    if(checked && !getSystemService(android.app.KeyguardManager::class.java).isDeviceSecure) {
+                        toggle.isChecked=false
+                        Toast.makeText(this,"Set a device screen lock first",Toast.LENGTH_LONG).show()
+                    } else {
+                        prefs.edit().putBoolean("privacy_lock",checked).apply()
+                        if(checked) { unlocked=false; requirePrivacyUnlock() }
+                    }
+                }
+                settingToggle(group ?: root,"Screen protection","Block screenshots and recent-app previews",prefs.getBoolean("secure_screen",false)) { _,checked ->
+                    prefs.edit().putBoolean("secure_screen",checked).apply(); applyScreenProtection()
+                }
             }
             "data" -> {
-                heading("Storage & caches")
-                (group ?: root).addView(Switch(this).apply { text="Download artwork only on unmetered networks"; isChecked=prefs.getBoolean("artwork_unmetered",false); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("artwork_unmetered",checked).apply() } })
-                button("Clear offline catalogue") { getSharedPreferences("offline_catalogue",MODE_PRIVATE).edit().clear().apply() }
-                button("Clear cached artwork") { Artwork.clear(this); Toast.makeText(this,"Artwork cache cleanup requested",Toast.LENGTH_SHORT).show() }
-                button("Recently deleted viewing") { recentlyDeleted() }
-                heading("Backup & transfer")
-                button("Transfer data to another device") { deviceTransferGuide() }
-                (group ?: root).addView(Switch(this).apply { text="Daily encrypted on-device history backup"; isChecked=prefs.getBoolean("daily_backup",false); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("daily_backup",checked).apply(); LocalBackupVault.schedule(this@MainActivity,checked) } })
-                button("Restore daily device backup") { restoreDailyBackup() }
-                button("Delete daily device backup") { LocalBackupVault.delete(this); Toast.makeText(this,"Device backup deleted",Toast.LENGTH_SHORT).show() }
-                heading("Encrypted import & export")
-                button("Export personal settings (encrypted)") { startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/octet-stream").putExtra(Intent.EXTRA_TITLE,"traktbridge-settings.tbenc"),65) }
-                button("Import personal settings (encrypted)") { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*"),66) }
-                button("Encrypted history backup") { startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/octet-stream").putExtra(Intent.EXTRA_TITLE,"traktbridge-history.tbenc"),63) }
-                button("Restore encrypted backup") { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*"),64) }
-                heading("File formats & external imports")
-                button("Back up viewing history (JSON)") { pickBackup(60) }
-                button("Export viewing history (CSV)") { pickBackup(61) }
-                button("Restore viewing history (JSON)") { pickBackup(62) }
-                button("Import Letterboxd diary (CSV)") { importSource="letterboxd"; startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*"),58) }
-                button("Import streaming viewing history (CSV)") { chooseImportProvider() }
-                button("Import external history (Trakt, IMDb, Simkl, anime)") { externalHistoryImport() }
+                fun dataRow(title:String,detail:String,action:()->Unit) { settingRow(group ?: root,title,detail,action) }
+                fun dataMenu(title:String,entries:List<Triple<String,String,()->Unit>>) {
+                    val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(4),dp(12),dp(12)) }
+                    val card=panel(body).apply { setPadding(dp(12),dp(4),dp(12),dp(4)) }
+                    val dialog=BridgeDialogBuilder(this).setTitle(title).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).create()
+                    entries.forEach { (name,detail,action) -> settingRow(card,name,detail) { dialog.dismiss(); action() } }
+                    dialog.show()
+                }
+                fun encryptedFile(request:Int,name:String="") {
+                    val intent=if(name.isNotEmpty()) Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/octet-stream").putExtra(Intent.EXTRA_TITLE,name)
+                        else Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
+                    startActivityForResult(intent,request)
+                }
+                heading("Backup & recovery")
+                settingToggle(group ?: root,"Automatic daily backup","Encrypted viewing history stored on this device",prefs.getBoolean("daily_backup",false)) { _,checked ->
+                    prefs.edit().putBoolean("daily_backup",checked).apply(); LocalBackupVault.schedule(this,checked)
+                }
+                dataRow("Create backup","Encrypted history or portable JSON file") {
+                    dataMenu("Create backup",listOf(
+                        Triple("Encrypted history","Password-protected backup") { encryptedFile(63,"traktbridge-history.tbenc") },
+                        Triple("JSON history","Unencrypted portable backup") { pickBackup(60) }
+                    ))
+                }
+                dataRow("Restore backup","Daily device backup, encrypted file or JSON") {
+                    dataMenu("Restore backup",listOf(
+                        Triple("Daily device backup","Restore the encrypted on-device copy") { restoreDailyBackup() },
+                        Triple("Encrypted history file","Choose a protected backup file") { encryptedFile(64) },
+                        Triple("JSON history file","Choose a portable history backup") { pickBackup(62) }
+                    ))
+                }
+                dataRow("Transfer to another device","Move data using the device transfer guide") { deviceTransferGuide() }
+                heading("Import & export")
+                dataRow("Import viewing history","Letterboxd, streaming services, Trakt and other sources") {
+                    dataMenu("Import viewing history",listOf(
+                        Triple("Letterboxd diary","Import a CSV diary") { importSource="letterboxd"; startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*"),58) },
+                        Triple("Streaming history","Import provider CSV data") { chooseImportProvider() },
+                        Triple("Other services","Trakt, IMDb, Simkl and anime history") { externalHistoryImport() }
+                    ))
+                }
+                dataRow("Export viewing history","CSV file for spreadsheets and other tools") { pickBackup(61) }
+                dataRow("Personal settings","Import or export encrypted preferences") {
+                    dataMenu("Personal settings",listOf(
+                        Triple("Export settings","Create an encrypted settings file") { encryptedFile(65,"traktbridge-settings.tbenc") },
+                        Triple("Import settings","Restore preferences from an encrypted file") { encryptedFile(66) }
+                    ))
+                }
+                heading("Storage & maintenance")
+                settingToggle(group ?: root,"Artwork on unmetered networks only","Avoid artwork downloads on metered connections",prefs.getBoolean("artwork_unmetered",false)) { _,checked ->
+                    prefs.edit().putBoolean("artwork_unmetered",checked).apply()
+                }
+                dataRow("Recently deleted","Review recoverable viewing records") { recentlyDeleted() }
+                dataRow("Manage storage","Clear cached data or delete the daily backup") {
+                    dataMenu("Manage storage",listOf(
+                        Triple("Clear offline catalogue","Remove cached catalogue information") { getSharedPreferences("offline_catalogue",MODE_PRIVATE).edit().clear().apply() },
+                        Triple("Clear artwork cache","Remove downloaded artwork") { Artwork.clear(this); Toast.makeText(this,"Artwork cache cleanup requested",Toast.LENGTH_SHORT).show() },
+                        Triple("Delete daily backup","Remove the on-device backup file") {
+                            BridgeDialogBuilder(this).setTitle("Delete daily backup?").setMessage("This deletes the current backup copy, not your viewing history. Automatic backups may create a new copy if enabled.").setNegativeButton("Cancel",null).setPositiveButton("Delete") { _,_-> LocalBackupVault.delete(this); Toast.makeText(this,"Device backup deleted",Toast.LENGTH_SHORT).show() }.show()
+                        }
+                    ))
+                }
             }
             "advanced" -> {
                 heading("Updates & support")
@@ -950,12 +1023,10 @@ class MainActivity : ComponentActivity() {
         status("Daily encrypted backup",prefs.getBoolean("daily_backup",false))
         status("Automatic remote refresh",prefs.getString("auto_refresh_account","").orEmpty().isNotBlank())
         body.addView(txt("Local viewing SQLite is not encrypted. Downloaded Trakt account data, OAuth credentials and optional encrypted backups use device-backed or password-based encryption.",14,muted))
-        body.addView(actionButton("Pause tracking") { privacyMode() })
         body.addView(actionButton("Disable automatic remote refresh") { RemoteRefreshSchedule.disable(this); Toast.makeText(this,"Remote refresh disabled",Toast.LENGTH_SHORT).show() })
         body.addView(actionButton("Delete downloaded Trakt account data") {
             BridgeDialogBuilder(this).setTitle("Clear downloaded Trakt data?").setMessage("Stops automatic refresh and deletes the downloaded account library. Local viewing records and your Trakt account are unchanged.").setNegativeButton("Cancel",null).setPositiveButton("Clear") { _,_->RemoteRefreshSchedule.disable(this); TraktLibrary.clearCache(this) }.show()
         })
-        body.addView(actionButton("Export encrypted history") { startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/octet-stream").putExtra(Intent.EXTRA_TITLE,"traktbridge-history.tbenc"),63) })
         BridgeDialogBuilder(this).setTitle("Privacy dashboard").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
     }
     private fun privacyMode() {
