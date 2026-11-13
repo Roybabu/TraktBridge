@@ -21,6 +21,22 @@ object YouTubePlayback {
     fun permitted(screen:Mode,uri:Mode):Boolean =
         screen !in setOf(Mode.SHORTS,Mode.ADVERTISEMENT) && uri!=Mode.SHORTS &&
             (screen==Mode.REGULAR || uri==Mode.REGULAR)
+    private var observed=Mode.UNKNOWN
+    private var observedAt=0L
+    @Synchronized fun observe(mode:Mode,now:Long):Boolean {
+        if(mode==Mode.UNKNOWN) return false
+        val changed=observed!=mode
+        observed=mode; observedAt=now
+        return changed
+    }
+    @Synchronized fun screenMode(now:Long,allow:Boolean):Mode {
+        if(!allow || observedAt==0L || now<observedAt) return Mode.UNKNOWN
+        // Exclusion stays latched until a positive regular-player observation.
+        return if(observed==Mode.REGULAR && now-observedAt>30000) Mode.UNKNOWN else observed
+    }
+    @Synchronized fun clear() { observed=Mode.UNKNOWN; observedAt=0L }
+    fun allowContinuation(screen:Mode,uri:Mode,previousIdentity:String?,identity:String):Boolean =
+        permitted(screen,uri) || (screen==Mode.UNKNOWN && uri==Mode.UNKNOWN && identity.isNotBlank() && previousIdentity==identity)
     fun recognition(direct:String,notes:List<String>,detail:String):Recognition? {
         val title=YouTubeTitleProbe.clean(direct)
         if(title!=null) return Recognition(title,detail,85,listOf("media"),false)
