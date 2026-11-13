@@ -15,6 +15,7 @@ class DebugActivity: Activity() {
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
         DebugTrace.init(this)
+        CrashRecovery.markScreen("Diagnostics")
         val root=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(24,32,24,24) }
         setContentView(ScrollView(this).apply { addView(root) })
         fun button(label: String,action: ()->Unit) { root.addView(Button(this).apply { text=label; setOnClickListener { action() } }) }
@@ -34,6 +35,11 @@ class DebugActivity: Activity() {
         button("Export report as text file") {
             if(prepared.isBlank()) { Toast.makeText(this,"Refresh report first",Toast.LENGTH_SHORT).show(); return@button }
             startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("text/plain").putExtra(Intent.EXTRA_TITLE,"TraktBridge-diagnostics.txt"),42)
+        }
+        button("Copy last crash report") {
+            val crash=CrashRecovery.report(this)
+            if(crash==null) Toast.makeText(this,"No saved crash report",Toast.LENGTH_SHORT).show()
+            else { getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(android.content.ClipData.newPlainText("TraktBridge crash report",crash)); Toast.makeText(this,"Crash report copied",Toast.LENGTH_SHORT).show() }
         }
         button("Share report") {
             if(prepared.isBlank()) { Toast.makeText(this,"Refresh report first",Toast.LENGTH_SHORT).show(); return@button }

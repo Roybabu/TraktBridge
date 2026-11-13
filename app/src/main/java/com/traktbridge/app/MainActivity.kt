@@ -77,7 +77,7 @@ class MainActivity : ComponentActivity() {
             Thread { val result=runCatching { PairingQr.decode(bitmap) }; runOnUiThread { if(!isDestroyed && !isFinishing) result.fold({ approvePairingInvitation(it) },{ Toast.makeText(this,"QR unreadable. Try closer or import a full-resolution image.",Toast.LENGTH_LONG).show() }) } }.start(); return
         }
         if(requestCode==97 && resultCode==RESULT_OK) { data?.data?.let { readPairingQr(it) }; return }
-        if(requestCode==96) { privacyPrompt=false; unlocked=resultCode==RESULT_OK; if(unlocked) { shell.visibility=android.view.View.VISIBLE; refreshHistory() } else finish(); return }
+        if(requestCode==96) { privacyPrompt=false; unlocked=resultCode==RESULT_OK; if(unlocked) { shell.visibility=android.view.View.VISIBLE; refreshHistory(); maybeShowCrashReport() } else finish(); return }
         if(requestCode==57 && resultCode==RESULT_OK) data?.data?.let { inspectVideo(it) }
         if(requestCode==58 && resultCode==RESULT_OK) data?.data?.let { inspectImport(it) }
         if(resultCode==RESULT_OK && requestCode in 65..66) data?.data?.let { settingsTransfer(requestCode,it) }
@@ -451,7 +451,8 @@ class MainActivity : ComponentActivity() {
         handleTrackingShortcut(intent)
         handleAutomation(intent)
         if(!prefs.getBoolean("setup_seen",false)) { prefs.edit().putBoolean("setup_seen",true).apply(); setupGuide() }
-        CrashRecovery.consume(this)?.let { DebugTrace.event("recovery","Previous process ended with "+it); Toast.makeText(this,"Previous session ended unexpectedly. Check tracking health if needed.",Toast.LENGTH_LONG).show() }
+        CrashRecovery.consume(this)?.let { DebugTrace.event("recovery","Previous process ended with "+it) }
+        Thread { CrashRecovery.recoverSystemExit(applicationContext); runOnUiThread { if(!isDestroyed && !isFinishing) maybeShowCrashReport() } }.start()
         StartupTiming.report(startup,"activity-created")
         shell.viewTreeObserver.addOnPreDrawListener(object:android.view.ViewTreeObserver.OnPreDrawListener {
             override fun onPreDraw():Boolean { shell.viewTreeObserver.removeOnPreDrawListener(this); StartupTiming.report(startup,"first-pre-draw"); return true }
@@ -942,6 +943,7 @@ class MainActivity : ComponentActivity() {
                     supportMenu("Diagnostics",listOf(
                         Triple("Live recognition","Inspect current playback detection") { liveInspector() },
                         Triple("Diagnostic recorder","Open the diagnostic recording tool") { startActivity(Intent(this,DebugActivity::class.java)) },
+                        Triple("Last crash report","View, copy or clear the saved crash report") { showCrashReport() },
                         Triple("Technical status","Refresh and view detailed diagnostic information") {
                             refresh()
                             val detail=TextView(this).apply { text=output.text; setTextIsSelectable(true); setPadding(dp(16),dp(12),dp(16),dp(12)); setTextColor(ink) }
@@ -954,6 +956,37 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+    private var crashDialogShowing=false
+    private fun maybeShowCrashReport() {
+        if(!isDestroyed && !isFinishing && (!prefs.getBoolean("privacy_lock",false) || unlocked) && CrashRecovery.pending(this)) showCrashReport()
+    }
+    private fun showCrashReport() {
+        if(crashDialogShowing || isDestroyed || isFinishing || (prefs.getBoolean("privacy_lock",false) && !unlocked)) return
+        val report=CrashRecovery.report(this)
+        if(report==null) {
+            CrashRecovery.acknowledge(this)
+            BridgeDialogBuilder(this).setTitle("Crash report").setMessage("No saved crash report is available.").setPositiveButton("OK",null).show()
+            return
+        }
+        crashDialogShowing=true
+        val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(18),dp(8),dp(18),dp(12)) }
+        body.addView(txt("TraktBridge stopped unexpectedly. Copy this report to help diagnose the issue. Nothing is sent automatically.",14,ink))
+        body.addView(txt(report,12,muted).apply { setTextIsSelectable(true); typeface=android.graphics.Typeface.MONOSPACE; setPadding(0,dp(12),0,0) })
+        val dialog=BridgeDialogBuilder(this).setTitle("Previous crash report").setView(ScrollView(this).apply { addView(body) })
+            .setNegativeButton("Later",null).setNeutralButton("Clear",null).setPositiveButton("Copy report",null).create()
+        dialog.setOnDismissListener { crashDialogShowing=false; CrashRecovery.acknowledge(this) }
+        dialog.setOnShowListener {
+            dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(android.content.ClipData.newPlainText("TraktBridge crash report",report))
+                Toast.makeText(this,"Crash report copied",Toast.LENGTH_SHORT).show()
+                dialog.dismiss()
+            }
+            dialog.getButton(android.app.AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                CrashRecovery.clear(this); dialog.dismiss()
+            }
+        }
+        dialog.show()
     }
     private fun betaFeedback() {
         val field=EditText(this).apply { hint="Describe the issue and steps to reproduce"; minLines=4; maxLines=8 }
@@ -1271,7 +1304,7 @@ class MainActivity : ComponentActivity() {
     private fun showTab(index:Int) {
         if(index !in 0..4) return
         if(tab!=index) { restoreContentFocus=false; restoreScrollY=0 }
-        tab=index; bridgeModel.select(index); settingsPage.visibility=if(index==4) android.view.View.VISIBLE else android.view.View.GONE
+        tab=index; CrashRecovery.markScreen(listOf("Home","Library","Review","Activity","Settings")[index]); bridgeModel.select(index); settingsPage.visibility=if(index==4) android.view.View.VISIBLE else android.view.View.GONE
         contentPage.visibility=if(index==4 || index==1) android.view.View.GONE else android.view.View.VISIBLE
         libraryHost.visibility=if(index==1) android.view.View.VISIBLE else android.view.View.GONE
         if(tvMode) for(i in 0 until nav.childCount) (nav.getChildAt(i) as TextView).apply { setTextColor(if(i==index) violet else muted); background=TvFocus.background(this@MainActivity,if(i==index) BridgeDesign.action else surface,violet,i==index); isSelected=i==index }
