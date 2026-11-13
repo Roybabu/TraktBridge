@@ -115,14 +115,14 @@ object TraktLibrary {
         }.sortedBy { it.airs }
     }
     private val downloadLock=Any()
-    fun syncAccount(context:Context,done:(Result<TraktAccountSummary>)->Unit) {
+    fun syncAccount(context:Context,progress:(String,Int,Int)->Unit={_,_,_->},done:(Result<TraktAccountSummary>)->Unit) {
         val app=context.applicationContext
         worker.execute {
-            val result=runCatching { downloadAccount(app,null,false) }
+            val result=runCatching { downloadAccount(app,null,false) { stage,done,total -> main.post { progress(stage,done,total) } } }
             main.post { done(result) }
         }
     }
-    fun downloadAccount(context:Context,expectedAccount:String?,automatic:Boolean):TraktAccountSummary=synchronized(downloadLock) {
+    fun downloadAccount(context:Context,expectedAccount:String?,automatic:Boolean,progress:(String,Int,Int)->Unit={_,_,_->}):TraktAccountSummary=synchronized(downloadLock) {
         val app=context.applicationContext
         val auth=TraktAuth(app)
         val prefs=app.getSharedPreferences("tracker",Context.MODE_PRIVATE)
@@ -138,6 +138,7 @@ object TraktLibrary {
         val results=mutableListOf<TraktSyncResult>()
         for(kind in TraktData.entries) {
             if(!valid()) break
+            progress("Downloading "+kind.title,0,0)
             val marker=kind.marker(activity)
             val prior=RemoteAccountCache.status(app,account,kind)
             if(automatic && prior!=null && TraktDownloadRules.canSkip(prior.marker,marker,prior.complete)) {
@@ -153,6 +154,7 @@ object TraktLibrary {
                         request(token,kind.endpoint+"?page="+page+"&limit="+TraktDownloadRules.PAGE_SIZE)
                     }
                     val a=JSONArray(response.text)
+                    progress("Downloading "+kind.title,page,response.pages ?: 0)
                     for(i in 0 until a.length()) {
                         val item=a.optJSONObject(i)?.let { parse(it) }
                         val key=item?.let { TraktDownloadRules.key(kind,it) }
@@ -162,6 +164,7 @@ object TraktLibrary {
                 }
                 check(valid()) { "Account changed or refresh cancelled" }
                 complete=complete && skipped==0
+                progress("Saving "+kind.title,0,0)
                 val saved=RemoteAccountCache.publish(app,account,generation,kind,rows,complete,marker)
                 val error=when {
                     !saved->"Previous complete snapshot retained or refresh cancelled"
@@ -177,6 +180,7 @@ object TraktLibrary {
                 if(message in setOf("Trakt HTTP 401","Trakt HTTP 403","Trakt HTTP 429") || !valid()) break
             }
         }
+        progress("Download finished",results.size,TraktData.entries.size)
         TraktAccountSummary(results)
     }
     fun refreshHistory(context:Context,maxPages:Int,done:(Result<Int>)->Unit)=task(context,done) { token,account ->
@@ -221,7 +225,7 @@ object TraktLibrary {
         val generation=RemoteAccountCache.generation(context)
         val status=RemoteAccountCache.status(context,account,TraktData.HISTORY)
         if(RemoteAccountCache.active(context)!=account) return emptyList()
-        historyMemory?.takeIf { it.account==account && it.generation==generation && it.updated==status?.updated && status.complete }?.let {
+        historyMemory?.takeIf { it.account==account && it.generation==generation && status!=null && status.complete && it.updated==status.updated }?.let {
             progress(it.rows.size,it.rows.size); return it.rows
         }
         val snapshot=RemoteAccountCache.rows(context,account,TraktData.HISTORY,progress)
