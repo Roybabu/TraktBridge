@@ -115,6 +115,7 @@ class PlaybackListener : NotificationListenerService() {
         DebugTrace.event("sampling","all="+sessions.size+" selected="+sessions.count { it.packageName in allowed }+" allowed="+allowed.size)
         val rows = JSONArray()
         val samples = mutableListOf<WatchSample>()
+        if(HotstarProbe.enabled(this)) HotstarProbe.signals(this,active.count { it.packageName==HotstarPlayback.PACKAGE },notificationControllers.count { it.packageName==HotstarPlayback.PACKAGE },runCatching { activeNotifications.orEmpty().filter { it.packageName==HotstarPlayback.PACKAGE } }.getOrDefault(emptyList()))
         HotstarProbe.media(this,sessions.filter { it.packageName==HotstarPlayback.PACKAGE },runCatching { activeNotifications.orEmpty().count { it.packageName==HotstarPlayback.PACKAGE } }.getOrDefault(0))
         val selected=sessions.filter { it.packageName in allowed }
         sessionIds.keys.retainAll(selected.map { it.sessionToken }.toSet())
