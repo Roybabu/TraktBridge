@@ -785,25 +785,57 @@ class MainActivity : ComponentActivity() {
                 appearanceToggle("Hide spoilers","Keep catalogue plot details hidden","hide_spoilers",true)
             }
             "library" -> {
-                heading("Dashboard & goals")
-                button("Monthly viewing goal and dashboard") { configureGoal() }
-                button("Customize dashboard and widget") { customizeDashboard() }
-                heading("Collections & organization")
-                button("Franchise viewing guides") { franchises() }
-                button("Share or import collections") { shareCollections() }
-                button("Smart collections") { smartCollections() }
-                button("Custom smart watchlists") { smartWatchlists() }
-                button("Personal collection profiles") { collectionProfiles() }
-                button("Personal collections") { collections() }
-                button("Organize library • tags and folders") { organizedLibrary() }
-                button("Favorite titles") { favorites() }
+                fun libraryRow(title:String,detail:String,action:()->Unit) {
+                    settingRow(group ?: root,title,detail,action)
+                }
+                fun libraryMenu(title:String,entries:List<Triple<String,String,()->Unit>>) {
+                    val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(4),dp(12),dp(12)) }
+                    val card=panel(body).apply { setPadding(dp(12),dp(4),dp(12),dp(4)) }
+                    val dialog=BridgeDialogBuilder(this).setTitle(title).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).create()
+                    entries.forEach { (name,detail,action) -> settingRow(card,name,detail) { dialog.dismiss(); action() } }
+                    dialog.show()
+                }
+                heading("Personalization")
+                libraryRow("Dashboard & viewing goal","Home layout, widget and monthly time budget") {
+                    libraryMenu("Dashboard & viewing goal",listOf(
+                        Triple("Customize dashboard","Choose visible sections, order and widget") { customizeDashboard() },
+                        Triple("Monthly viewing goal","Set an optional viewing time budget") { configureGoal() }
+                    ))
+                }
+                heading("Library organization")
+                libraryRow("Collections & watchlists","Personal lists, automatic rules, profiles and sharing") {
+                    libraryMenu("Collections & watchlists",listOf(
+                        Triple("Personal collections","Create and manage your own collections") { collections() },
+                        Triple("Smart collections","Browse automatically grouped viewing history") { smartCollections() },
+                        Triple("Smart watchlists","Create saved automatic watchlist rules") { smartWatchlists() },
+                        Triple("Collection profiles","Manage separate collections and personal notes") { collectionProfiles() },
+                        Triple("Share or import","Exchange personal collections") { shareCollections() }
+                    ))
+                }
+                libraryRow("Tags & folders","Find and organize titles by tags or collection") { organizedLibrary() }
+                libraryRow("Favorites","Manage saved favorite titles") { favorites() }
+                heading("Discovery")
+                libraryRow("Franchise guides","Explore curated movie viewing orders") { franchises() }
+                libraryRow("Anime","Local progress and public AniList libraries") {
+                    libraryMenu("Anime",listOf(
+                        Triple("My anime progress","Track episodes locally") { animeLocalProgress() },
+                        Triple("Public AniList library","Browse a public account without signing in") { publicAnimeList() }
+                    ))
+                }
                 heading("Shortcuts & reminders")
-                button("Automation shortcuts") { automationShortcuts() }
-                button("Universal playback shortcuts") { playbackShortcut() }
-                button("Cancel all episode reminders") { prefs.edit().putBoolean("episode_reminders",false).apply(); EpisodeReminders.cancelAll(this); Toast.makeText(this,"Reminders cancelled",Toast.LENGTH_SHORT).show() }
-                heading("Anime")
-                button("My anime progress (local)") { animeLocalProgress() }
-                button("Browse public AniList account") { publicAnimeList() }
+                libraryRow("Shortcuts","Automation links and direct playback shortcuts") {
+                    libraryMenu("Shortcuts",listOf(
+                        Triple("Automation shortcuts","Copy links for Android automation tools") { automationShortcuts() },
+                        Triple("Playback shortcuts","Open a specific title or installed player") { playbackShortcut() }
+                    ))
+                }
+                libraryRow("Episode reminders","Manage or cancel scheduled reminders") {
+                    BridgeDialogBuilder(this).setTitle("Episode reminders").setMessage("Cancel all scheduled episode reminders on this device?").setNegativeButton("Keep reminders",null).setPositiveButton("Cancel all reminders") { _,_->
+                        prefs.edit().putBoolean("episode_reminders",false).apply()
+                        EpisodeReminders.cancelAll(this)
+                        Toast.makeText(this,"Reminders cancelled",Toast.LENGTH_SHORT).show()
+                    }.show()
+                }
             }
             "privacy" -> {
                 heading("Privacy controls")
