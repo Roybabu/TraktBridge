@@ -24,6 +24,7 @@ object PlaybackAccuracy {
         return PlaybackInterval(watched=elapsed)
     }
     fun compatibleIdentity(old:WatchSample,next:WatchSample):Boolean {
+        if(old.source==YouTubeTitleProbe.PACKAGE && next.source==YouTubeTitleProbe.PACKAGE) return old.title.isNotBlank() && old.title==next.title
         if(old.title.isBlank() || next.title.isBlank()) return true
         if(RecognitionEngine.normalized(RecognitionEngine.query(old.title))!=RecognitionEngine.normalized(RecognitionEngine.query(next.title))) return false
         val a=RecognitionEngine.episodeOf(old.title+" "+old.subtitle)
