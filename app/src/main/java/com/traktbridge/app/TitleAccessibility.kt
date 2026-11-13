@@ -121,7 +121,7 @@ class TitleAccessibility: AccessibilityService() {
         }
         fun hint(context:Context,pkg:String,start:Long,end:Long):Pair<String,String>? {
             val p=context.getSharedPreferences("tracker",Context.MODE_PRIVATE)
-            if(!p.getBoolean("title_optin",false) || pkg !in (p.getStringSet("allowed",emptySet()) ?: emptySet())) return null
+            if(!p.getBoolean("title_optin",false) || !ContentRecognition.allowAutomaticScreenTitle(pkg) || pkg !in (p.getStringSet("allowed",emptySet()) ?: emptySet())) return null
             val t=p.getLong("title_time:"+pkg,0)
             if(t !in start..end) return null
             val title=p.getString("title_hint:"+pkg,"").orEmpty()

@@ -2,6 +2,13 @@ package com.traktbridge.app
 import org.junit.Assert.*
 import org.junit.Test
 class ContentRecognitionTest {
+ @Test fun youtubeDoesNotGuessTitlesFromPlayerOrBrowseScreens() {
+  val labels=listOf(ScreenLabel("video_title","Recommended video",heading=true,x=0.5,y=0.1,w=0.5,h=0.05), ScreenLabel("","Pause",button=true), ScreenLabel("","",seek=true))
+  assertNull(ContentRecognition.detect("com.google.android.youtube",labels,true))
+  assertNull(ContentRecognition.detect("com.google.android.youtube",listOf(ScreenLabel("","Other video",heading=true),ScreenLabel("","Play",button=true)),false))
+  assertFalse(ContentRecognition.allowAutomaticScreenTitle("com.google.android.youtube"))
+  assertTrue(ContentRecognition.allowAutomaticScreenTitle("other.player"))
+ }
  @Test fun detailHeadingNeedsPlayAction() {
   val title=ScreenLabel("","The Last of Us",heading=true)
   assertNull(ContentRecognition.detect("example",listOf(title),false))

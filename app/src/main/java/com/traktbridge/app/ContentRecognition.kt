@@ -55,7 +55,10 @@ object ContentRecognition {
         val total=elapsed+remaining
         return if(PlaybackPosition.valid(elapsed,total) && total<=24*60*60*1000L) PlayerTime(elapsed,total) else null
     }
+    // YouTube mixes recommendations and playlist titles into the player accessibility tree.
+    fun allowAutomaticScreenTitle(pkg:String):Boolean = pkg != "com.google.android.youtube"
     fun detect(pkg:String,labels:List<ScreenLabel>,player:Boolean):ContentHint? {
+        if(!allowAutomaticScreenTitle(pkg)) return null
         val controls=labels.filter { it.button && play.matches(it.text.trim()) }
         val explicit=labels.filter { PlayerRules.titleId(pkg,it.id,player) && usable(it.text) }
         val strong=explicit.filter { !PlayerRules.detailId(it.id) }
