@@ -519,21 +519,20 @@ class MainActivity : ComponentActivity() {
         settingsRoot.addView(settingsOverview)
         settingsOverview.addView(txt("Settings",28,ink,true))
         settingsOverview.addView(txt("Manage your viewing experience",14,muted))
-        val quick=panel(settingsOverview)
-        quick.addView(txt("Quick actions",17,ink,true))
-        quick.addView(actionButton("Guided tracking setup") { setupGuide() })
-        quick.addView(actionButton("Now Playing • All devices") { nowPlaying() })
-        for(category in definitions) {
-            val card=panel(settingsOverview).apply {
-                isFocusable=true
-                isClickable=true
-                contentDescription=category.title+". "+category.description
-                background=if(tvMode) TvFocus.background(this@MainActivity,surface,violet) else rounded(surface)
-                minimumHeight=dp(adaptiveLayout.touch)
-                setOnClickListener { BridgeHaptics.tap(this); showSettingsCategory(category.id) }
+        val sections=listOf(
+            "Account & playback" to listOf("account","tracking","devices"),
+            "Personalization" to listOf("appearance","library"),
+            "Privacy & data" to listOf("privacy","data"),
+            "Help & support" to listOf("advanced")
+        )
+        for((title,ids) in sections) {
+            val card=settingGroup(settingsOverview,title)
+            for(id in ids) {
+                val category=definitions.first { it.id==id }
+                settingRow(card,category.title,category.description) { showSettingsCategory(category.id) }
             }
-            card.addView(txt(category.title+"  ›",19,ink,true))
-            card.addView(txt(category.description,13,muted))
+        }
+        for(category in definitions) {
             val page=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; visibility=android.view.View.GONE }
             settingsRoot.addView(page)
             settingsGroups[category.id]=page
@@ -673,6 +672,7 @@ class MainActivity : ComponentActivity() {
             }
             "tracking" -> {
                 heading("Tracking preferences")
+                settingRow(group ?: root,"Guided tracking setup","Walk through app selection and Android permissions") { setupGuide() }
                 button("Completion review threshold") { configureCompletionThreshold() }
                 heading("Identify content")
                 button("Identify local video file") { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("video/*"),57) }
