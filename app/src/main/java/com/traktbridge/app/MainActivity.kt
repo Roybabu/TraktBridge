@@ -1268,20 +1268,59 @@ class MainActivity : ComponentActivity() {
     private fun emptyState(parent:LinearLayout,title:String,detail:String,label:String,action:()->Unit) {
         parent.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeEmptyState(violet,title,detail,label,action) } })
     }
+    private var historyLoadPanel:LinearLayout?=null
+    private var historyLoadLabel:TextView?=null
+    private var historyLoadBar:ProgressBar?=null
+    private var renderedHistoryTab=-1
+    private fun showHistoryProgress(progress:HistoryLoadProgress) {
+        if(tab==4 || isDestroyed || isFinishing) return
+        if(historyLoadPanel?.parent!=dashboard) {
+            val panel=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(8),dp(12),dp(8)) }
+            val label=txt("",13,muted)
+            val bar=ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal).apply { max=1000; progressTintList=android.content.res.ColorStateList.valueOf(violet); indeterminateTintList=android.content.res.ColorStateList.valueOf(violet) }
+            panel.addView(label); panel.addView(bar,LinearLayout.LayoutParams(-1,dp(8)))
+            dashboard.addView(panel,0); historyLoadPanel=panel; historyLoadLabel=label; historyLoadBar=bar
+        }
+        val known=progress.total>0
+        historyLoadLabel?.text=progress.stage+if(known) " • "+progress.completed+" / "+progress.total+" records ("+(progress.completed.toLong()*100/progress.total)+"%)" else "…"
+        historyLoadBar?.isIndeterminate=!known
+        if(known) historyLoadBar?.progress=(progress.completed.toLong()*1000/progress.total).toInt().coerceIn(0,1000)
+    }
+    private fun clearHistoryProgress() {
+        historyLoadPanel?.let { if(it.parent==dashboard) dashboard.removeView(it) }
+        historyLoadPanel=null; historyLoadLabel=null; historyLoadBar=null
+    }
     private fun refreshHistory() {
         if(!::dashboard.isInitialized || tab==4 || isFinishing || isDestroyed) return
         val selectedTab=tab
-        dashboard.removeAllViews()
-        dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeLoading(violet) } })
+        if(renderedHistoryTab!=selectedTab) { dashboard.removeAllViews(); clearHistoryProgress() }
         if(tvMode && contentPage.hasFocus()) restoreContentFocus=true
-        bridgeModel.load { result ->
-            if(isDestroyed || isFinishing || tab!=selectedTab) return@load
-            result.fold({ snapshot -> renderHistory(snapshot.records,snapshot.groups,snapshot.unified); if(restoreScrollY>0) { val y=restoreScrollY; restoreScrollY=0; contentPage.post { if(tab==selectedTab) contentPage.scrollTo(0,y) } }; if(tvMode && restoreContentFocus) { restoreContentFocus=false; contentPage.post { if(tab==selectedTab) TvFocus.firstContent(contentPage) } } }, {
-                dashboard.removeAllViews()
-                emptyState(dashboard,"History unavailable","Existing viewing data has not been cleared.","Retry") { refreshHistory() }
-                dashboard.addView(actionButton("Check database integrity") { checkHistoryIntegrity() })
-            })
-        }
+        bridgeModel.load({ result,finished ->
+            if(!isDestroyed && !isFinishing && tab==selectedTab) {
+                result.fold({ snapshot ->
+                    val y=if(restoreScrollY>0) restoreScrollY else if(renderedHistoryTab==selectedTab) contentPage.scrollY else 0
+                    val drawn=runCatching { renderHistory(snapshot.records,snapshot.groups,snapshot.unified) }
+                    if(drawn.isSuccess) {
+                        renderedHistoryTab=selectedTab
+                        clearHistoryProgress()
+                        if(!finished) showHistoryProgress(HistoryLoadProgress("Loading downloaded Trakt history"))
+                        restoreScrollY=0
+                        if(y>0) contentPage.post { if(tab==selectedTab) contentPage.scrollTo(0,y) }
+                        if(tvMode && restoreContentFocus) { restoreContentFocus=false; contentPage.post { if(tab==selectedTab) TvFocus.firstContent(contentPage) } }
+                    } else {
+                        clearHistoryProgress()
+                        emptyState(dashboard,"Unable to display history","Existing viewing records are unchanged.","Retry"){refreshHistory()}
+                    }
+                }, {
+                    clearHistoryProgress()
+                    val warning=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(8),dp(12),dp(8)) }
+                    warning.addView(txt("History loading interrupted",16,ink,true))
+                    warning.addView(txt("Some history may be unavailable. Existing records have not been cleared.",13,muted))
+                    warning.addView(actionButton("Retry loading"){refreshHistory()})
+                    dashboard.addView(warning,0); historyLoadPanel=warning
+                })
+            }
+        },{ progress -> if(tab==selectedTab && !isDestroyed && !isFinishing) showHistoryProgress(progress) })
     }
 
     private fun customizeDashboard() {
