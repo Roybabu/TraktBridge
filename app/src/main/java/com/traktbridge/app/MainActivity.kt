@@ -2,7 +2,6 @@ package com.traktbridge.app
 
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.weight
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
@@ -387,11 +386,12 @@ class MainActivity : ComponentActivity() {
         settingsCategory=savedInstanceState?.getString("settings_category").orEmpty()
         librarySelection=savedInstanceState?.getString("library_selection").orEmpty()
         libraryCategory=savedInstanceState?.getString("library_category") ?: "All"
+        reviewCategory=savedInstanceState?.getString("review_category") ?: "match"
         restoreContentFocus=savedInstanceState?.getBoolean("content_focus",false) ?: false
         restoreScrollY=savedInstanceState?.getInt("content_scroll",0) ?: 0
         importSource=savedInstanceState?.getString("import_source") ?: "com.netflix.mediaclient"
         historyFilter=HistoryFilter(savedInstanceState?.getString("filter_q").orEmpty(),savedInstanceState?.getString("filter_source").orEmpty(),savedInstanceState?.getInt("filter_period") ?: 0,savedInstanceState?.getString("filter_type").orEmpty(),savedInstanceState?.getString("filter_status").orEmpty(),savedInstanceState?.getString("filter_sort") ?: "recent")
-        analyticsPeriod=savedInstanceState?.getInt("analytics_period") ?: 30
+        analyticsPeriod=(savedInstanceState?.getInt("analytics_period") ?: 30).let { if(it in setOf(0,7,30,365)) it else 30 }
         analyticsSource=savedInstanceState?.getString("analytics_source").orEmpty()
         calendarMonth=runCatching { java.time.YearMonth.parse(savedInstanceState?.getString("calendar_month").orEmpty()) }.getOrDefault(java.time.YearMonth.now())
         shell=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(bg) }
@@ -1200,7 +1200,7 @@ class MainActivity : ComponentActivity() {
         runCatching { startActivityForResult(intent,96) }.onFailure { privacyPrompt=false; finish() }
     }
     override fun onDestroy() { bridgeModel.cancel(); if (::history.isInitialized) history.close(); super.onDestroy() }
-    override fun onSaveInstanceState(outState: Bundle) { outState.putInt("content_scroll",if(::contentPage.isInitialized) (if(tab==4) settingsPage else contentPage).scrollY else 0); outState.putBoolean("content_focus",tvMode && ::nav.isInitialized && !nav.hasFocus()); outState.putString("settings_category",settingsCategory); outState.putString("library_selection",librarySelection); outState.putString("library_category",libraryCategory); outState.putInt("tab",tab); outState.putString("import_source",importSource); outState.putString("filter_q",historyFilter.query); outState.putString("filter_source",historyFilter.source); outState.putInt("filter_period",historyFilter.period); outState.putString("filter_type",historyFilter.type); outState.putString("filter_status",historyFilter.status); outState.putString("filter_sort",historyFilter.sort); outState.putInt("analytics_period",analyticsPeriod); outState.putString("analytics_source",analyticsSource); outState.putString("calendar_month",calendarMonth.toString()); super.onSaveInstanceState(outState) }
+    override fun onSaveInstanceState(outState: Bundle) { outState.putInt("content_scroll",if(::contentPage.isInitialized) (if(tab==4) settingsPage else contentPage).scrollY else 0); outState.putBoolean("content_focus",tvMode && ::nav.isInitialized && !nav.hasFocus()); outState.putString("settings_category",settingsCategory); outState.putString("library_selection",librarySelection); outState.putString("library_category",libraryCategory); outState.putString("review_category",reviewCategory); outState.putInt("tab",tab); outState.putString("import_source",importSource); outState.putString("filter_q",historyFilter.query); outState.putString("filter_source",historyFilter.source); outState.putInt("filter_period",historyFilter.period); outState.putString("filter_type",historyFilter.type); outState.putString("filter_status",historyFilter.status); outState.putString("filter_sort",historyFilter.sort); outState.putInt("analytics_period",analyticsPeriod); outState.putString("analytics_source",analyticsSource); outState.putString("calendar_month",calendarMonth.toString()); super.onSaveInstanceState(outState) }
     private fun dp(n:Int)= (n*resources.displayMetrics.density+0.5f).toInt()
     private fun rounded(color:Int,radius:Int=16)=android.graphics.drawable.GradientDrawable().apply { setColor(color); cornerRadius=dp(radius).toFloat() }
     private fun txt(value:String,size:Int=15,color:Int=ink,bold:Boolean=false)=TextView(this).apply {
@@ -1303,7 +1303,7 @@ class MainActivity : ComponentActivity() {
         val hidden=DashboardPreferences.visible(prefs.getString("dashboard_hidden","").orEmpty())
         val active=groups.filter { it.active }
         val continuing=SeriesLibrary.continueWatching(groups)
-        val recent=groups.filter { !it.active && it !in continuing.take(6) }.take(5)
+        val recent=groups.filter { !it.active && it !in continuing.take(7) }.take(5)
         if("now" !in hidden && active.isNotEmpty()) {
             section(dashboard,"Now watching")
             modernContent { ModernActionRow(violet,active.first().representative.title,"Live playback • all devices"){ nowPlaying() } }
