@@ -2409,6 +2409,7 @@ class MainActivity : ComponentActivity() {
             Toast.makeText(this,"Match could not be saved; refresh and try again",Toast.LENGTH_LONG).show()
             refreshHistory(); return
         }
+        AutoMatchSuggestions.confirmed(this,current,item)
         AutoMatchSuggestions.remove(this,current.id)
         ViewingNotifications.cancel(this,current.id)
         refreshHistory()
@@ -2634,7 +2635,7 @@ class MainActivity : ComponentActivity() {
         }
     }
     private fun confirmMatch(r: WatchRecord, item: CatalogueItem) {
-        BridgeDialogBuilder(this).setTitle("Save local match?").setMessage(item.label() + "\nTrakt ID: " + item.id + "\nThis does not mark it watched on Trakt.").setNegativeButton("Cancel",null).setPositiveButton("Save match") { _,_ -> history.match(r.id,item); AutoMatchSuggestions.remove(this,r.id); ViewingNotifications.cancel(this,r.id); refreshHistory() }.show()
+        BridgeDialogBuilder(this).setTitle("Save local match?").setMessage(item.label() + "\nTrakt ID: " + item.id + "\nThis does not mark it watched on Trakt.").setNegativeButton("Cancel",null).setPositiveButton("Save match") { _,_ -> history.match(r.id,item); AutoMatchSuggestions.confirmed(this,r,item); AutoMatchSuggestions.remove(this,r.id); ViewingNotifications.cancel(this,r.id); refreshHistory() }.show()
     }
     private fun refresh() {
         val raw=prefs.getString("sessions","[]") ?: "[]"
