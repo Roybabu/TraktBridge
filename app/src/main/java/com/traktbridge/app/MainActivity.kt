@@ -644,20 +644,32 @@ class MainActivity : ComponentActivity() {
         fun button(s:String,action:()->Unit) { settingRow(group ?: root,s,action=action) }
         when(id) {
             "account" -> {
-                root.addView(account)
-                heading("Connection")
-                button("Connect Trakt") { try { startActivity(Intent(Intent.ACTION_VIEW, auth.begin())); showAuth("Complete sign-in in your browser") } catch (_: Exception) { showAuth("Unable to open sign-in") } }
-                button("Check Trakt connection") { showAuth("Checking…"); auth.check { showAuth(it) } }
+                heading("Trakt account")
+                (group ?: root).addView(account.apply { setPadding(dp(4),dp(10),dp(4),dp(10)) })
+                settingRow(group ?: root,"Manage connection","Sign in, verify or disconnect your account") {
+                    val entries=if(auth.hasConnection()) listOf("Verify connection","Reconnect Trakt","Disconnect locally") else listOf("Connect Trakt")
+                    choose("Trakt connection",entries) { index ->
+                        when(entries[index]) {
+                            "Verify connection" -> { showAuth("Checking…"); auth.check { showAuth(it) } }
+                            "Disconnect locally" -> BridgeDialogBuilder(this).setTitle("Disconnect Trakt?").setMessage("Removes local authorization and downloaded account data, and stops daily sync. Your Trakt account and local viewing history are unchanged.").setNegativeButton("Cancel",null).setPositiveButton("Disconnect") { _,_-> RemoteRefreshSchedule.disable(this); auth.disconnect { showAuth(it) } }.show()
+                            else -> try { startActivity(Intent(Intent.ACTION_VIEW,auth.begin())); showAuth("Complete sign-in in your browser") } catch (_:Exception) { showAuth("Unable to open sign-in") }
+                        }
+                    }
+                }
                 heading("Synchronization")
-                button("Daily Trakt library sync") { configureAccountRefresh() }
-                button("Sync Trakt account now") { offerTraktSync() }
-                button("Downloaded Trakt library") { openDownloadedTrakt() }
-                heading("Account data")
-                button("Clear downloaded Trakt library") { BridgeDialogBuilder(this).setTitle("Clear downloaded Trakt library?").setMessage("Stops automatic refresh and deletes downloaded account data on this device. Local viewing records and your Trakt account are unchanged.").setNegativeButton("Cancel",null).setPositiveButton("Clear") { _,_->RemoteRefreshSchedule.disable(this); TraktLibrary.clearCache(this) }.show() }
-                button("Disconnect Trakt locally") { RemoteRefreshSchedule.disable(this); auth.disconnect { showAuth(it) } }
-                label("Uses Trakt but is not endorsed or certified by Trakt.")
-                label("Only selected apps are tracked locally. Catalogue search sends only the search text you choose to Trakt. Only explicitly approved completed watches are uploaded.")
-                button("Retry approved sync queue") { HistorySync.schedule(this); refreshHistory() }
+                settingRow(group ?: root,"Automatic sync","Refresh your downloaded Trakt library daily") { configureAccountRefresh() }
+                settingRow(group ?: root,"Sync now","Download existing watches, watchlists, ratings and more") { offerTraktSync() }
+                settingRow(group ?: root,"Trakt library","Browse downloaded data or open the online library") { openDownloadedTrakt() }
+                heading("Data & maintenance")
+                settingRow(group ?: root,"Sync maintenance","Retry approved uploads or clear downloaded account data") {
+                    choose("Sync maintenance",listOf("Retry approved uploads","Clear downloaded library")) { index ->
+                        if(index==0) { HistorySync.schedule(this); refreshHistory(); Toast.makeText(this,"Approved sync queue scheduled",Toast.LENGTH_SHORT).show() }
+                        else BridgeDialogBuilder(this).setTitle("Clear downloaded Trakt library?").setMessage("Stops automatic refresh and deletes downloaded account data on this device. Local viewing records and your Trakt account are unchanged.").setNegativeButton("Cancel",null).setPositiveButton("Clear") { _,_-> RemoteRefreshSchedule.disable(this); TraktLibrary.clearCache(this) }.show()
+                    }
+                }
+                settingRow(group ?: root,"About Trakt sync","Data usage and upload permissions") {
+                    BridgeDialogBuilder(this).setTitle("About Trakt sync").setMessage("Uses Trakt but is not endorsed or certified by Trakt. Only selected apps are tracked locally. Catalogue search sends only the search text you choose to Trakt. Only explicitly approved completed watches are uploaded. Downloaded account history is separate from measured local viewing.").setPositiveButton("Close",null).show()
+                }
             }
             "tracking" -> {
                 heading("Tracking preferences")
@@ -943,20 +955,47 @@ class MainActivity : ComponentActivity() {
                 }
             }
             "advanced" -> {
-                heading("Updates & support")
-                button("Check for app updates") { checkUpdates() }
-                button("Beta feedback and diagnostics") { betaFeedback() }
-                button("Companion status") { val summary=CompanionStatus.summarize(history.records(0)); BridgeDialogBuilder(this).setTitle("Companion status").setMessage("Active sessions: "+summary.active+"\nAwaiting review: "+summary.pending+"\nSampled time: "+durationText(summary.watchedMs)).setPositiveButton("Close",null).show() }
-                heading("Compatibility & diagnostics")
-                button("Playback compatibility profiles") { BridgeDialogBuilder(this).setTitle("Playback profiles").setMessage(PlayerRules.apps.entries.joinToString("\n") { (name,pkg) -> name+": "+DetectionProfiles.forPackage(pkg).label }).setPositiveButton("Close",null).show() }
-                button("Check history database integrity") { checkHistoryIntegrity() }
-                button("Encryption migration readiness") { encryptionReadiness() }
-                button("Tracking health and review center") { trackingHealth() }
-                button("Live recognition inspector") { liveInspector() }
-                button("Open diagnostic recorder") { startActivity(Intent(this,DebugActivity::class.java)) }
-                button("Refresh diagnostics") { refresh() }
-                button("Clear diagnostic data") { prefs.edit().remove("sessions").remove("last_nonempty_sessions").remove("sample_error").apply(); refresh() }
-                root.addView(output)
+                fun supportRow(title:String,detail:String,action:()->Unit) { settingRow(group ?: root,title,detail,action) }
+                fun supportMenu(title:String,entries:List<Triple<String,String,()->Unit>>) {
+                    val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(4),dp(12),dp(12)) }
+                    val card=panel(body).apply { setPadding(dp(12),dp(4),dp(12),dp(4)) }
+                    val dialog=BridgeDialogBuilder(this).setTitle(title).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).create()
+                    entries.forEach { (name,detail,action) -> settingRow(card,name,detail) { dialog.dismiss(); action() } }
+                    dialog.show()
+                }
+                heading("App & support")
+                supportRow("App updates","Check for a newer version") { checkUpdates() }
+                supportRow("Send feedback","Report a problem or suggest an improvement") { betaFeedback() }
+                heading("Tracking & compatibility")
+                supportRow("Tracking health","Permissions, sampling, battery and review status") { trackingHealth() }
+                supportRow("Companion status","Active sessions, pending reviews and measured viewing") {
+                    val summary=CompanionStatus.summarize(history.records(0))
+                    BridgeDialogBuilder(this).setTitle("Companion status").setMessage("Active sessions: "+summary.active+"\nAwaiting review: "+summary.pending+"\nSampled time: "+durationText(summary.watchedMs)).setPositiveButton("Close",null).show()
+                }
+                supportRow("Playback compatibility","View detection profiles for supported apps") {
+                    BridgeDialogBuilder(this).setTitle("Playback profiles").setMessage(PlayerRules.apps.entries.joinToString("\n") { (name,pkg) -> name+": "+DetectionProfiles.forPackage(pkg).label }).setPositiveButton("Close",null).show()
+                }
+                heading("Advanced tools")
+                supportRow("Database & encryption","Integrity checks and encryption migration readiness") {
+                    supportMenu("Database & encryption",listOf(
+                        Triple("History database integrity","Check stored viewing records") { checkHistoryIntegrity() },
+                        Triple("Encryption readiness","Check migration requirements") { encryptionReadiness() }
+                    ))
+                }
+                supportRow("Diagnostics","Live recognition, recording, technical status and cleanup") {
+                    supportMenu("Diagnostics",listOf(
+                        Triple("Live recognition","Inspect current playback detection") { liveInspector() },
+                        Triple("Diagnostic recorder","Open the diagnostic recording tool") { startActivity(Intent(this,DebugActivity::class.java)) },
+                        Triple("Technical status","Refresh and view detailed diagnostic information") {
+                            refresh()
+                            val detail=TextView(this).apply { text=output.text; setTextIsSelectable(true); setPadding(dp(16),dp(12),dp(16),dp(12)); setTextColor(ink) }
+                            BridgeDialogBuilder(this).setTitle("Technical status").setView(ScrollView(this).apply { addView(detail) }).setPositiveButton("Close",null).show()
+                        },
+                        Triple("Clear diagnostic data","Remove stored session snapshots and last error") {
+                            BridgeDialogBuilder(this).setTitle("Clear diagnostic data?").setMessage("Removes diagnostic session snapshots and the last sampling error. Saved viewing history is unchanged.").setNegativeButton("Cancel",null).setPositiveButton("Clear") { _,_-> prefs.edit().remove("sessions").remove("last_nonempty_sessions").remove("sample_error").apply(); refresh() }.show()
+                        }
+                    ))
+                }
             }
         }
     }
