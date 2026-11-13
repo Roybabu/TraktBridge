@@ -30,6 +30,7 @@ class PlaybackListener : NotificationListenerService() {
     private lateinit var history: WatchHistory
     private val prefs by lazy { getSharedPreferences("tracker", MODE_PRIVATE) }
     private var lastTick=0L
+    private var lastSuggestionCheck= -15000L
     @Volatile private var connected=false
     private var sessionCallbackRegistered=false
     private val sessionCallback=MediaSessionManager.OnActiveSessionsChangedListener { if(connected) wake() }
@@ -51,7 +52,7 @@ class PlaybackListener : NotificationListenerService() {
     private val poll = object : Runnable {
         override fun run() {
             if(!connected) return
-            try { capture(); notifyPending(); consecutiveFailures=0 } catch (e: Exception) { consecutiveFailures=(consecutiveFailures+1).coerceAtMost(3); DebugTrace.failure("poll",e); prefs.edit().putString("sample_error",e.javaClass.simpleName).apply(); runCatching { history.finishAll() } } finally { if(connected) handler.postDelayed(this, ResourcePolicy.pollDelay(prefs.getBoolean("enabled",false),prefs.getInt("tracked_session_count",0)>0,consecutiveFailures,getSystemService(android.os.PowerManager::class.java).isPowerSaveMode,android.os.Build.VERSION.SDK_INT>=28 && getSystemService(android.app.ActivityManager::class.java).isBackgroundRestricted)) }
+            try { capture(); requestCatalogueSuggestions(); notifyPending(); consecutiveFailures=0 } catch (e: Exception) { consecutiveFailures=(consecutiveFailures+1).coerceAtMost(3); DebugTrace.failure("poll",e); prefs.edit().putString("sample_error",e.javaClass.simpleName).apply(); runCatching { history.finishAll() } } finally { if(connected) handler.postDelayed(this, ResourcePolicy.pollDelay(prefs.getBoolean("enabled",false),prefs.getInt("tracked_session_count",0)>0,consecutiveFailures,getSystemService(android.os.PowerManager::class.java).isPowerSaveMode,android.os.Build.VERSION.SDK_INT>=28 && getSystemService(android.app.ActivityManager::class.java).isBackgroundRestricted)) }
         }
     }
     override fun onListenerConnected() { super.onListenerConnected(); connected=true; instance=this; if(!sessionCallbackRegistered) runCatching { getSystemService(MediaSessionManager::class.java).addOnActiveSessionsChangedListener(sessionCallback,ComponentName(this,PlaybackListener::class.java),handler); sessionCallbackRegistered=true }.onFailure { DebugTrace.failure("session-callback",it) }; DeviceControl.dispatch={ session,action -> runCatching { remoteCommand(session,action) }.getOrDefault(false) }; DebugTrace.event("listener","connected"); prefs.edit().putBoolean("listener_connected",true).apply(); handler.removeCallbacks(poll); handler.post(poll) }
@@ -62,6 +63,13 @@ class PlaybackListener : NotificationListenerService() {
     }
     override fun onListenerDisconnected() { connected=false; unregisterSessionCallback(); DeviceControl.dispatch=null; DebugTrace.event("listener","disconnected"); handler.removeCallbacks(poll); prefs.edit().putBoolean("listener_connected",false).apply(); TrackingRecovery.clearObservation(this); runCatching { history.finishAll() }; sessionIds.clear(); youtubeIdentities.clear(); YouTubePlayback.clear(); super.onListenerDisconnected() }
     override fun onDestroy() { connected=false; unregisterSessionCallback(); DeviceControl.dispatch=null; DebugTrace.event("listener","destroyed"); handler.removeCallbacks(poll); prefs.edit().putBoolean("listener_connected",false).apply(); runCatching { history.finishAll() }; runCatching { history.close() }; super.onDestroy() }
+    private fun requestCatalogueSuggestions() {
+        if(!prefs.getBoolean("enabled",false) || prefs.getBoolean("privacy_lock",false)) return
+        val now=SystemClock.elapsedRealtime()
+        if(now-lastSuggestionCheck<15000) return
+        lastSuggestionCheck=now
+        runCatching { AutoMatchSuggestions.enqueue(this,history.records(200)) }.onFailure { DebugTrace.failure("catalogue-suggestion",it) }
+    }
     private fun notifyPending() {
         if (!getSharedPreferences("tracker",MODE_PRIVATE).getBoolean("enabled",false) || !ViewingNotifications.enabled(this)) return
         for (record in history.pendingNotifications().take(3)) {
