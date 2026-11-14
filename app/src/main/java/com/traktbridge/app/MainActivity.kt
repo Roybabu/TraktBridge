@@ -1248,7 +1248,45 @@ class MainActivity : ComponentActivity() {
         showTab(4)
         BridgeDialogBuilder(this).setTitle("Start playback tracking?").setMessage("Track selected video apps in the background.").setNegativeButton("Cancel",null).setPositiveButton("Start") { _,_->prefs.edit().putBoolean("enabled",true).apply(); startTracking(); recreate() }.show()
     }
+    private var localNetworkRequestPending=false
+    private val localNetworkPermission=registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        localNetworkRequestPending=false
+        if(!granted) {
+            prefs.edit().putBoolean("device_sharing",false).apply()
+            if(android.os.Build.VERSION.SDK_INT>=37 && !shouldShowRequestPermissionRationale("android.permission.ACCESS_LOCAL_NETWORK")) {
+                BridgeDialogBuilder(this).setTitle("Local network access")
+                    .setMessage("Device sharing needs local network access. You can allow it in app settings and enable sharing again.")
+                    .setNegativeButton("Close",null).setPositiveButton("App settings") { _,_->
+                        startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,android.net.Uri.fromParts("package",packageName,null)))
+                    }.show()
+            } else Toast.makeText(this,"Device sharing is off. Local tracking remains available.",Toast.LENGTH_LONG).show()
+        }
+        if(prefs.getBoolean("enabled",false)) startTracking()
+    }
     private fun startTracking() {
+        if(android.os.Build.VERSION.SDK_INT>=37 && prefs.getBoolean("device_sharing",false) &&
+            checkSelfPermission("android.permission.ACCESS_LOCAL_NETWORK")!=android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            if(localNetworkRequestPending) return
+            localNetworkRequestPending=true
+            val permission="android.permission.ACCESS_LOCAL_NETWORK"
+            if(shouldShowRequestPermissionRationale(permission)) {
+                BridgeDialogBuilder(this).setTitle("Allow device sharing?")
+                    .setMessage("Local network access lets TraktBridge find and connect to your paired devices.")
+                    .setPositiveButton("Continue") { _,_->localNetworkPermission.launch(permission) }
+                    .setNegativeButton("Not now") { _,_->
+                        localNetworkRequestPending=false
+                        prefs.edit().putBoolean("device_sharing",false).apply()
+                        startTracking()
+                    }.setOnCancelListener {
+                        localNetworkRequestPending=false
+                        prefs.edit().putBoolean("device_sharing",false).apply()
+                        startTracking()
+                    }.show()
+            } else localNetworkPermission.launch(permission)
+            return
+        }
         runCatching {
             startForegroundService(Intent(this,TrackingService::class.java))
             TrackingRecovery.request(this,"tracking started")
