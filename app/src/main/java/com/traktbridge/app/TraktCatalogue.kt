@@ -57,6 +57,30 @@ object TraktCatalogue {
         }.distinctBy { it.id }
     }
     fun suggest(record:WatchRecord,confirmedShows:List<CatalogueItem> = emptyList(),done:(Result<List<RankedMatch>>)->Unit)=request(done) {
+        // Hotstar often supplies only "S1 E1 Episode name", not the parent show.
+        // Search episode titles directly; never treat an episode name as a show name.
+        val hotstarEpisode=if(record.source==HotstarPlayback.PACKAGE)
+            Regex("(?i)^\\s*S(\\d{1,3})[ ._-]*E(\\d{1,4})\\b\\s*[:.\\-–—]?\\s*(.+)$").matchEntire(record.title) else null
+        if(hotstarEpisode!=null) {
+            val number=RecognitionEngine.episodeOf(record.title+" "+record.subtitle) ?: return@request emptyList()
+            val name=hotstarEpisode.groupValues[3].trim()
+            if(name.length !in 2..160 || record.duration<120000L) return@request emptyList()
+            val encoded=URLEncoder.encode(name,"UTF-8")
+            return@request objects(get("/search/episode?query="+encoded+"&fields=title&limit=100&extended=full")).mapNotNull { row ->
+                val episode=row.optJSONObject("episode") ?: return@mapNotNull null
+                val show=row.optJSONObject("show") ?: return@mapNotNull null
+                val episodeId=id(episode); val showId=id(show)
+                val episodeTitle=episode.optString("title"); val showTitle=show.optString("title")
+                val runtime=episode.optInt("runtime")
+                if(episodeId<=0 || showId<=0 || showTitle.isBlank() ||
+                    episode.optInt("season",-1)!=number.season || episode.optInt("number",-1)!=number.episode ||
+                    RecognitionEngine.normalized(name)!=RecognitionEngine.normalized(episodeTitle)) return@mapNotNull null
+                val expected=runtime*60000L
+                if(runtime>0 && kotlin.math.abs(record.duration-expected)>maxOf(180000L,expected/8)) return@mapNotNull null
+                RankedMatch(CatalogueItem("episode",episodeId,showTitle+" — "+episodeTitle,show.optInt("year"),showId,number.season,number.episode,runtime),
+                    if(runtime>0) 95 else 85,"Episode title and number agree"+if(runtime>0) " • Runtime agrees" else " • Runtime unavailable")
+            }.distinctBy { it.item.id }.sortedByDescending { it.score }.take(3)
+        }
         val query=AutoMatchPolicy.query(record.title,record.subtitle) ?: return@request emptyList()
         val types=when(query.kind) { AutoMatchPolicy.Kind.EPISODE->listOf("show"); AutoMatchPolicy.Kind.MOVIE->listOf("movie"); else->listOf("movie","show") }
         val items=mutableListOf<CatalogueItem>()
