@@ -15,6 +15,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
 private fun actionDescription(label:String):String=when {
+    label=="Customize dashboard"->"Choose sections, order and startup preferences"
+    label=="Refresh library"->"Reload saved viewing information"
+    label=="Viewing planner"->"Find something that fits your available time"
     label.startsWith("Title details")->"Information, rating and related titles"
     label.contains("duplicate",true)->"Review possible matches"
     label.contains("More title",true)->"Status, favorites, notes and collections"
@@ -44,7 +47,7 @@ fun ModernDetailAction(label:String,onClick:()->Unit) {
 }
 
 @Composable
-private fun DetailHeader(title:String,onClose:()->Unit) {
+internal fun DetailHeader(title:String,onClose:()->Unit) {
     Row(Modifier.fillMaxWidth().padding(horizontal=8.dp,vertical=4.dp),verticalAlignment=Alignment.CenterVertically) {
         TextButton(onClick=onClose,modifier=Modifier.size(48.dp),contentPadding=PaddingValues(0.dp)) { Text("‹",style=MaterialTheme.typography.headlineMedium) }
         Text(title,Modifier.weight(1f),style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.SemiBold,color=MaterialTheme.colorScheme.onBackground)
@@ -146,6 +149,29 @@ fun ModernSeriesDetails(accent:Int,series:SeriesGroup,onProgress:()->Unit,onCata
                     items(season.episodes) { episode ->
                         val r=episode.representative
                         ModernDetailAction("E"+r.episode+" · "+r.matchLabel.substringAfter(" — ",r.title)+" · "+when { episode.confirmed->"Watched";episode.queued->"Awaiting sync";else->"In progress" }) { onEpisode(episode) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ModernContinueEpisodes(accent:Int,title:String,episodes:List<PosterLibraryItem>,onSelect:(Int)->Unit,onClose:()->Unit) {
+    ModernToolPage(accent,title,onClose) {
+        LazyColumn(Modifier.fillMaxSize(),contentPadding=PaddingValues(16.dp),verticalArrangement=Arrangement.spacedBy(10.dp)) {
+            item { Text("Episodes in progress",style=MaterialTheme.typography.titleLarge) }
+            items(episodes.size) { index ->
+                val episode=episodes[index]
+                Surface(shape=RoundedCornerShape(12.dp),color=MaterialTheme.colorScheme.surface) {
+                    Row(Modifier.fillMaxWidth().clickable { onSelect(index) }.padding(12.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+                        LibraryPoster(episode,Modifier.width(56.dp).aspectRatio(2f/3f).clip(RoundedCornerShape(8.dp)))
+                        Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(6.dp)) {
+                            Text(episode.subtitle,style=MaterialTheme.typography.titleMedium)
+                            Text(episode.status,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                            episode.progress?.let { value -> LinearProgressIndicator(progress={value.coerceIn(0f,1f)},modifier=Modifier.fillMaxWidth()) }
+                        }
+                        Text("›",color=MaterialTheme.colorScheme.primary)
                     }
                 }
             }

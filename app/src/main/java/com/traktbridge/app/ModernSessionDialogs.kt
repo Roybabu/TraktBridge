@@ -91,3 +91,26 @@ fun ModernActionDialog(accent:Int,title:String,detail:String,labels:List<String>
         }
     }
 }
+
+@Composable
+fun ModernWatchApproval(accent:Int,item:PosterLibraryItem,rewatch:Boolean,usage:Boolean,verified:Boolean,onApprove:()->Unit,onClose:()->Unit) {
+    BridgeTheme(accent) {
+        Surface(color=MaterialTheme.colorScheme.surface,shape=RoundedCornerShape(topStart=24.dp,topEnd=24.dp)) {
+            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(20.dp),verticalArrangement=Arrangement.spacedBy(14.dp)) {
+                Box(Modifier.align(Alignment.CenterHorizontally).width(36.dp).height(4.dp).clip(RoundedCornerShape(4.dp)).background(MaterialTheme.colorScheme.onSurfaceVariant))
+                Row(horizontalArrangement=Arrangement.spacedBy(12.dp),verticalAlignment=Alignment.CenterVertically) {
+                    LibraryPoster(item,Modifier.width(72.dp).aspectRatio(2f/3f).clip(RoundedCornerShape(8.dp)))
+                    Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(6.dp)) {
+                        Text(if(rewatch) "Record completed rewatch?" else "Mark as watched?",style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.SemiBold)
+                        Text(item.title,color=MaterialTheme.colorScheme.onSurface)
+                        Text(if(verified) "Trakt connected" else "Account will be verified",color=MaterialTheme.colorScheme.primary,style=MaterialTheme.typography.bodySmall)
+                    }
+                }
+                Text(if(rewatch) "Add another completed watch. Your original viewing history stays unchanged." else "Add a completed watch to your Trakt history. Only confirm if you finished watching.",color=MaterialTheme.colorScheme.onSurfaceVariant)
+                if(usage) Text("This record uses the app exit time, not a verified playback end.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                Button(onClick=onApprove,modifier=Modifier.fillMaxWidth()) { Text(if(rewatch) "Record rewatch & sync" else "Mark watched & sync") }
+                TextButton(onClick=onClose,modifier=Modifier.align(Alignment.CenterHorizontally)) { Text("Cancel") }
+            }
+        }
+    }
+}

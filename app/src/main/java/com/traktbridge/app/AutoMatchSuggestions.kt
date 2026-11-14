@@ -77,6 +77,10 @@ object AutoMatchSuggestions {
         if(running.isNotEmpty()) return
         val app=context.applicationContext
         val record=records.firstOrNull { eligible(it) && read(app,it).status=="waiting" } ?: return
+        val learned=runCatching { WatchHistory(app).use { it.learned(record) } }.getOrNull()
+        if(learned!=null && candidateKey(learned) !in rejected(app,record)) {
+            runCatching { WatchHistory(app).use { it.match(record.id,learned,false) } }; return
+        }
         val k=key(record)
         running.add(k)
         val confirmed=confirmedSeries(record,records)

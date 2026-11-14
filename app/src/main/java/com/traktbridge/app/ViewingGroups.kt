@@ -16,11 +16,15 @@ data class ViewingTitle(val key:String,val sessions:List<WatchRecord>) {
     val rewinds=sessions.sumOf { it.rewinds }
     val possibleRewatchIds=sessions.sortedBy { it.started }.zipWithNext().filter { (a,b) -> SessionContinuity.possibleRewatch(a,b) }.map { it.second.id }.toSet()
     val confirmed=sessions.any { it.status=="synced" }
+    val completedWatches=sessions.filter { it.status=="synced" }.sortedBy { it.ended }
+    val lastCompleted=completedWatches.lastOrNull()?.ended ?: 0L
+    val rewatchSessions=sessions.filter { !UnifiedTraktHistory.remote(it) && it.status in setOf("active","pending","reviewed") && it.started>lastCompleted && lastCompleted>0 && it.watched>0 }
+    val rewatching=rewatchSessions.isNotEmpty()
     val active=sessions.any { it.status=="active" }
     val queued=sessions.any { it.status in setOf("queued","uncertain","blocked") }
     val pending=sessions.any { it.status in setOf("pending","reviewed") }
     // Do not add playback positions together: resuming/rewinding/replaying is not progress.
-    val positionSession=sessions.filter { PlaybackPosition.valid(it.position,it.duration) }.maxByOrNull { it.ended }
+    val positionSession=(if(rewatching) rewatchSessions else sessions).filter { PlaybackPosition.valid(it.position,it.duration) }.maxByOrNull { it.ended }
     val catalogueRuntimeMs=sessions.maxOf { it.catalogueRuntime }
     val durationMs=positionSession?.duration ?: catalogueRuntimeMs
     val positionMs=positionSession?.position?.coerceIn(0,durationMs) ?: -1L
