@@ -1231,14 +1231,27 @@ class MainActivity : ComponentActivity() {
         val nm=getSystemService(android.app.NotificationManager::class.java)
         val component=android.content.ComponentName(this,PlaybackListener::class.java)
         val access=if(android.os.Build.VERSION.SDK_INT>=27) nm.isNotificationListenerAccessGranted(component) else Settings.Secure.getString(contentResolver,"enabled_notification_listeners").orEmpty().split(":").any { android.content.ComponentName.unflattenFromString(it)==component }
-        fun step(title:String,detail:String,action:()->Unit) {
-            box.addView(txt(title,17,ink,true)); box.addView(txt(detail,13,muted)); box.addView(actionButton("Open "+title,action))
+        fun step(title:String,detail:String,buttonLabel:String="Open "+title,action:()->Unit) {
+            box.addView(txt(title,17,ink,true)); box.addView(txt(detail,13,muted)); box.addView(actionButton(buttonLabel,action))
         }
         for(check in PermissionDiagnostics.read(this)) box.addView(txt((if(check.ready) "Ready" else if(check.required) "Action needed" else "Optional / unavailable")+" • "+check.name+"\n"+check.detail,14,if(check.ready) ink else muted))
         step("Notification access",if(access) "Granted" else "Required for media-session detection.") { runCatching { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }.onFailure { Toast.makeText(this,"This device does not expose the notification access settings screen.",Toast.LENGTH_LONG).show() } }
         step("Video app selection",(prefs.getStringSet("allowed",emptySet())?.size ?: 0).toString()+" selected. Choose only apps you want tracked.") { chooseInstalledApps() }
         step("Battery settings",BatteryCompatibility.guidance(android.os.Build.MANUFACTURER)+" Optional; no setting is changed automatically.") { runCatching { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) } }
-        step("Start tracking","Enable background sampling after selecting apps and granting access.") { if(TrackingRecovery.listenerGranted(this) && !prefs.getStringSet("allowed",emptySet()).isNullOrEmpty()) { prefs.edit().putBoolean("enabled",true).apply(); startTracking(); if(settingsCategory=="tracking") refreshSettingsState("tracking") } else Toast.makeText(this,"Grant notification access and choose playback apps first.",Toast.LENGTH_LONG).show() }
+        val trackingFeedback=txt(TrackingRecovery.status(this),14,muted).apply { accessibilityLiveRegion=android.view.View.ACCESSIBILITY_LIVE_REGION_POLITE }
+        step("Start tracking","Enable background sampling after selecting apps and granting access.","Start tracking") {
+            if(TrackingRecovery.listenerGranted(this) && !prefs.getStringSet("allowed",emptySet()).isNullOrEmpty()) {
+                prefs.edit().putBoolean("enabled",true).apply()
+                startTracking()
+                // Service startup and permission prompts are asynchronous; acknowledge the request without claiming success.
+                trackingFeedback.text="Tracking start requested. Check tracking status in Settings."
+                if(settingsCategory=="tracking") refreshSettingsState("tracking")
+            } else {
+                trackingFeedback.text="Grant notification access and choose playback apps first."
+                Toast.makeText(this,trackingFeedback.text,Toast.LENGTH_LONG).show()
+            }
+        }
+        box.addView(trackingFeedback)
         box.addView(txt("YouTube player identification requires separate Accessibility consent in Settings when the media session does not identify the player type. Trakt sign-in is not required for local tracking.",14,muted))
         BridgeDialogBuilder(this).setTitle("Set up TraktBridge").setView(ScrollView(this).apply { addView(box) }).setNegativeButton("Later",null).setPositiveButton("Done") { _,_->showTab(4) }.show()
     }
