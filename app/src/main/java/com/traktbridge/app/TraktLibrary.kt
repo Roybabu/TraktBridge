@@ -14,7 +14,7 @@ data class RemoteItem(val type:String,val id:Long,val title:String,val showId:Lo
 data class RemotePage(val items:List<RemoteItem>,val page:Int,val pages:Int?,val account:String)
 data class RemoteProgress(val aired:Int,val completed:Int,val next:String)
 object RemoteRules {
-    fun plural(type:String):String=when(type) { "movie"->"movies"; "show"->"shows"; "episode"->"episodes"; else->error("Unsupported type") }
+    fun plural(type:String):String=when(type) { "movie"->"movies"; "show"->"shows"; "episode"->"episodes"; "season"->"seasons"; else->error("Unsupported type") }
     fun identity(type:String,id:Long):String { require(id>0); return plural(type)+":"+id }
     fun rating(value:Int):Int { require(value in 1..10); return value }
     fun historyKey(account:String,eventId:Long):String { require(account.isNotBlank() && eventId>0); return account+":"+eventId }
@@ -59,14 +59,14 @@ object TraktLibrary {
     }
     private fun id(o:JSONObject?)=o?.optJSONObject("ids")?.optLong("trakt",0) ?: 0
     private fun parse(o:JSONObject):RemoteItem? {
-        val type=o.optString("type")
-        if(type !in setOf("movie","show","episode")) return null
+        val type=o.optString("type").ifBlank { listOf("episode","season","movie","show").firstOrNull { o.has(it) }.orEmpty() }
+        if(type !in setOf("movie","show","season","episode")) return null
         val item=o.optJSONObject(type) ?: return null
         val itemId=id(item); if(itemId<=0) return null
         val show=o.optJSONObject("show")
-        val name=if(type=="episode") show?.optString("title").orEmpty()+" — "+item.optString("title")+" • S"+item.optInt("season")+" E"+item.optInt("number") else item.optString("title")
+        val name=if(type=="episode") show?.optString("title").orEmpty()+" — "+item.optString("title")+" • S"+item.optInt("season")+" E"+item.optInt("number") else if(type=="season") show?.optString("title").orEmpty()+" • Season "+item.optInt("number") else item.optString("title")
         if(name.isBlank()) return null
-        return RemoteItem(type,itemId,name,id(show),item.optInt("season",-1),item.optInt("number",-1),o.optString("watched_at"),o.optLong("id",0),o.optInt("rating",0),o.optDouble("progress",-1.0))
+        return RemoteItem(type,itemId,name,id(show),if(type=="season") item.optInt("number",-1) else item.optInt("season",-1),if(type=="episode") item.optInt("number",-1) else -1,o.optString("watched_at"),o.optLong("id",0),o.optInt("rating",0),o.optDouble("progress",-1.0))
     }
     fun page(context:Context,kind:String,page:Int,done:(Result<RemotePage>)->Unit)=task(context,done) { token,account ->
         require(page in 1..10000)
@@ -114,6 +114,71 @@ object TraktLibrary {
             if(runCatching { Instant.parse(airs) }.isFailure) null else UpcomingEpisode(show.optString("title"),ep.optString("title"),ep.optInt("season"),ep.optInt("number"),airs)
         }.sortedBy { it.airs }
     }
+    private val downloadLock=Any()
+    fun syncAccount(context:Context,done:(Result<TraktAccountSummary>)->Unit) {
+        val app=context.applicationContext
+        worker.execute {
+            val result=runCatching { downloadAccount(app,null,false) }
+            main.post { done(result) }
+        }
+    }
+    fun downloadAccount(context:Context,expectedAccount:String?,automatic:Boolean):TraktAccountSummary=synchronized(downloadLock) {
+        val app=context.applicationContext
+        val auth=TraktAuth(app)
+        val prefs=app.getSharedPreferences("tracker",Context.MODE_PRIVATE)
+        val (account,generation,activity)=auth.authorized { token ->
+            val id=account(token)
+            require(expectedAccount==null || expectedAccount==id) { "Connected account changed" }
+            require(!automatic || prefs.getString("auto_refresh_account","")==id) { "Automatic refresh disabled" }
+            val gen=RemoteAccountCache.activate(app,id)
+            val a=runCatching { JSONObject(request(token,"/sync/last_activities").text) }.getOrDefault(JSONObject())
+            Triple(id,gen,a)
+        }
+        fun valid()=RemoteAccountCache.current(app,account,generation) && (!automatic || prefs.getString("auto_refresh_account","")==account)
+        val results=mutableListOf<TraktSyncResult>()
+        for(kind in TraktData.entries) {
+            if(!valid()) break
+            val marker=kind.marker(activity)
+            val prior=RemoteAccountCache.status(app,account,kind)
+            if(automatic && prior!=null && TraktDownloadRules.canSkip(prior.marker,marker,prior.complete)) {
+                results.add(TraktSyncResult(kind,prior.count,true,unchanged=true)); continue
+            }
+            val rows=linkedMapOf<String,RemoteItem>()
+            var complete=false
+            var skipped=0
+            try {
+                for(page in 1..TraktDownloadRules.MAX_PAGES) {
+                    val response=auth.authorized { token ->
+                        check(valid()) { "Account changed or refresh cancelled" }
+                        request(token,kind.endpoint+"?page="+page+"&limit="+TraktDownloadRules.PAGE_SIZE)
+                    }
+                    val a=JSONArray(response.text)
+                    for(i in 0 until a.length()) {
+                        val item=a.optJSONObject(i)?.let { parse(it) }
+                        val key=item?.let { TraktDownloadRules.key(kind,it) }
+                        if(item==null || key==null) skipped++ else rows[key]=item
+                    }
+                    if(TraktDownloadRules.lastPage(page,response.pages,a.length())) { complete=true; break }
+                }
+                check(valid()) { "Account changed or refresh cancelled" }
+                complete=complete && skipped==0
+                val saved=RemoteAccountCache.publish(app,account,generation,kind,rows,complete,marker)
+                val error=when {
+                    !saved->"Previous complete snapshot retained or refresh cancelled"
+                    skipped>0->"$skipped unsupported or invalid rows"
+                    !complete->"Page safety limit reached; partial download"
+                    else->""
+                }
+                results.add(TraktSyncResult(kind,if(saved) rows.size else prior?.count ?: 0,complete && saved,error))
+            } catch(e:Exception) {
+                val message=e.message.orEmpty()
+                val reason=if(message.startsWith("Trakt HTTP ")) message else "Download interrupted; previous cache retained"
+                results.add(TraktSyncResult(kind,prior?.count ?: 0,false,reason))
+                if(message in setOf("Trakt HTTP 401","Trakt HTTP 403","Trakt HTTP 429") || !valid()) break
+            }
+        }
+        TraktAccountSummary(results)
+    }
     fun refreshHistory(context:Context,maxPages:Int,done:(Result<Int>)->Unit)=task(context,done) { token,account ->
         require(maxPages in 1..20)
         var saved=0
@@ -152,9 +217,10 @@ object TraktLibrary {
     }
     fun cachedHistory(context:Context,account:String):List<RemoteItem> {
         val prefix=AccountScope.key(account)+":"
-        return context.getSharedPreferences("trakt_remote_history_encrypted",Context.MODE_PRIVATE).all.filterKeys { it.startsWith(prefix) }.entries.mapNotNull { (key,value) ->
+        val legacy=context.getSharedPreferences("trakt_remote_history_encrypted",Context.MODE_PRIVATE).all.filterKeys { it.startsWith(prefix) }.entries.mapNotNull { (key,value) ->
             runCatching { val o=JSONObject(PrivateHistoryCache.open(value as String,key)); RemoteItem(o.getString("type"),o.getLong("id"),o.getString("title"),o.getLong("show"),o.getInt("season"),o.getInt("episode"),o.getString("watched"),o.getLong("event")) }.getOrNull()
-        }.sortedByDescending { it.watchedAt }
+        }
+        return (RemoteAccountCache.rows(context,account,TraktData.HISTORY)+legacy).distinctBy { it.eventId }.sortedByDescending { it.watchedAt }
     }
-    fun clearCache(context:Context) { context.getSharedPreferences("trakt_remote_history_encrypted",Context.MODE_PRIVATE).edit().clear().apply(); context.getSharedPreferences("trakt_remote_history",Context.MODE_PRIVATE).edit().clear().apply() }
+    fun clearCache(context:Context) { RemoteAccountCache.clear(context); context.getSharedPreferences("trakt_remote_history_encrypted",Context.MODE_PRIVATE).edit().clear().apply(); context.getSharedPreferences("trakt_remote_history",Context.MODE_PRIVATE).edit().clear().apply() }
 }

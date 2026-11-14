@@ -19,7 +19,7 @@ class RemoteRefreshWorker(context:Context,params:WorkerParameters):Worker(contex
         val prefs=applicationContext.getSharedPreferences("tracker",Context.MODE_PRIVATE)
         val account=prefs.getString("auto_refresh_account","").orEmpty()
         if(account.isBlank()) return Result.success()
-        return try { TraktLibrary.refreshRecentForAccount(applicationContext,account); Result.success() }
+        return try { val summary=TraktLibrary.downloadAccount(applicationContext,account,true); if(summary.complete) Result.success() else if(runAttemptCount<3) Result.retry() else Result.failure() }
         catch(_:Exception) { if(runAttemptCount<3) Result.retry() else Result.failure() }
     }
 }

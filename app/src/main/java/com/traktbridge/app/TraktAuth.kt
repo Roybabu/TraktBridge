@@ -28,6 +28,7 @@ class TraktAuth(context: Context) {
         private val executor = Executors.newSingleThreadExecutor()
         private val lock = Any()
     }
+    private val app = context.applicationContext
     private val prefs = context.getSharedPreferences("oauth", Context.MODE_PRIVATE)
     private val main = Handler(Looper.getMainLooper())
     private fun b64(bytes: ByteArray) = Base64.encodeToString(bytes, Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
@@ -52,6 +53,7 @@ class TraktAuth(context: Context) {
         c.init(Cipher.DECRYPT_MODE, secret(), GCMParameterSpec(128, Base64.decode(parts[0], Base64.URL_SAFE)))
         return JSONObject(String(c.doFinal(Base64.decode(parts[1], Base64.URL_SAFE)), Charsets.UTF_8))
     }
+    fun hasConnection():Boolean = prefs.contains("tokens")
     fun status(): String = if (prefs.contains("tokens")) "Trakt authorization saved — check connection" else "Trakt not connected"
     fun begin(): Uri = synchronized(lock) {
         val verifier = random()
@@ -87,6 +89,8 @@ class TraktAuth(context: Context) {
             if(prefs.contains("pending")) return@task "A newer sign-in is pending. Complete that sign-in instead."
             val response = token(mapOf("grant_type" to "authorization_code", "code" to code, "client_id" to CLIENT_ID, "redirect_uri" to REDIRECT, "code_verifier" to pending.getString("verifier")))
             saveTokens(response)
+            RemoteRefreshSchedule.disable(app)
+            TraktLibrary.clearCache(app)
         }
         "Trakt connected. Use Check Trakt connection to verify."
     }
@@ -126,7 +130,7 @@ class TraktAuth(context: Context) {
         } finally { c.disconnect() }
     }
     fun disconnect(done: (String) -> Unit) = task(done) {
-        synchronized(lock) { prefs.edit().clear().commit() }
+        synchronized(lock) { prefs.edit().clear().commit(); RemoteRefreshSchedule.disable(app); TraktLibrary.clearCache(app) }
         "Trakt disconnected locally. Revoke access in Trakt settings if desired."
     }
     private class OAuthFailure(val status: Int, val invalidGrant: Boolean): Exception()
