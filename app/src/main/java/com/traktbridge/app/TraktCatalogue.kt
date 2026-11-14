@@ -56,6 +56,39 @@ object TraktCatalogue {
             if (id <= 0 || title.isBlank()) null else CatalogueItem(type,id,title,o.optInt("year"),runtimeMinutes=o.optInt("runtime"))
         }.distinctBy { it.id }
     }
+    fun suggest(record:WatchRecord,confirmedShows:List<CatalogueItem> = emptyList(),done:(Result<List<RankedMatch>>)->Unit)=request(done) {
+        val query=AutoMatchPolicy.query(record.title,record.subtitle) ?: return@request emptyList()
+        val types=when(query.kind) { AutoMatchPolicy.Kind.EPISODE->listOf("show"); AutoMatchPolicy.Kind.MOVIE->listOf("movie"); else->listOf("movie","show") }
+        val items=mutableListOf<CatalogueItem>()
+        val verified=confirmedShows.filter { it.type=="show" && it.id>0 }.distinctBy { it.id }.take(3)
+        items.addAll(verified)
+        for(variant in (query.variants.ifEmpty { listOf(query.title) }).take(3)) {
+            val encoded=URLEncoder.encode(variant,"UTF-8")
+            for(type in types) {
+                items.addAll(objects(get("/search/"+type+"?query="+encoded+"&limit=15&extended=full")).mapNotNull { row ->
+                    val o=row.optJSONObject(type) ?: return@mapNotNull null
+                    val key=id(o); val title=o.optString("title")
+                    if(key<=0 || title.isBlank()) null else CatalogueItem(type,key,title,o.optInt("year"),runtimeMinutes=o.optInt("runtime"))
+                })
+            }
+            if(AutoMatchPolicy.rank(query,record.title,record.duration,items,verified.map { it.id }.toSet()).any { it.score>=85 }) break
+        }
+        AutoMatchPolicy.rank(query,record.title,record.duration,items,verified.map { it.id }.toSet()).mapNotNull { ranked ->
+            val item=ranked.item
+            if(item.type=="movie" || query.episode==null) ranked
+            else {
+                val seasons=if(query.season!=null) listOf(query.season) else objects(get("/shows/"+item.id+"/seasons")).map { it.optInt("number",-1) }.filter { it>0 }.distinct()
+                if(seasons.size>8) return@mapNotNull null
+                val episodes=seasons.flatMap { season ->
+                    objects(get("/shows/"+item.id+"/seasons/"+season+"?extended=full")).mapNotNull { o ->
+                        val n=o.optInt("number",-1); val key=id(o)
+                        if(n<=0 || key<=0) null else CatalogueItem("episode",key,item.title+" — "+o.optString("title","Episode "+n),item.year,item.id,season,n,o.optInt("runtime"))
+                    }
+                }
+                AutoMatchPolicy.episodeMatches(query,episodes,record.duration)?.let { RankedMatch(it,(ranked.score+10).coerceAtMost(100),ranked.reason+" • Episode agrees") }
+            }
+        }.sortedByDescending { it.score }
+    }
     fun seasons(show: CatalogueItem, done: (Result<List<CatalogueSeason>>) -> Unit) = request(done) {
         require(show.type == "show" && show.id > 0)
         objects(get("/shows/" + show.id + "/seasons")).mapNotNull { o ->
