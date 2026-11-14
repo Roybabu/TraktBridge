@@ -7,7 +7,7 @@ object PermissionDiagnostics {
     data class Check(val name:String,val ready:Boolean,val required:Boolean,val detail:String)
     fun checks(access:Boolean,selected:Int,enabled:Boolean,notifications:Boolean,restricted:Boolean,foreground:Boolean):List<Check> = listOf(
         Check("Media notification access",access,true,"Required for Android media-session observations."),
-        Check("Selected playback apps",selected>0,true,"Select YouTube explicitly; other detectors are not integrated."),
+        Check("Selected playback apps",selected>0,true,"Select YouTube or experimental JioHotstar tracking explicitly."),
         Check("Tracking enabled",enabled,true,"Start tracking only when you want it."),
         Check("Foreground tracking service",foreground,false,"Keep the user-started tracking service active."),
         Check("Review notifications",notifications,false,"Optional; local history works without review alerts."),
