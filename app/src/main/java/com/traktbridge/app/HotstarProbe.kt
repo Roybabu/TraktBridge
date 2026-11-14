@@ -12,6 +12,10 @@ object HotstarProbe {
     private var last=0L
     private var lastScreen=0L
     private var lastSignals=0L
+    private data class Count(var attempts:Int=0,var evidence:Int=0)
+    private val counts=linkedMapOf<String,Count>()
+    private fun observe(source:String,available:Boolean) { val count=counts.getOrPut(source) { Count() };count.attempts++;if(available) count.evidence++ }
+    private fun benchmark():String = "Source evidence coverage (not identification accuracy)\n"+counts.entries.joinToString("\n") { (name,count) -> "$name: ${count.evidence}/${count.attempts} (${100*count.evidence/maxOf(1,count.attempts)}%)" }+"\nShare/deep links, provider catalogue, Trakt catalogue, learned mappings and OCR: not measured by this probe.\n"
     private data class Sample(val title:String,val duration:Long,val position:Long,val time:Long,val state:Int,val speed:Float)
     private val previous=mutableMapOf<Int,Sample>()
     private fun prefs(c:Context)=c.getSharedPreferences("tracker",Context.MODE_PRIVATE)
@@ -19,8 +23,8 @@ object HotstarProbe {
     fun enabled(c:Context)=!prefs(c).getBoolean("privacy_lock",false) && System.currentTimeMillis()<prefs(c).getLong(KEY,0)
     @Synchronized fun start(c:Context) { clear(c);prefs(c).edit().putLong(KEY,System.currentTimeMillis()+900000).apply();last=0;lastScreen=0;lastSignals=0;previous.clear() }
     fun stop(c:Context) { prefs(c).edit().remove(KEY).apply() }
-    @Synchronized fun clear(c:Context) { file(c).delete() }
-    @Synchronized fun report(c:Context):String=if(prefs(c).getBoolean("privacy_lock",false)) "Unlock or disable app privacy lock before accessing this diagnostic." else "JioHotstar title detection diagnostic\nCapture active: "+enabled(c)+"\n"+runCatching { file(c).takeIf { it.exists() }?.readText().orEmpty() }.getOrDefault("")
+    @Synchronized fun clear(c:Context) { file(c).delete();counts.clear() }
+    @Synchronized fun report(c:Context):String=if(prefs(c).getBoolean("privacy_lock",false)) "Unlock or disable app privacy lock before accessing this diagnostic." else "JioHotstar title detection diagnostic\nCapture active: "+enabled(c)+"\n"+benchmark()+runCatching { file(c).takeIf { it.exists() }?.readText().orEmpty() }.getOrDefault("")
     private fun safe(value:String):String=HotstarPlayback.clean(value)?.takeIf { !it.contains(Regex("(?i)(https?://|www\\.|@|[0-9]{7,})")) }?.take(160).orEmpty()
     // Fingerprints are diagnostic candidates only, never verified content identities.
     private fun fingerprint(value:String):String {
@@ -56,6 +60,7 @@ object HotstarProbe {
         val now=android.os.SystemClock.elapsedRealtime()
         if(lastSignals!=0L && now-lastSignals<4000) return
         lastSignals=now
+        observe("Media notification present",notes.any { it.notification.category==android.app.Notification.CATEGORY_TRANSPORT || it.notification.extras.containsKey(android.app.Notification.EXTRA_MEDIA_SESSION) })
         append(c,"sources activeSessions="+active+" notificationTokenControllers="+tokenControllers+" notifications="+notes.size)
         notes.take(4).forEach { n ->
             val e=n.notification.extras
@@ -80,6 +85,7 @@ object HotstarProbe {
         if(!enabled(c)) return
         runCatching { val f=file(c); if(f.length()>96000) f.writeText(f.readText().takeLast(48000).substringAfter('\n',""));f.appendText(Instant.now().toString()+" "+value.replace('\n',' ').replace('\r',' ')+"\n") }
     }
+    private fun statePlaying(state:Int?)=state==android.media.session.PlaybackState.STATE_PLAYING
     @Synchronized fun media(c:Context,controllers:List<MediaController>,notifications:Int) {
         if(!enabled(c)) return
         val now=android.os.SystemClock.elapsedRealtime()
@@ -96,6 +102,16 @@ object HotstarProbe {
             val duration=m?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L
             val position=p?.position ?: -1L
             val result=HotstarPlayback.recognize(title,display,detail,duration,position)
+            val uri=m?.getString(MediaMetadata.METADATA_KEY_MEDIA_URI).orEmpty()
+            val episode=RecognitionEngine.episodeOf(title)
+            val parts=runCatching { android.net.Uri.parse(uri).pathSegments }.getOrDefault(emptyList())
+            val candidate=if(episode!=null && parts.size in 8..9) fingerprint(parts[parts.size-6]) else "none"
+            if(statePlaying(p?.state) && result!=null) {
+                observe("MediaSession accepted title",true)
+                if(episode!=null) { observe("MediaSession episode number",true);observe("URI series candidate",candidate!="none");observe("MediaSession secondary title",safe(display).isNotBlank() || safe(detail).isNotBlank()) }
+                observe("MediaSession media ID",!m?.getString(MediaMetadata.METADATA_KEY_MEDIA_ID).isNullOrBlank())
+            } else if(statePlaying(p?.state)) observe("MediaSession accepted title",false)
+            append(c,"benchmark seriesCandidate="+candidate+" layout="+parts.size+" (unverified)")
             val token=controller.sessionToken.hashCode()
             val state=p?.state ?: -1
             val speed=p?.playbackSpeed ?: 0f
@@ -123,6 +139,7 @@ object HotstarProbe {
         val now=android.os.SystemClock.elapsedRealtime()
         if(lastScreen!=0L && now-lastScreen<2000) return
         lastScreen=now
+        observe("Accessibility callback labels",labels.any { safe(it).isNotBlank() })
         append(c,"accessibility eventType="+eventType+" visible control IDs="+ids.take(80).joinToString(",")+" candidate player labels="+labels.map(::safe).filter { it.isNotBlank() }.take(12).joinToString(" | "))
     }
 }
