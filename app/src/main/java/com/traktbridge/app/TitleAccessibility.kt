@@ -31,7 +31,7 @@ class TitleAccessibility: AccessibilityService() {
             if(node.isVisibleToUser) {
                 val id=PlayerRules.id(node.viewIdResourceName.orEmpty())
                 if(id.matches(Regex("[a-z0-9_]{1,80}"))) ids.add(id)
-                if(hotstar && id.matches(Regex(".*(player|playback|video|episode|season|content)_(title|subtitle|name|description).*"))) {
+                if(hotstar && (node.isHeading || id.matches(Regex(".*(player|playback|video|episode|season|content|series|show|detail|header)_(title|subtitle|name|description).*")))) {
                     node.text?.toString()?.take(160)?.let { labels.add(it) }
                     node.contentDescription?.toString()?.take(160)?.let { labels.add(it) }
                 }
