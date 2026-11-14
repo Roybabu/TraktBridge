@@ -26,7 +26,7 @@ object HotstarProbe {
         append(c,"resolution source="+source+" record="+fingerprint(r.id)+" candidate="+(item?.let { safe(it.title)+" id="+it.id+" showId="+it.showId+" season="+it.season+" episode="+it.episode } ?: "none")+" latencyMs="+latency)
     }
     @Synchronized fun confirmed(c:Context,r:WatchRecord,item:CatalogueItem) {
-        if(!enabled(c) || r.source!=HotstarPlayback.PACKAGE) return
+        if(prefs(c).getBoolean("privacy_lock",false) || r.source!=HotstarPlayback.PACKAGE) return
         val saved=runCatching { WatchHistory(c).use { it.record(r.id) } }.getOrNull() ?: return
         if(saved.traktId!=item.id || saved.matchType!=item.type) return
         val entries=predictions.remove(r.id) ?: return
@@ -134,6 +134,11 @@ object HotstarProbe {
             val result=HotstarPlayback.recognize(title,display,detail,duration,position)
             val uri=m?.getString(MediaMetadata.METADATA_KEY_MEDIA_URI).orEmpty()
             val episode=RecognitionEngine.episodeOf(title)
+            val contentId=m?.getString("androidx.media.MediaMetadatCompat.METADATA_KEY_CONTENT_ID").orEmpty()
+            val seriesId=m?.getString("androidx.media.MediaMetadatCompat.METADATA_KEY_SERIES_CONTENT_ID").orEmpty()
+            val publicId=runCatching { val u=android.net.Uri.parse(uri); if(u.scheme=="https" && u.host in setOf("www.hotstar.com","hotstar.com","www.jiohotstar.com","jiohotstar.com")) u.pathSegments.lastOrNull()?.takeIf { it.matches(Regex("[0-9]{10}")) }.orEmpty() else "" }.getOrDefault("")
+            if(statePlaying(p?.state) && result!=null) { observe("Android content ID",contentId.isNotBlank()); observe("Android series content ID",seriesId.isNotBlank()); observe("Public provider page ID",publicId.isNotBlank()) }
+            append(c,"provider metadata contentIdHash="+fingerprint(contentId)+" seriesIdHash="+fingerprint(seriesId)+" publicPageIdHash="+fingerprint(publicId))
             val parts=runCatching { android.net.Uri.parse(uri).pathSegments }.getOrDefault(emptyList())
             val candidate=if(episode!=null && parts.size in 8..9) fingerprint(parts[parts.size-6]) else "none"
             if(statePlaying(p?.state) && result!=null) {
