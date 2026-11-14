@@ -28,7 +28,7 @@ enum class TraktData(val title:String,val endpoint:String) {
 }
 object TraktDownloadRules {
     const val PAGE_SIZE=250
-    const val MAX_PAGES=100
+    const val MAX_PAGES=1000
     fun key(kind:TraktData,item:RemoteItem):String? {
         if(item.id<=0 || item.type !in setOf("movie","show","season","episode") || item.title.isBlank()) return null
         if(kind==TraktData.HISTORY) {

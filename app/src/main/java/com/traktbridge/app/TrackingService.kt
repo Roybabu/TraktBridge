@@ -43,20 +43,48 @@ class TrackingService: Service() {
         }.onFailure { DebugTrace.failure("device-sync",it) }
     }
     private var lastRebind= -60000L
+    private var attempts=0
+    private var lastStatus=""
+    private fun notification():Notification {
+        val open=PendingIntent.getActivity(this,0,Intent(this,MainActivity::class.java),PendingIntent.FLAG_IMMUTABLE)
+        val repair=PendingIntent.getActivity(this,2,Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS),PendingIntent.FLAG_IMMUTABLE)
+        val stop=PendingIntent.getService(this,1,Intent(this,TrackingService::class.java).setAction("stop"),PendingIntent.FLAG_IMMUTABLE)
+        val status=TrackingRecovery.status(this)
+        return Notification.Builder(this,"tracking").setSmallIcon(android.R.drawable.ic_media_play).setContentTitle("TraktBridge • "+status).setContentText(if(status=="Tracking active") "YouTube playback monitoring" else "Check notification access if recovery fails").setContentIntent(open).setOngoing(true).addAction(Notification.Action.Builder(null,"Repair tracking",repair).build()).addAction(Notification.Action.Builder(null,"Stop tracking",stop).build()).build()
+    }
     private val heartbeat=object: Runnable {
         override fun run() {
             if(!prefs.getBoolean("enabled",false)) { stopSelf(); return }
-            runCatching { updateDeviceSync() }.onFailure { DebugTrace.failure("device-sync-heartbeat",it) }
-            val now=System.currentTimeMillis()
-            val last=prefs.getLong("last_sample",0)
-            val tick=SystemClock.elapsedRealtime()
-            if(TrackingRecovery.listenerGranted(this@TrackingService) && TrackingHealthPolicy.shouldRebind(now,last,tick,lastRebind)) {
-                lastRebind=tick
-                val woke=PlaybackListener.wake()
-                DebugTrace.event("foreground","listener stale; directWake="+woke)
-                if(!woke) runCatching { android.service.notification.NotificationListenerService.requestRebind(ComponentName(this@TrackingService,PlaybackListener::class.java)) }
-            }
-            handler.postDelayed(this,15000)
+            try {
+                val now=System.currentTimeMillis()
+                val age=now-prefs.getLong("last_sample",0)
+                val tick=SystemClock.elapsedRealtime()
+                val connected=PlaybackListener.liveConnected()
+                val granted=TrackingRecovery.listenerGranted(this@TrackingService)
+                val healthy=connected && age in 0..45000 && prefs.getString("sample_error",null)==null
+                if(healthy) {
+                    if(attempts>0) DebugTrace.event("recovery","Verified fresh playback sampling after "+attempts+" attempts")
+                    attempts=0
+                } else if(granted && tick-lastRebind>=RecoveryRetryPolicy.delay(attempts)) {
+                    lastRebind=tick
+                    attempts=(attempts+1).coerceAtMost(20)
+                    if(!connected) {
+                        prefs.edit().putBoolean("listener_connected",false).apply()
+                        TrackingRecovery.clearObservation(this@TrackingService)
+                        TrackingRecovery.request(this@TrackingService,"watchdog attempt "+attempts)
+                    } else if(attempts<=1) PlaybackListener.wake()
+                    else PlaybackListener.reconnect()
+                    DebugTrace.event("recovery","attempt="+attempts+" connected="+connected+" ageMs="+age)
+                }
+                prefs.edit().putInt("recovery_attempts",attempts).apply()
+                val status=TrackingRecovery.status(this@TrackingService)
+                if(status!=lastStatus) {
+                    lastStatus=status
+                    getSystemService(NotificationManager::class.java).notify(721,notification())
+                }
+                runCatching { updateDeviceSync() }.onFailure { DebugTrace.failure("device-sync-heartbeat",it) }
+            } catch(e:Exception) { DebugTrace.failure("tracking-watchdog",e) }
+            finally { handler.postDelayed(this,15000) }
         }
     }
     override fun onBind(intent: Intent?) : IBinder?=null
@@ -68,9 +96,7 @@ class TrackingService: Service() {
         }
         val nm=getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel("tracking","Active playback tracking",NotificationManager.IMPORTANCE_LOW))
-        val open=PendingIntent.getActivity(this,0,Intent(this,MainActivity::class.java),PendingIntent.FLAG_IMMUTABLE)
-        val stop=PendingIntent.getService(this,1,Intent(this,TrackingService::class.java).setAction("stop"),PendingIntent.FLAG_IMMUTABLE)
-        val n=Notification.Builder(this,"tracking").setSmallIcon(android.R.drawable.ic_media_play).setContentTitle("TraktBridge tracking active").setContentText("Selected video apps • tap to open").setContentIntent(open).setOngoing(true).addAction(Notification.Action.Builder(null,"Stop tracking",stop).build()).build()
+        val n=notification()
         try { if(Build.VERSION.SDK_INT>=34) startForeground(721,n,ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE) else startForeground(721,n) } catch(e:Exception) {
             DebugTrace.failure("foreground-start",e); prefs.edit().putBoolean("foreground_running",false).putString("sample_error","Foreground start failed").apply(); handler.removeCallbacks(heartbeat); stopSelf(); return START_NOT_STICKY
         }
@@ -78,7 +104,7 @@ class TrackingService: Service() {
         if(!networkRegistered) runCatching { connectivity.registerDefaultNetworkCallback(networkCallback); networkRegistered=true }
         prefs.edit().putBoolean("foreground_running",true).putLong("foreground_started_elapsed",SystemClock.elapsedRealtime()).apply()
         DebugTrace.event("foreground","started")
-        PlaybackListener.wake()
+        if(!PlaybackListener.wake()) TrackingRecovery.request(this,"foreground started")
         handler.removeCallbacks(heartbeat); handler.post(heartbeat)
         return START_STICKY
     }

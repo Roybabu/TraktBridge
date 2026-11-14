@@ -15,6 +15,13 @@ class PlaybackListener : NotificationListenerService() {
     companion object {
         @Volatile private var instance:PlaybackListener?=null
         fun liveConnected()=instance?.connected==true
+        fun reconnect() {
+            val listener=instance ?: return
+            listener.handler.post {
+                if(listener.connected) runCatching { listener.requestUnbind() }.onFailure { DebugTrace.failure("listener-unbind",it) }
+                listener.handler.postDelayed({ TrackingRecovery.request(listener.applicationContext,"stale connected listener") },2000)
+            }
+        }
         fun wake():Boolean {
             val listener=instance ?: return false
             if(!listener.connected) return false
@@ -47,7 +54,7 @@ class PlaybackListener : NotificationListenerService() {
         wake()
     }
     override fun onNotificationRemoved(sbn: android.service.notification.StatusBarNotification?) { if(sbn?.packageName==YouTubePlayback.PACKAGE) wake() }
-    override fun onCreate() { super.onCreate(); PlaybackTrackingMigration.apply(this); DebugTrace.init(this); DebugTrace.event("listener","service created"); history = WatchHistory(this); runCatching { history.recover() }.onFailure { DebugTrace.failure("history-recovery",it) } }
+    override fun onCreate() { super.onCreate(); PlaybackTrackingMigration.apply(this); DebugTrace.init(this); DebugTrace.event("listener","service created"); prefs.edit().putBoolean("listener_connected",false).apply(); history = WatchHistory(this); runCatching { history.recover() }.onFailure { DebugTrace.failure("history-recovery",it) } }
     private val handler = Handler(Looper.getMainLooper())
     private val poll = object : Runnable {
         override fun run() {
@@ -61,8 +68,8 @@ class PlaybackListener : NotificationListenerService() {
         sessionCallbackRegistered=false
         if(instance===this) instance=null
     }
-    override fun onListenerDisconnected() { connected=false; unregisterSessionCallback(); DeviceControl.dispatch=null; DebugTrace.event("listener","disconnected"); handler.removeCallbacks(poll); prefs.edit().putBoolean("listener_connected",false).apply(); TrackingRecovery.clearObservation(this); runCatching { history.finishAll() }; sessionIds.clear(); youtubeIdentities.clear(); YouTubePlayback.clear(); super.onListenerDisconnected() }
-    override fun onDestroy() { connected=false; unregisterSessionCallback(); DeviceControl.dispatch=null; DebugTrace.event("listener","destroyed"); handler.removeCallbacks(poll); prefs.edit().putBoolean("listener_connected",false).apply(); runCatching { history.finishAll() }; runCatching { history.close() }; super.onDestroy() }
+    override fun onListenerDisconnected() { connected=false; unregisterSessionCallback(); DeviceControl.dispatch=null; DebugTrace.event("listener","disconnected"); handler.removeCallbacks(poll); prefs.edit().putBoolean("listener_connected",false).apply(); TrackingRecovery.clearObservation(this); if(prefs.getBoolean("enabled",false)) handler.postDelayed({ TrackingRecovery.request(applicationContext,"listener disconnected") },2000); runCatching { history.finishAll() }; sessionIds.clear(); youtubeIdentities.clear(); YouTubePlayback.clear(); super.onListenerDisconnected() }
+    override fun onDestroy() { connected=false; unregisterSessionCallback(); DeviceControl.dispatch=null; DebugTrace.event("listener","destroyed"); handler.removeCallbacks(poll); prefs.edit().putBoolean("listener_connected",false).apply(); TrackingRecovery.clearObservation(this); runCatching { history.finishAll() }; runCatching { history.close() }; super.onDestroy() }
     private fun requestCatalogueSuggestions() {
         if(!prefs.getBoolean("enabled",false) || prefs.getBoolean("privacy_lock",false)) return
         val now=SystemClock.elapsedRealtime()
@@ -91,7 +98,7 @@ class PlaybackListener : NotificationListenerService() {
         val tick=SystemClock.elapsedRealtime()
         if(lastTick>0 && tick-lastTick>12000) DebugTrace.event("sampling","gapMs="+(tick-lastTick))
         lastTick=tick
-        prefs.edit().putLong("last_sample",System.currentTimeMillis()).remove("sample_error").apply()
+        
         if (!prefs.getBoolean("enabled", false)) { DebugTrace.event("sampling","disabled"); history.finishAll(); youtubeIdentities.clear(); YouTubePlayback.clear(); prefs.edit().remove("sessions").apply(); return }
         val allowed=PlaybackDetectors.selected(prefs.getStringSet("allowed",emptySet()).orEmpty())
         val active = try {
@@ -180,7 +187,7 @@ class PlaybackListener : NotificationListenerService() {
         }
         val local=ConcurrentPlayback.select(samples)
         history.ingest(local,SystemClock.elapsedRealtime(),System.currentTimeMillis())
-        prefs.edit().putString("sessions", rows.toString()).putInt("session_count",selected.size).putInt("tracked_session_count",local.size).apply {
+        prefs.edit().putLong("last_sample",System.currentTimeMillis()).remove("sample_error").putString("sessions", rows.toString()).putInt("session_count",selected.size).putInt("tracked_session_count",local.size).apply {
             if(rows.length()>0) putString("last_nonempty_sessions",rows.toString())
         }.apply()
     }
