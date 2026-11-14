@@ -71,7 +71,7 @@ class MainActivity : ComponentActivity() {
             Thread { val result=runCatching { PairingQr.decode(bitmap) }; runOnUiThread { if(!isDestroyed && !isFinishing) result.fold({ approvePairingInvitation(it) },{ Toast.makeText(this,"QR unreadable. Try closer or import a full-resolution image.",Toast.LENGTH_LONG).show() }) } }.start(); return
         }
         if(requestCode==97 && resultCode==RESULT_OK) { data?.data?.let { readPairingQr(it) }; return }
-        if(requestCode==96) { privacyPrompt=false; unlocked=resultCode==RESULT_OK; if(unlocked) shell.visibility=android.view.View.VISIBLE else finish(); return }
+        if(requestCode==96) { privacyPrompt=false; unlocked=resultCode==RESULT_OK; if(unlocked) { shell.visibility=android.view.View.VISIBLE; refreshHistory() } else finish(); return }
         if(requestCode==57 && resultCode==RESULT_OK) data?.data?.let { inspectVideo(it) }
         if(requestCode==58 && resultCode==RESULT_OK) data?.data?.let { inspectImport(it) }
         if(resultCode==RESULT_OK && requestCode in 65..66) data?.data?.let { settingsTransfer(requestCode,it) }
@@ -310,74 +310,6 @@ class MainActivity : ComponentActivity() {
             }.show()
         }
     }
-    private fun armOcr() {
-        if(android.os.Build.VERSION.SDK_INT<34) { Toast.makeText(this,"Window OCR requires Android 14 or later",Toast.LENGTH_LONG).show(); return }
-        if(!prefs.getBoolean("enabled",false) || !prefs.getBoolean("title_optin",false) || !prefs.getBoolean("title_connected",false)) { Toast.makeText(this,"Enable tracking and Accessibility title detection first",Toast.LENGTH_LONG).show(); return }
-        val packages=(prefs.getStringSet("allowed",emptySet()) ?: emptySet()).sortedBy { appLabel(it) }
-        choose("Choose one player to scan",packages.map { appLabel(it) }) { index ->
-            val pkg=packages[index]
-            BridgeDialogBuilder(this).setTitle("One-time on-device OCR").setMessage("TraktBridge will attempt one screenshot of the selected app's window, beginning in 8 seconds and expiring after 45 seconds. Open the video and reveal its controls. Only edge regions are read locally; the image is not saved or uploaded. Protected windows cannot be captured. Review any detected text before using it.").setNegativeButton("Cancel",null).setPositiveButton("Arm scan") { _,_->
-                val now=System.currentTimeMillis()
-                prefs.edit().putLong("ocr_generation",prefs.getLong("ocr_generation",0)+1).remove("ocr_choices").remove("ocr_source").remove("ocr_captured").putString("ocr_target",pkg).putLong("ocr_after",now+8000).putLong("ocr_until",now+45000).putString("ocr_status","Armed").apply()
-                Toast.makeText(this,"Open the selected player and reveal controls after 8 seconds",Toast.LENGTH_LONG).show()
-            }.show()
-        }
-    }
-    private fun reviewOcr() {
-        val status=prefs.getString("ocr_status","No OCR scan yet").orEmpty()
-        val source=prefs.getString("ocr_source","").orEmpty()
-        val choices=runCatching { org.json.JSONArray(prefs.getString("ocr_choices","[]")) }.getOrDefault(org.json.JSONArray())
-        if(choices.length()==0) { BridgeDialogBuilder(this).setTitle("OCR result").setMessage(status).setPositiveButton("OK",null).show(); return }
-        val entries=(0 until choices.length()).map { choices.getJSONObject(it) }
-        choose("Review OCR title candidates",entries.map { it.optString("title") }) { index ->
-            val c=entries[index]
-            val detail=c.optString("detail")
-            val pos=c.optLong("position",-1); val dur=c.optLong("duration",0)
-            val timer=if(PlaybackPosition.valid(pos,dur)) "\nVisible timer estimate: "+durationText(pos)+" / "+durationText(dur) else ""
-            BridgeDialogBuilder(this).setTitle("Use this title?").setMessage(c.optString("title")+"\n"+detail+timer+"\nOCR may misread text. Timers are not automatically used as verified progress.").setNegativeButton("Cancel",null).setPositiveButton("Identify") { _,_->
-                presentShared(SharedCandidate(c.optString("title"),detail,source))
-            }.show()
-        }
-    }
-    private fun serverSettings() {
-        val kinds=listOf("plex","jellyfin","emby","kodi")
-        val names=listOf("Plex","Jellyfin","Emby","Kodi")
-        choose("Media server integrations",kinds.mapIndexed { i,k -> names[i]+if(ServerStore.load(this,k)!=null) " • connected" else " • not configured" }) { index ->
-            val kind=kinds[index]
-            val old=ServerStore.load(this,kind)
-            val url=EditText(this).apply { hint="HTTPS server base URL"; setSingleLine(true); setText(old?.url.orEmpty()) }
-            val token=EditText(this).apply { hint=if(kind=="kodi") "Username:password (if required)" else "Server API token"; inputType=android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD; setText(old?.token.orEmpty()) }
-            val client=EditText(this).apply { hint="Playback client / device ID"; setSingleLine(true); setText(old?.client.orEmpty()) }
-            val box=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(24,12,24,12); addView(url); addView(token); addView(client); addView(txt("Use a trusted HTTPS server. Discover clients while the intended device is connected. Only the selected client is tracked. Credentials stay encrypted on this device. Server playback may occur on another device.",14,muted)) }
-            val d=BridgeDialogBuilder(this).setTitle(names[index]+" connection").setView(box).setNegativeButton("Cancel",null).setNeutralButton(if(old!=null) "Disconnect" else "Discover clients",null).setPositiveButton("Discover and save",null).create()
-            d.setOnShowListener {
-                fun discover() {
-                    val c=ServerConfig(kind,url.text.toString().trim(),token.text.toString(),client.text.toString().trim().ifBlank { "discover" })
-                    val valid=runCatching { ServerStore.validate(c) }
-                    if(valid.isFailure) { url.error=valid.exceptionOrNull()?.message ?: "Invalid configuration"; return }
-                    d.dismiss()
-                    val progress=android.app.ProgressDialog.show(this,"Connecting", "Discovering playback clients…",true,false)
-                    Thread {
-                        val result=runCatching { MediaServer.discover(c) }
-                        runOnUiThread {
-                            if(isFinishing || isDestroyed) return@runOnUiThread
-                            progress.dismiss()
-                            result.fold({ clients ->
-                                if(clients.isEmpty()) { Toast.makeText(this,"No clients found. Start playback on the intended device and retry.",Toast.LENGTH_LONG).show(); return@fold }
-                                choose("Select playback client",clients.map { it.second+" • "+it.first }) { j ->
-                                    val saved=runCatching { ServerStore.save(this,c.copy(client=clients[j].first)) }
-                                    Toast.makeText(this,if(saved.isSuccess) "Media server saved" else "Unable to save connection",Toast.LENGTH_LONG).show()
-                                }
-                            },{ Toast.makeText(this,"Connection failed. Check HTTPS URL, certificate and credentials.",Toast.LENGTH_LONG).show() })
-                        }
-                    }.start()
-                }
-                d.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener { discover() }
-                d.getButton(android.app.AlertDialog.BUTTON_NEUTRAL).setOnClickListener { if(old!=null) { ServerStore.remove(this,kind); d.dismiss() } else discover() }
-            }
-            d.show()
-        }
-    }
     private fun handleShared(i:Intent) {
         if(i.action!=Intent.ACTION_SEND || prefs.getBoolean("privacy_lock",false) && !unlocked) return
         val type=i.type.orEmpty()
@@ -425,7 +357,7 @@ class MainActivity : ComponentActivity() {
         dialog.show()
     }
     private fun handleReview(i: Intent) {
-        if(i.action==ViewingNotifications.USAGE_REVIEW) { i.action=null; if(!prefs.getBoolean("privacy_lock",false) || unlocked) reviewUsage(); return }
+        if(i.action==ViewingNotifications.USAGE_REVIEW) { i.action=null; return }
         if (i.action != ViewingNotifications.REVIEW) return
         val uri = i.data ?: return
         if (uri.scheme != "traktbridge" || uri.host != "review") return
@@ -442,6 +374,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         val startup=android.os.SystemClock.elapsedRealtime()
         super.onCreate(savedInstanceState)
+        PlaybackTrackingMigration.apply(this)
         historyLimit=MemoryPolicy.pageSize(lowRam)
         applyScreenProtection()
         DebugTrace.init(this)
@@ -519,21 +452,20 @@ class MainActivity : ComponentActivity() {
         settingsRoot.addView(settingsOverview)
         settingsOverview.addView(txt("Settings",28,ink,true))
         settingsOverview.addView(txt("Manage your viewing experience",14,muted))
-        val quick=panel(settingsOverview)
-        quick.addView(txt("Quick actions",17,ink,true))
-        quick.addView(actionButton("Guided tracking setup") { setupGuide() })
-        quick.addView(actionButton("Now Playing • All devices") { nowPlaying() })
-        for(category in definitions) {
-            val card=panel(settingsOverview).apply {
-                isFocusable=true
-                isClickable=true
-                contentDescription=category.title+". "+category.description
-                background=if(tvMode) TvFocus.background(this@MainActivity,surface,violet) else rounded(surface)
-                minimumHeight=dp(adaptiveLayout.touch)
-                setOnClickListener { BridgeHaptics.tap(this); showSettingsCategory(category.id) }
+        val sections=listOf(
+            "Account & playback" to listOf("account","tracking","devices"),
+            "Personalization" to listOf("appearance","library"),
+            "Privacy & data" to listOf("privacy","data"),
+            "Help & support" to listOf("advanced")
+        )
+        for((title,ids) in sections) {
+            val card=settingGroup(settingsOverview,title)
+            for(id in ids) {
+                val category=definitions.first { it.id==id }
+                settingRow(card,category.title,category.description) { showSettingsCategory(category.id) }
             }
-            card.addView(txt(category.title+"  ›",19,ink,true))
-            card.addView(txt(category.description,13,muted))
+        }
+        for(category in definitions) {
             val page=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; visibility=android.view.View.GONE }
             settingsRoot.addView(page)
             settingsGroups[category.id]=page
@@ -548,7 +480,7 @@ class MainActivity : ComponentActivity() {
         settingsCategory=id.takeIf { it in settingsGroups }.orEmpty()
         settingsOverview.visibility=if(settingsCategory.isEmpty()) android.view.View.VISIBLE else android.view.View.GONE
         settingsGroups.forEach { (key,page) -> page.visibility=if(key==settingsCategory) android.view.View.VISIBLE else android.view.View.GONE }
-        if(settingsCategory=="devices") refreshDeviceSettings()
+        if(settingsCategory in setOf("devices","tracking","privacy")) refreshSettingsState(settingsCategory)
         if(resetScroll) settingsPage.scrollTo(0,0)
         if(tvMode && tab==4) settingsPage.post { if(tab==4) TvFocus.firstContent(settingsPage) }
     }
@@ -571,15 +503,41 @@ class MainActivity : ComponentActivity() {
         if(parent.childCount>0) parent.addView(android.view.View(this).apply { setBackgroundColor(0x227F7F7F) },LinearLayout.LayoutParams(-1,dp(1)))
         parent.addView(row,LinearLayout.LayoutParams(-1,-2))
     }
-    private fun refreshDeviceSettings() {
-        val page=settingsGroups["devices"] ?: return
-        if(page.childCount>3) page.removeViews(3,page.childCount-3)
-        populateSettings("devices",page)
+    private fun settingToggle(parent:LinearLayout,title:String,detail:String,checked:Boolean,onChange:(Switch,Boolean)->Unit) {
+        if(parent.childCount>0) parent.addView(android.view.View(this).apply { setBackgroundColor(0x227F7F7F) },LinearLayout.LayoutParams(-1,dp(1)))
+        val row=LinearLayout(this).apply {
+            orientation=LinearLayout.HORIZONTAL
+            gravity=android.view.Gravity.CENTER_VERTICAL
+            minimumHeight=dp(adaptiveLayout.touch)
+            setPadding(dp(4),dp(10),dp(4),dp(10))
+        }
+        val labels=LinearLayout(this).apply {
+            orientation=LinearLayout.VERTICAL
+            addView(txt(title,16,ink,true))
+            addView(txt(detail,13,muted))
+        }
+        val toggle=Switch(this).apply {
+            contentDescription="$title. $detail"
+            isChecked=checked
+            isFocusable=true
+        }
+        toggle.setOnCheckedChangeListener { _,value -> onChange(toggle,value) }
+        row.addView(labels,LinearLayout.LayoutParams(0,-2,1f))
+        row.addView(toggle,LinearLayout.LayoutParams(-2,-2))
+        labels.setOnClickListener { toggle.isChecked=!toggle.isChecked }
+        parent.addView(row,LinearLayout.LayoutParams(-1,-2))
     }
+    private fun refreshSettingsState(id:String) {
+        val page=settingsGroups[id] ?: return
+        if(page.childCount>3) page.removeViews(3,page.childCount-3)
+        populateSettings(id,page)
+    }
+    private fun refreshDeviceSettings() = refreshSettingsState("devices")
     private fun disableTitleDetection() {
-        val edit=prefs.edit().putLong("ocr_generation",prefs.getLong("ocr_generation",0)+1).putBoolean("title_optin",false).remove("ocr_target").remove("ocr_after").remove("ocr_until").remove("ocr_choices").remove("ocr_source").remove("ocr_captured").remove("ocr_status")
-                    prefs.all.keys.filter { it.startsWith("title_hint:") || it.startsWith("title_detail:") || it.startsWith("title_time:") }.forEach { edit.remove(it) }
-                    edit.apply(); startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+        prefs.edit().putBoolean("title_optin",false).remove("segment:"+YouTubePlayback.PACKAGE).remove("segment_time:"+YouTubePlayback.PACKAGE).apply()
+        YouTubePlayback.clear()
+        PlaybackListener.wake()
+        startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         recreate()
     }
     private fun pairDeviceMenu() {
@@ -620,34 +578,37 @@ class MainActivity : ComponentActivity() {
         fun button(s:String,action:()->Unit) { settingRow(group ?: root,s,action=action) }
         when(id) {
             "account" -> {
-                root.addView(account)
-                heading("Connection")
-                button("Connect Trakt") { try { startActivity(Intent(Intent.ACTION_VIEW, auth.begin())); showAuth("Complete sign-in in your browser") } catch (_: Exception) { showAuth("Unable to open sign-in") } }
-                button("Check Trakt connection") { showAuth("Checking…"); auth.check { showAuth(it) } }
+                heading("Trakt account")
+                (group ?: root).addView(account.apply { setPadding(dp(4),dp(10),dp(4),dp(10)) })
+                settingRow(group ?: root,"Manage connection","Sign in, verify or disconnect your account") {
+                    val entries=if(auth.hasConnection()) listOf("Verify connection","Reconnect Trakt","Disconnect locally") else listOf("Connect Trakt")
+                    choose("Trakt connection",entries) { index ->
+                        when(entries[index]) {
+                            "Verify connection" -> { showAuth("Checking…"); auth.check { showAuth(it) } }
+                            "Disconnect locally" -> BridgeDialogBuilder(this).setTitle("Disconnect Trakt?").setMessage("Removes local authorization and downloaded account data, and stops daily sync. Your Trakt account and local viewing history are unchanged.").setNegativeButton("Cancel",null).setPositiveButton("Disconnect") { _,_-> RemoteRefreshSchedule.disable(this); auth.disconnect { showAuth(it) } }.show()
+                            else -> try { startActivity(Intent(Intent.ACTION_VIEW,auth.begin())); showAuth("Complete sign-in in your browser") } catch (_:Exception) { showAuth("Unable to open sign-in") }
+                        }
+                    }
+                }
                 heading("Synchronization")
-                button("Daily Trakt library sync") { configureAccountRefresh() }
-                button("Sync Trakt account now") { offerTraktSync() }
-                button("Downloaded Trakt library") { openDownloadedTrakt() }
-                heading("Account data")
-                button("Clear downloaded Trakt library") { BridgeDialogBuilder(this).setTitle("Clear downloaded Trakt library?").setMessage("Stops automatic refresh and deletes downloaded account data on this device. Local viewing records and your Trakt account are unchanged.").setNegativeButton("Cancel",null).setPositiveButton("Clear") { _,_->RemoteRefreshSchedule.disable(this); TraktLibrary.clearCache(this) }.show() }
-                button("Disconnect Trakt locally") { RemoteRefreshSchedule.disable(this); auth.disconnect { showAuth(it) } }
-                label("Uses Trakt but is not endorsed or certified by Trakt.")
-                label("Only selected apps are tracked locally. Catalogue search sends only the search text you choose to Trakt. Only explicitly approved completed watches are uploaded.")
-                button("Retry approved sync queue") { HistorySync.schedule(this); refreshHistory() }
+                settingRow(group ?: root,"Automatic sync","Refresh your downloaded Trakt library daily") { configureAccountRefresh() }
+                settingRow(group ?: root,"Sync now","Download existing watches, watchlists, ratings and more") { offerTraktSync() }
+                settingRow(group ?: root,"Trakt library","Browse downloaded data or open the online library") { openDownloadedTrakt() }
+                heading("Data & maintenance")
+                settingRow(group ?: root,"Sync maintenance","Retry approved uploads or clear downloaded account data") {
+                    choose("Sync maintenance",listOf("Retry approved uploads","Clear downloaded library")) { index ->
+                        if(index==0) { HistorySync.schedule(this); refreshHistory(); Toast.makeText(this,"Approved sync queue scheduled",Toast.LENGTH_SHORT).show() }
+                        else BridgeDialogBuilder(this).setTitle("Clear downloaded Trakt library?").setMessage("Stops automatic refresh and deletes downloaded account data on this device. Local viewing records and your Trakt account are unchanged.").setNegativeButton("Cancel",null).setPositiveButton("Clear") { _,_-> RemoteRefreshSchedule.disable(this); TraktLibrary.clearCache(this) }.show()
+                    }
+                }
+                settingRow(group ?: root,"About Trakt sync","Data usage and upload permissions") {
+                    BridgeDialogBuilder(this).setTitle("About Trakt sync").setMessage("Uses Trakt but is not endorsed or certified by Trakt. Only selected apps are tracked locally. Catalogue search sends only the search text you choose to Trakt. Only explicitly approved completed watches are uploaded. Downloaded account history is separate from measured local viewing.").setPositiveButton("Close",null).show()
+                }
             }
             "tracking" -> {
                 heading("Tracking preferences")
+                settingRow(group ?: root,"Guided tracking setup","Walk through app selection and Android permissions") { setupGuide() }
                 button("Completion review threshold") { configureCompletionThreshold() }
-                heading("Identify content")
-                button("Identify local video file") { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("video/*"),57) }
-                button("Identify shared movie link") { val field=EditText(this).apply { hint="Paste shared title or link" }; BridgeDialogBuilder(this).setTitle("Identify shared content").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Continue") { _,_-> presentShared(SharedContent.fromText(field.text.toString())) }.show() }
-                button("Scan player title (one-shot OCR)") { armOcr() }
-                button("Review OCR result") { reviewOcr() }
-                button("Clear OCR result") { prefs.edit().putLong("ocr_generation",prefs.getLong("ocr_generation",0)+1).remove("ocr_target").remove("ocr_after").remove("ocr_until").remove("ocr_choices").remove("ocr_source").remove("ocr_captured").remove("ocr_status").apply() }
-                button("Connect media servers") { serverSettings() }
-                (group ?: root).addView(Switch(this).apply { text="Automatically reuse confirmed local title mappings"; isChecked=prefs.getBoolean("learned_auto",false); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("learned_auto",checked).apply() } })
-                button("Clear learned title mappings") { BridgeDialogBuilder(this).setTitle("Clear learned mappings?").setMessage("Existing viewing history and Trakt matches stay unchanged.").setNegativeButton("Cancel",null).setPositiveButton("Clear") { _,_->history.clearLearning() }.show() }
-                label("Remote playback is recognized when Android exposes a media session. Picture-in-picture can continue tracking through the same session; unsupported casts cannot be observed directly.")
                 heading("Permissions & notifications")
                 button("Grant notification access") { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
                 button("Reconnect playback listener") { runCatching { android.service.notification.NotificationListenerService.requestRebind(android.content.ComponentName(this,PlaybackListener::class.java)) }; refresh() }
@@ -665,27 +626,20 @@ class MainActivity : ComponentActivity() {
                     setOnCheckedChangeListener { _, checked -> prefs.edit().putBoolean("enabled",checked).apply(); if(checked) startTracking() else stopService(Intent(this@MainActivity,TrackingService::class.java)); refresh() }
                 })
                 button("Battery optimization settings") { runCatching { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) } }
-                heading("Optional detection")
-                label("Optional title suggestions read recognized controls in selected apps. One-shot OCR requires separate explicit permission; no automatic uploads.")
-                button(if(prefs.getBoolean("title_optin",false)) "Title detection • On" else "Title detection • Off") {
+                heading("YouTube player identification")
+                label("YouTube titles come from Android media metadata. Accessibility reads only YouTube player control IDs to exclude Shorts and ads.")
+                button(if(prefs.getBoolean("title_optin",false)) "YouTube player identification • On" else "YouTube player identification • Off") {
                     if(prefs.getBoolean("title_optin",false)) {
-                        choose("Title detection",listOf("Open Android Accessibility settings","Turn off title detection")) { i -> if(i==0) startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) else disableTitleDetection() }
+                        choose("YouTube player identification",listOf("Open Android Accessibility settings","Turn off player identification")) { i -> if(i==0) startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) else disableTitleDetection() }
                     } else {
-                    BridgeDialogBuilder(this).setTitle("Optional title detection").setMessage("Android Accessibility can expose screen content. TraktBridge checks selected video apps for player titles and video detail headings near play actions. Suggestions stay local and are never uploaded automatically. Enable only if you agree.").setNegativeButton("Cancel",null).setPositiveButton("Agree and open settings") { _,_ -> prefs.edit().putBoolean("title_optin",true).apply(); startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }.show()
-                }
+                        BridgeDialogBuilder(this).setTitle("YouTube player identification").setMessage("Allow TraktBridge to read visible YouTube player control IDs to distinguish regular videos from Shorts and ads. It does not read screen titles or capture screenshots.").setNegativeButton("Cancel",null).setPositiveButton("Agree and open settings") { _,_ -> prefs.edit().putBoolean("title_optin",true).apply(); startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }.show()
+                    }
                 }
                 heading("Tracked apps")
-                label("Choose apps to track • select only video apps. Use the installed-app picker for any service or regional variant not listed.")
+                label("Only regular YouTube videos are currently supported. Other apps will be added individually.")
                 button("Choose apps to track") { chooseInstalledApps() }
-                heading("App activity fallback")
-                label("For Netflix or other apps without media metadata, enable optional app-activity reminders. These do not prove playback.")
-                button(if(prefs.contains("usage_since")) "App-activity fallback • On" else "App-activity fallback • Off") {
-                    if(prefs.contains("usage_since")) choose("App-activity fallback",listOf("Open Usage access settings","Turn off fallback")) { i -> if(i==0) startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) else { prefs.edit().remove("usage_since").apply(); recreate() } }
-                    else { prefs.edit().putLong("usage_since",System.currentTimeMillis()).apply(); startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)); recreate() }
-                }
-                button("Review recent app activity (not watch time)") { reviewUsage() }
-
             }
+
             "devices" -> {
                 val peers=DevicePairing.peers(this).sortedBy { it.label }
                 val identity=runCatching { DeviceIdentity.register(this) }.getOrNull()
@@ -736,84 +690,227 @@ class MainActivity : ComponentActivity() {
                 settingRow(advanced,"Network & device maintenance","Relay, discovery and received history") { deviceAdvancedMenu() }
             }
             "appearance" -> {
-                heading("Display & interaction")
-                (group ?: root).addView(Switch(this).apply { text="Hide catalogue spoilers"; isChecked=prefs.getBoolean("hide_spoilers",true); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("hide_spoilers",checked).apply() } })
-                (group ?: root).addView(Switch(this).apply { text="High contrast text"; isChecked=prefs.getBoolean("high_contrast",false); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("high_contrast",checked).apply(); recreate() } })
-                if(!tvMode) (group ?: root).addView(Switch(this).apply { text="Haptic feedback"; isChecked=prefs.getBoolean(BridgeHaptics.PREF,true); setOnCheckedChangeListener { view,checked -> prefs.edit().putBoolean(BridgeHaptics.PREF,checked).apply(); if(checked) BridgeHaptics.tap(view) } })
-                (group ?: root).addView(Switch(this).apply { text="Reduce interface motion"; isChecked=prefs.getBoolean("reduce_motion",false); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("reduce_motion",checked).apply(); recreate() } })
-                heading("Theme & reading")
-                button("Text size") { choose("Reading size",listOf("System default","Large","Extra large")) { prefs.edit().putInt("reading_size",it).apply(); recreate() } }
-                button("Appearance theme") { choose("Theme",listOf("Classic dark","AMOLED black","Dynamic dark (Android 12+)")) { prefs.edit().putString("appearance_mode",listOf("dark","amoled","dynamic")[it]).apply(); recreate() } }
-                button("Appearance accent") { choose("Accent color",listOf("Violet","Blue","Green")) { prefs.edit().putString("accent",listOf("violet","blue","green")[it]).apply(); recreate() } }
+                val themes=listOf("Classic dark","AMOLED black","Dynamic dark (Android 12+)")
+                val themeKeys=listOf("dark","amoled","dynamic")
+                val accents=listOf("Violet","Blue","Green")
+                val accentKeys=listOf("violet","blue","green")
+                val sizes=listOf("System default","Large","Extra large")
+                fun preferenceRow(title:String,detail:String,action:()->Unit) {
+                    settingRow(group ?: root,title,detail,action)
+                }
+                fun appearanceToggle(title:String,detail:String,key:String,default:Boolean,onChange:(android.view.View,Boolean)->Unit={ _,_-> }) {
+                    val parent=group ?: root
+                    if(parent.childCount>0) parent.addView(android.view.View(this).apply { setBackgroundColor(0x227F7F7F) },LinearLayout.LayoutParams(-1,dp(1)))
+                    val row=LinearLayout(this).apply {
+                        orientation=LinearLayout.HORIZONTAL
+                        gravity=android.view.Gravity.CENTER_VERTICAL
+                        minimumHeight=dp(adaptiveLayout.touch)
+                        setPadding(dp(4),dp(10),dp(4),dp(10))
+                    }
+                    val labels=LinearLayout(this).apply {
+                        orientation=LinearLayout.VERTICAL
+                        addView(txt(title,16,ink,true))
+                        addView(txt(detail,13,muted))
+                    }
+                    row.addView(labels,LinearLayout.LayoutParams(0,-2,1f))
+                    val toggle=Switch(this).apply {
+                        contentDescription="$title. $detail"
+                        isChecked=prefs.getBoolean(key,default)
+                        isFocusable=true
+                        setOnCheckedChangeListener { view,checked ->
+                            prefs.edit().putBoolean(key,checked).apply()
+                            onChange(view,checked)
+                        }
+                    }
+                    row.addView(toggle,LinearLayout.LayoutParams(-2,-2))
+                    labels.setOnClickListener { toggle.isChecked=!toggle.isChecked }
+                    parent.addView(row,LinearLayout.LayoutParams(-1,-2))
+                }
+                heading("Theme & colors")
+                preferenceRow("Theme",themes[themeKeys.indexOf(prefs.getString("appearance_mode","dark").orEmpty()).coerceAtLeast(0)]) { choose("Theme",themes) { prefs.edit().putString("appearance_mode",themeKeys[it]).apply(); recreate() } }
+                preferenceRow("Accent color",accents[accentKeys.indexOf(prefs.getString("accent","violet").orEmpty()).coerceAtLeast(0)]) { choose("Accent color",accents) { prefs.edit().putString("accent",accentKeys[it]).apply(); recreate() } }
+                heading("Display")
+                preferenceRow("Text size",sizes[prefs.getInt("reading_size",0).coerceIn(0,sizes.lastIndex)]) { choose("Reading size",sizes) { prefs.edit().putInt("reading_size",it).apply(); recreate() } }
+                appearanceToggle("High contrast text","Improve text visibility","high_contrast",false) { _,_-> recreate() }
+                heading("Interaction")
+                if(!tvMode) appearanceToggle("Haptic feedback","Feel a light vibration when interacting",BridgeHaptics.PREF,true) { view,checked -> if(checked) BridgeHaptics.tap(view) }
+                appearanceToggle("Reduce motion","Minimize interface animations","reduce_motion",false) { _,_-> recreate() }
+                heading("Content preferences")
+                appearanceToggle("Hide spoilers","Keep catalogue plot details hidden","hide_spoilers",true)
             }
             "library" -> {
-                heading("Dashboard & goals")
-                button("Monthly viewing goal and dashboard") { configureGoal() }
-                button("Customize dashboard and widget") { customizeDashboard() }
-                heading("Collections & organization")
-                button("Franchise viewing guides") { franchises() }
-                button("Share or import collections") { shareCollections() }
-                button("Smart collections") { smartCollections() }
-                button("Custom smart watchlists") { smartWatchlists() }
-                button("Personal collection profiles") { collectionProfiles() }
-                button("Personal collections") { collections() }
-                button("Organize library • tags and folders") { organizedLibrary() }
-                button("Favorite titles") { favorites() }
+                fun libraryRow(title:String,detail:String,action:()->Unit) {
+                    settingRow(group ?: root,title,detail,action)
+                }
+                fun libraryMenu(title:String,entries:List<Triple<String,String,()->Unit>>) {
+                    val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(4),dp(12),dp(12)) }
+                    val card=panel(body).apply { setPadding(dp(12),dp(4),dp(12),dp(4)) }
+                    val dialog=BridgeDialogBuilder(this).setTitle(title).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).create()
+                    entries.forEach { (name,detail,action) -> settingRow(card,name,detail) { dialog.dismiss(); action() } }
+                    dialog.show()
+                }
+                heading("Personalization")
+                libraryRow("Dashboard & viewing goal","Home layout, widget and monthly time budget") {
+                    libraryMenu("Dashboard & viewing goal",listOf(
+                        Triple("Customize dashboard","Choose visible sections, order and widget") { customizeDashboard() },
+                        Triple("Monthly viewing goal","Set an optional viewing time budget") { configureGoal() }
+                    ))
+                }
+                heading("Library organization")
+                libraryRow("Collections & watchlists","Personal lists, automatic rules, profiles and sharing") {
+                    libraryMenu("Collections & watchlists",listOf(
+                        Triple("Personal collections","Create and manage your own collections") { collections() },
+                        Triple("Smart collections","Browse automatically grouped viewing history") { smartCollections() },
+                        Triple("Smart watchlists","Create saved automatic watchlist rules") { smartWatchlists() },
+                        Triple("Collection profiles","Manage separate collections and personal notes") { collectionProfiles() },
+                        Triple("Share or import","Exchange personal collections") { shareCollections() }
+                    ))
+                }
+                libraryRow("Tags & folders","Find and organize titles by tags or collection") { organizedLibrary() }
+                libraryRow("Favorites","Manage saved favorite titles") { favorites() }
+                heading("Discovery")
+                libraryRow("Franchise guides","Explore curated movie viewing orders") { franchises() }
+                libraryRow("Anime","Local progress and public AniList libraries") {
+                    libraryMenu("Anime",listOf(
+                        Triple("My anime progress","Track episodes locally") { animeLocalProgress() },
+                        Triple("Public AniList library","Browse a public account without signing in") { publicAnimeList() }
+                    ))
+                }
                 heading("Shortcuts & reminders")
-                button("Automation shortcuts") { automationShortcuts() }
-                button("Universal playback shortcuts") { playbackShortcut() }
-                button("Cancel all episode reminders") { prefs.edit().putBoolean("episode_reminders",false).apply(); EpisodeReminders.cancelAll(this); Toast.makeText(this,"Reminders cancelled",Toast.LENGTH_SHORT).show() }
-                heading("Anime")
-                button("My anime progress (local)") { animeLocalProgress() }
-                button("Browse public AniList account") { publicAnimeList() }
+                libraryRow("Shortcuts","Automation links and direct playback shortcuts") {
+                    libraryMenu("Shortcuts",listOf(
+                        Triple("Automation shortcuts","Copy links for Android automation tools") { automationShortcuts() },
+                        Triple("Playback shortcuts","Open a specific title or installed player") { playbackShortcut() }
+                    ))
+                }
+                libraryRow("Episode reminders","Manage or cancel scheduled reminders") {
+                    BridgeDialogBuilder(this).setTitle("Episode reminders").setMessage("Cancel all scheduled episode reminders on this device?").setNegativeButton("Keep reminders",null).setPositiveButton("Cancel all reminders") { _,_->
+                        prefs.edit().putBoolean("episode_reminders",false).apply()
+                        EpisodeReminders.cancelAll(this)
+                        Toast.makeText(this,"Reminders cancelled",Toast.LENGTH_SHORT).show()
+                    }.show()
+                }
             }
             "privacy" -> {
-                heading("Privacy controls")
-                button("Privacy dashboard and data controls") { privacyDashboard() }
-                button("Privacy mode • stop tracking now") { privacyMode() }
+                heading("Tracking privacy")
+                val trackingActive=prefs.getBoolean("enabled",false) || prefs.getBoolean("title_optin",false) || prefs.getBoolean("device_sharing",false) || prefs.getBoolean("device_controls",false) || prefs.getBoolean("device_history",false)
+                settingRow(group ?: root,"Pause all tracking",if(trackingActive) "Tracking or sharing is enabled" else "Tracking and sharing are paused") { privacyMode() }
+                settingRow(group ?: root,"Privacy overview","Review tracking, data storage and account privacy") { privacyDashboard() }
                 heading("App protection")
-                (group ?: root).addView(Switch(this).apply { text="Require biometric or device credential on app resume"; isChecked=prefs.getBoolean("privacy_lock",false); setOnCheckedChangeListener { _,checked -> if(checked && !getSystemService(android.app.KeyguardManager::class.java).isDeviceSecure) { isChecked=false; Toast.makeText(this@MainActivity,"Set a device screen lock first",Toast.LENGTH_LONG).show() } else { prefs.edit().putBoolean("privacy_lock",checked).apply(); if(checked) { unlocked=false; requirePrivacyUnlock() } } } })
-                (group ?: root).addView(Switch(this).apply { text="Protect app screen from screenshots and recent-app previews"; isChecked=prefs.getBoolean("secure_screen",false); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("secure_screen",checked).apply(); applyScreenProtection() } })
+                settingToggle(group ?: root,"App lock","Require device authentication when returning to the app",prefs.getBoolean("privacy_lock",false)) { toggle,checked ->
+                    if(checked && !getSystemService(android.app.KeyguardManager::class.java).isDeviceSecure) {
+                        toggle.isChecked=false
+                        Toast.makeText(this,"Set a device screen lock first",Toast.LENGTH_LONG).show()
+                    } else {
+                        prefs.edit().putBoolean("privacy_lock",checked).apply()
+                        if(checked) { unlocked=false; requirePrivacyUnlock() }
+                    }
+                }
+                settingToggle(group ?: root,"Screen protection","Block screenshots and recent-app previews",prefs.getBoolean("secure_screen",false)) { _,checked ->
+                    prefs.edit().putBoolean("secure_screen",checked).apply(); applyScreenProtection()
+                }
             }
             "data" -> {
-                heading("Storage & caches")
-                (group ?: root).addView(Switch(this).apply { text="Download artwork only on unmetered networks"; isChecked=prefs.getBoolean("artwork_unmetered",false); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("artwork_unmetered",checked).apply() } })
-                button("Clear offline catalogue") { getSharedPreferences("offline_catalogue",MODE_PRIVATE).edit().clear().apply() }
-                button("Clear cached artwork") { Artwork.clear(this); Toast.makeText(this,"Artwork cache cleanup requested",Toast.LENGTH_SHORT).show() }
-                button("Recently deleted viewing") { recentlyDeleted() }
-                heading("Backup & transfer")
-                button("Transfer data to another device") { deviceTransferGuide() }
-                (group ?: root).addView(Switch(this).apply { text="Daily encrypted on-device history backup"; isChecked=prefs.getBoolean("daily_backup",false); setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean("daily_backup",checked).apply(); LocalBackupVault.schedule(this@MainActivity,checked) } })
-                button("Restore daily device backup") { restoreDailyBackup() }
-                button("Delete daily device backup") { LocalBackupVault.delete(this); Toast.makeText(this,"Device backup deleted",Toast.LENGTH_SHORT).show() }
-                heading("Encrypted import & export")
-                button("Export personal settings (encrypted)") { startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/octet-stream").putExtra(Intent.EXTRA_TITLE,"traktbridge-settings.tbenc"),65) }
-                button("Import personal settings (encrypted)") { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*"),66) }
-                button("Encrypted history backup") { startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/octet-stream").putExtra(Intent.EXTRA_TITLE,"traktbridge-history.tbenc"),63) }
-                button("Restore encrypted backup") { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*"),64) }
-                heading("File formats & external imports")
-                button("Back up viewing history (JSON)") { pickBackup(60) }
-                button("Export viewing history (CSV)") { pickBackup(61) }
-                button("Restore viewing history (JSON)") { pickBackup(62) }
-                button("Import Letterboxd diary (CSV)") { importSource="letterboxd"; startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*"),58) }
-                button("Import streaming viewing history (CSV)") { chooseImportProvider() }
-                button("Import external history (Trakt, IMDb, Simkl, anime)") { externalHistoryImport() }
+                fun dataRow(title:String,detail:String,action:()->Unit) { settingRow(group ?: root,title,detail,action) }
+                fun dataMenu(title:String,entries:List<Triple<String,String,()->Unit>>) {
+                    val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(4),dp(12),dp(12)) }
+                    val card=panel(body).apply { setPadding(dp(12),dp(4),dp(12),dp(4)) }
+                    val dialog=BridgeDialogBuilder(this).setTitle(title).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).create()
+                    entries.forEach { (name,detail,action) -> settingRow(card,name,detail) { dialog.dismiss(); action() } }
+                    dialog.show()
+                }
+                fun encryptedFile(request:Int,name:String="") {
+                    val intent=if(name.isNotEmpty()) Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/octet-stream").putExtra(Intent.EXTRA_TITLE,name)
+                        else Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
+                    startActivityForResult(intent,request)
+                }
+                heading("Backup & recovery")
+                settingToggle(group ?: root,"Automatic daily backup","Encrypted viewing history stored on this device",prefs.getBoolean("daily_backup",false)) { _,checked ->
+                    prefs.edit().putBoolean("daily_backup",checked).apply(); LocalBackupVault.schedule(this,checked)
+                }
+                dataRow("Create backup","Encrypted history or portable JSON file") {
+                    dataMenu("Create backup",listOf(
+                        Triple("Encrypted history","Password-protected backup") { encryptedFile(63,"traktbridge-history.tbenc") },
+                        Triple("JSON history","Unencrypted portable backup") { pickBackup(60) }
+                    ))
+                }
+                dataRow("Restore backup","Daily device backup, encrypted file or JSON") {
+                    dataMenu("Restore backup",listOf(
+                        Triple("Daily device backup","Restore the encrypted on-device copy") { restoreDailyBackup() },
+                        Triple("Encrypted history file","Choose a protected backup file") { encryptedFile(64) },
+                        Triple("JSON history file","Choose a portable history backup") { pickBackup(62) }
+                    ))
+                }
+                dataRow("Transfer to another device","Move data using the device transfer guide") { deviceTransferGuide() }
+                heading("Import & export")
+                dataRow("Import viewing history","Letterboxd, streaming services, Trakt and other sources") {
+                    dataMenu("Import viewing history",listOf(
+                        Triple("Letterboxd diary","Import a CSV diary") { importSource="letterboxd"; startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*"),58) },
+                        Triple("Streaming history","Import provider CSV data") { chooseImportProvider() },
+                        Triple("Other services","Trakt, IMDb, Simkl and anime history") { externalHistoryImport() }
+                    ))
+                }
+                dataRow("Export viewing history","CSV file for spreadsheets and other tools") { pickBackup(61) }
+                dataRow("Personal settings","Import or export encrypted preferences") {
+                    dataMenu("Personal settings",listOf(
+                        Triple("Export settings","Create an encrypted settings file") { encryptedFile(65,"traktbridge-settings.tbenc") },
+                        Triple("Import settings","Restore preferences from an encrypted file") { encryptedFile(66) }
+                    ))
+                }
+                heading("Storage & maintenance")
+                settingToggle(group ?: root,"Artwork on unmetered networks only","Avoid artwork downloads on metered connections",prefs.getBoolean("artwork_unmetered",false)) { _,checked ->
+                    prefs.edit().putBoolean("artwork_unmetered",checked).apply()
+                }
+                dataRow("Recently deleted","Review recoverable viewing records") { recentlyDeleted() }
+                dataRow("Manage storage","Clear cached data or delete the daily backup") {
+                    dataMenu("Manage storage",listOf(
+                        Triple("Clear offline catalogue","Remove cached catalogue information") { getSharedPreferences("offline_catalogue",MODE_PRIVATE).edit().clear().apply() },
+                        Triple("Clear artwork cache","Remove downloaded artwork") { Artwork.clear(this); Toast.makeText(this,"Artwork cache cleanup requested",Toast.LENGTH_SHORT).show() },
+                        Triple("Delete daily backup","Remove the on-device backup file") {
+                            BridgeDialogBuilder(this).setTitle("Delete daily backup?").setMessage("This deletes the current backup copy, not your viewing history. Automatic backups may create a new copy if enabled.").setNegativeButton("Cancel",null).setPositiveButton("Delete") { _,_-> LocalBackupVault.delete(this); Toast.makeText(this,"Device backup deleted",Toast.LENGTH_SHORT).show() }.show()
+                        }
+                    ))
+                }
             }
             "advanced" -> {
-                heading("Updates & support")
-                button("Check for app updates") { checkUpdates() }
-                button("Beta feedback and diagnostics") { betaFeedback() }
-                button("Companion status") { val summary=CompanionStatus.summarize(history.records(0)); BridgeDialogBuilder(this).setTitle("Companion status").setMessage("Active sessions: "+summary.active+"\nAwaiting review: "+summary.pending+"\nSampled time: "+durationText(summary.watchedMs)).setPositiveButton("Close",null).show() }
-                heading("Compatibility & diagnostics")
-                button("Playback compatibility profiles") { BridgeDialogBuilder(this).setTitle("Playback profiles").setMessage(PlayerRules.apps.entries.joinToString("\n") { (name,pkg) -> name+": "+DetectionProfiles.forPackage(pkg).label }).setPositiveButton("Close",null).show() }
-                button("Check history database integrity") { checkHistoryIntegrity() }
-                button("Encryption migration readiness") { encryptionReadiness() }
-                button("Tracking health and review center") { trackingHealth() }
-                button("Live recognition inspector") { liveInspector() }
-                button("Open diagnostic recorder") { startActivity(Intent(this,DebugActivity::class.java)) }
-                button("Refresh diagnostics") { refresh() }
-                button("Clear diagnostic data") { prefs.edit().remove("sessions").remove("last_nonempty_sessions").remove("sample_error").apply(); refresh() }
-                root.addView(output)
+                fun supportRow(title:String,detail:String,action:()->Unit) { settingRow(group ?: root,title,detail,action) }
+                fun supportMenu(title:String,entries:List<Triple<String,String,()->Unit>>) {
+                    val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(4),dp(12),dp(12)) }
+                    val card=panel(body).apply { setPadding(dp(12),dp(4),dp(12),dp(4)) }
+                    val dialog=BridgeDialogBuilder(this).setTitle(title).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).create()
+                    entries.forEach { (name,detail,action) -> settingRow(card,name,detail) { dialog.dismiss(); action() } }
+                    dialog.show()
+                }
+                heading("App & support")
+                supportRow("App updates","Check for a newer version") { checkUpdates() }
+                supportRow("Send feedback","Report a problem or suggest an improvement") { betaFeedback() }
+                heading("Tracking status")
+                supportRow("Tracking health","Permissions, sampling, battery and review status") { trackingHealth() }
+                supportRow("Companion status","Active sessions, pending reviews and measured viewing") {
+                    val summary=CompanionStatus.summarize(history.records(0))
+                    BridgeDialogBuilder(this).setTitle("Companion status").setMessage("Active sessions: "+summary.active+"\nAwaiting review: "+summary.pending+"\nSampled time: "+durationText(summary.watchedMs)).setPositiveButton("Close",null).show()
+                }
+                heading("Advanced tools")
+                supportRow("Database & encryption","Integrity checks and encryption migration readiness") {
+                    supportMenu("Database & encryption",listOf(
+                        Triple("History database integrity","Check stored viewing records") { checkHistoryIntegrity() },
+                        Triple("Encryption readiness","Check migration requirements") { encryptionReadiness() }
+                    ))
+                }
+                supportRow("Diagnostics","Live recognition, recording, technical status and cleanup") {
+                    supportMenu("Diagnostics",listOf(
+                        Triple("Live recognition","Inspect current playback detection") { liveInspector() },
+                        Triple("Diagnostic recorder","Open the diagnostic recording tool") { startActivity(Intent(this,DebugActivity::class.java)) },
+                        Triple("Technical status","Refresh and view detailed diagnostic information") {
+                            refresh()
+                            val detail=TextView(this).apply { text=output.text; setTextIsSelectable(true); setPadding(dp(16),dp(12),dp(16),dp(12)); setTextColor(ink) }
+                            BridgeDialogBuilder(this).setTitle("Technical status").setView(ScrollView(this).apply { addView(detail) }).setPositiveButton("Close",null).show()
+                        },
+                        Triple("Clear diagnostic data","Remove stored session snapshots and last error") {
+                            BridgeDialogBuilder(this).setTitle("Clear diagnostic data?").setMessage("Removes diagnostic session snapshots and the last sampling error. Saved viewing history is unchanged.").setNegativeButton("Cancel",null).setPositiveButton("Clear") { _,_-> prefs.edit().remove("sessions").remove("last_nonempty_sessions").remove("sample_error").apply(); refresh() }.show()
+                        }
+                    ))
+                }
             }
         }
     }
@@ -873,27 +970,22 @@ class MainActivity : ComponentActivity() {
         val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(12),dp(16),dp(12)) }
         fun status(label:String,enabled:Boolean) { body.addView(txt(label+": "+if(enabled) "On" else "Off",15,ink)) }
         status("Playback tracking",prefs.getBoolean("enabled",false))
-        status("Title suggestions",prefs.getBoolean("title_optin",false))
-        status("Usage fallback",prefs.contains("usage_since") && UsageFallback.allowed(this))
+        status("YouTube player identification",prefs.getBoolean("title_optin",false))
         status("Device credential lock",prefs.getBoolean("privacy_lock",false))
         status("Screenshot protection",prefs.getBoolean("secure_screen",false))
         status("Daily encrypted backup",prefs.getBoolean("daily_backup",false))
         status("Automatic remote refresh",prefs.getString("auto_refresh_account","").orEmpty().isNotBlank())
         body.addView(txt("Local viewing SQLite is not encrypted. Downloaded Trakt account data, OAuth credentials and optional encrypted backups use device-backed or password-based encryption.",14,muted))
-        body.addView(actionButton("Pause tracking") { privacyMode() })
         body.addView(actionButton("Disable automatic remote refresh") { RemoteRefreshSchedule.disable(this); Toast.makeText(this,"Remote refresh disabled",Toast.LENGTH_SHORT).show() })
         body.addView(actionButton("Delete downloaded Trakt account data") {
             BridgeDialogBuilder(this).setTitle("Clear downloaded Trakt data?").setMessage("Stops automatic refresh and deletes the downloaded account library. Local viewing records and your Trakt account are unchanged.").setNegativeButton("Cancel",null).setPositiveButton("Clear") { _,_->RemoteRefreshSchedule.disable(this); TraktLibrary.clearCache(this) }.show()
         })
-        body.addView(actionButton("Export encrypted history") { startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/octet-stream").putExtra(Intent.EXTRA_TITLE,"traktbridge-history.tbenc"),63) })
         BridgeDialogBuilder(this).setTitle("Privacy dashboard").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
     }
     private fun privacyMode() {
-        BridgeDialogBuilder(this).setTitle("Pause all playback tracking?").setMessage("Sampling, title hints and optional usage reminders stop. Existing history and already approved uploads are retained. Restart tracking manually in Settings.").setNegativeButton("Cancel",null).setPositiveButton("Pause tracking") { _,_->
-            val generation=prefs.getLong("ocr_generation",0)+1
-            val edit=prefs.edit().putBoolean("enabled",false).putBoolean("device_sharing",false).putBoolean("device_controls",false).putBoolean("device_history",false).putBoolean("title_optin",false).remove("usage_since").remove("sessions").remove("last_nonempty_sessions")
-            prefs.all.keys.filter { it.startsWith("ocr_") || it.startsWith("title_hint:") || it.startsWith("title_detail:") || it.startsWith("title_time:") }.forEach { edit.remove(it) }
-            edit.putLong("ocr_generation",generation).apply(); stopService(Intent(this,TrackingService::class.java)); recreate()
+        BridgeDialogBuilder(this).setTitle("Pause all playback tracking?").setMessage("YouTube playback sampling, player identification and device sharing stop. Existing history and already approved uploads are retained. Restart tracking manually in Settings.").setNegativeButton("Cancel",null).setPositiveButton("Pause tracking") { _,_->
+            val edit=prefs.edit().putBoolean("enabled",false).putBoolean("device_sharing",false).putBoolean("device_controls",false).putBoolean("device_history",false).putBoolean("title_optin",false).remove("sessions").remove("last_nonempty_sessions")
+            edit.remove("segment:"+YouTubePlayback.PACKAGE).remove("segment_time:"+YouTubePlayback.PACKAGE).apply(); YouTubePlayback.clear(); PlaybackListener.wake(); stopService(Intent(this,TrackingService::class.java)); recreate()
         }.show()
     }
     private fun configureGoal() {
@@ -1068,8 +1160,8 @@ class MainActivity : ComponentActivity() {
         step("Notification access",if(access) "Granted" else "Required for media-session detection.") { runCatching { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }.onFailure { Toast.makeText(this,"This device does not expose the notification access settings screen.",Toast.LENGTH_LONG).show() } }
         step("Video app selection",(prefs.getStringSet("allowed",emptySet())?.size ?: 0).toString()+" selected. Choose only apps you want tracked.") { chooseInstalledApps() }
         step("Battery settings",BatteryCompatibility.guidance(android.os.Build.MANUFACTURER)+" Optional; no setting is changed automatically.") { runCatching { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) } }
-        step("Start tracking","Enable background sampling after selecting apps and granting access.") { if(TrackingRecovery.listenerGranted(this) && !prefs.getStringSet("allowed",emptySet()).isNullOrEmpty()) { prefs.edit().putBoolean("enabled",true).apply(); startTracking() } else Toast.makeText(this,"Grant notification access and choose playback apps first.",Toast.LENGTH_LONG).show() }
-        box.addView(txt("Accessibility title detection and app-activity fallback are optional and require separate consent in Settings. Trakt sign-in is not required for local tracking.",14,muted))
+        step("Start tracking","Enable background sampling after selecting apps and granting access.") { if(TrackingRecovery.listenerGranted(this) && !prefs.getStringSet("allowed",emptySet()).isNullOrEmpty()) { prefs.edit().putBoolean("enabled",true).apply(); startTracking(); if(settingsCategory=="tracking") refreshSettingsState("tracking") } else Toast.makeText(this,"Grant notification access and choose playback apps first.",Toast.LENGTH_LONG).show() }
+        box.addView(txt("YouTube player identification requires separate Accessibility consent in Settings when the media session does not identify the player type. Trakt sign-in is not required for local tracking.",14,muted))
         BridgeDialogBuilder(this).setTitle("Set up TraktBridge").setView(ScrollView(this).apply { addView(box) }).setNegativeButton("Later",null).setPositiveButton("Done") { _,_->showTab(4) }.show()
     }
     private fun handleTrackingShortcut(intent:Intent) {
@@ -1084,8 +1176,8 @@ class MainActivity : ComponentActivity() {
             android.service.notification.NotificationListenerService.requestRebind(android.content.ComponentName(this,PlaybackListener::class.java))
         }.onFailure { DebugTrace.failure("foreground",it); Toast.makeText(this,"Unable to start tracking",Toast.LENGTH_LONG).show() }
     }
-    override fun onPause() { super.onPause(); if(prefs.getBoolean("privacy_lock",false) && !privacyPrompt) { unlocked=false; if(::shell.isInitialized) shell.visibility=android.view.View.INVISIBLE } }
-    override fun onResume() { super.onResume(); if (::output.isInitialized) refresh(); if (::historyList.isInitialized) refreshHistory(); requirePrivacyUnlock(); recoverTrackingWhenVisible(); if(::settingsOverview.isInitialized && settingsCategory=="devices") refreshDeviceSettings() }
+    override fun onPause() { AutoMatchSuggestions.store(this).unregisterOnSharedPreferenceChangeListener(suggestionListener); super.onPause(); if(prefs.getBoolean("privacy_lock",false) && !privacyPrompt) { unlocked=false; if(::shell.isInitialized) shell.visibility=android.view.View.INVISIBLE } }
+    override fun onResume() { super.onResume(); AutoMatchSuggestions.store(this).registerOnSharedPreferenceChangeListener(suggestionListener); if (::output.isInitialized) refresh(); if (::historyList.isInitialized) refreshHistory(); requirePrivacyUnlock(); recoverTrackingWhenVisible(); if(::settingsOverview.isInitialized && settingsCategory in setOf("devices","tracking","privacy")) refreshSettingsState(settingsCategory) }
     private fun recoverTrackingWhenVisible() {
         val permitted=!prefs.getBoolean("privacy_lock",false) || unlocked
         if(TrackingRecovery.shouldStart(prefs.getBoolean("enabled",false),permitted,TrackingService.running,TrackingRecovery.listenerGranted(this))) startTracking()
@@ -1188,6 +1280,7 @@ class MainActivity : ComponentActivity() {
     private fun renderHistory(records:List<WatchRecord>,groups:List<ViewingTitle>) {
         dashboard.removeAllViews()
         val pending=groups.count { it.queued || it.pending }
+        if(tab==2) requestReviewSuggestions(records)
         when(tab) {
             0 -> {
                 val age=System.currentTimeMillis()-prefs.getLong("last_sample",0)
@@ -1222,7 +1315,7 @@ class MainActivity : ComponentActivity() {
                     }
                     "review" -> {
                 section(dashboard,"Review queue")
-                val q=panel(dashboard); q.addView(txt("$pending awaiting action",22,ink,true)); q.addView(actionButton("Open review queue") { showTab(2) }); q.addView(actionButton("Review app activity") { reviewUsage() })
+                val q=panel(dashboard); q.addView(txt("$pending awaiting action",22,ink,true)); q.addView(actionButton("Open review queue") { showTab(2) })
 
                     }
                     "discover" -> {
@@ -1244,10 +1337,10 @@ class MainActivity : ComponentActivity() {
             }
             1,2 -> {
                 if(tab==1) dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeLibraryToolbar(violet,groups.size.toString()+" identified titles and provisional groups",{ universalSearch() },{ editHistoryFilter(records) },{ manualLog() }) } })
-                else { if(tvMode) dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeTvSettings(violet,listOf(UiAction("Review recent activity") { reviewUsage() },UiAction("Retry approved uploads") { HistorySync.schedule(this@MainActivity); refreshHistory() })) } }); dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeReviewSummary(violet,pending,{ manualLog() },{ HistorySync.schedule(this@MainActivity); refreshHistory() }) } }) }
+                else { dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeReviewSummary(violet,pending,{ manualLog() },{ HistorySync.schedule(this@MainActivity); refreshHistory() }) } }) }
                 if(tab==1) { dashboard.addView(actionButton("Synced Trakt account library") { openDownloadedTrakt() }); dashboard.addView(actionButton("Unified movie, TV and anime library") { unifiedLibrary() }); dashboard.addView(actionButton("Advanced search • tags and folders") { organizedLibrary() }) }
                 dashboard.addView(actionButton("Refresh") { refreshHistory() })
-                if(tab==2) { dashboard.addView(actionButton("Review recent app activity") { reviewUsage() }); dashboard.addView(actionButton("Retry approved sync queue") { HistorySync.schedule(this); refreshHistory() }) }
+                
                 if(tab==1) {
                     dashboard.addView(txt("Filters: "+listOfNotNull(historyFilter.query.takeIf { it.isNotBlank() }?.let { "Search: "+it },historyFilter.source.takeIf { it.isNotBlank() }?.let { appLabel(it) },historyFilter.period.takeIf { it>0 }?.let { "Last "+it+" days" },historyFilter.type.takeIf { it.isNotBlank() },historyFilter.status.takeIf { it.isNotBlank() } ).joinToString(" • ").ifBlank { "All viewing" },13,muted))
                     if(historyFilter!=HistoryFilter()) dashboard.addView(actionButton("Reset filters") { historyFilter=HistoryFilter(); historyLimit=MemoryPolicy.pageSize(lowRam); refreshHistory() })
@@ -2293,18 +2386,67 @@ class MainActivity : ComponentActivity() {
         val min=ms/60000
         return if(min>=60) (min/60).toString()+"h "+(min%60)+"m" else if(min==0L && ms>0) (ms/1000).toString()+"s" else min.toString()+" min"
     }
+    private val suggestionListener=android.content.SharedPreferences.OnSharedPreferenceChangeListener { _,_ ->
+        if(!isDestroyed && !isFinishing && tab==2 && ::contentPage.isInitialized && (!prefs.getBoolean("privacy_lock",false) || unlocked)) {
+            restoreScrollY=contentPage.scrollY
+            refreshHistory()
+        }
+    }
+    private fun requestReviewSuggestions(records:List<WatchRecord>) {
+        if(tab!=2 || (prefs.getBoolean("privacy_lock",false) && !unlocked)) return
+        AutoMatchSuggestions.enqueue(this,records)
+    }
+    private fun acceptSuggestion(r:WatchRecord,item:CatalogueItem) {
+        val current=history.record(r.id)
+        if(current==null || !AutoMatchSuggestions.eligible(current) || current.title!=r.title || current.subtitle!=r.subtitle) {
+            Toast.makeText(this,"Viewing record changed; refresh and try again",Toast.LENGTH_LONG).show()
+            refreshHistory(); return
+        }
+        if(item.type=="show") { selectSuggestedEpisode(current,item); return }
+        history.match(current.id,item,false)
+        val saved=history.record(current.id)
+        if(saved==null || saved.traktId!=item.id || saved.matchType!=item.type) {
+            Toast.makeText(this,"Match could not be saved; refresh and try again",Toast.LENGTH_LONG).show()
+            refreshHistory(); return
+        }
+        AutoMatchSuggestions.confirmed(this,current,item)
+        AutoMatchSuggestions.remove(this,current.id)
+        ViewingNotifications.cancel(this,current.id)
+        refreshHistory()
+        Toast.makeText(this,"Match saved locally",Toast.LENGTH_SHORT).show()
+    }
+    private fun suggestionActions(r:WatchRecord,state:AutoMatchSuggestions.State):List<UiAction> {
+        val best=state.matches.firstOrNull()?.item
+        val actions=mutableListOf<UiAction>()
+        if(best!=null) {
+            actions.add(UiAction(if(best.type=="show") "Yes — choose episode" else "Yes, correct") { acceptSuggestion(r,best) })
+            if(state.matches.size>1) actions.add(UiAction("Other suggested matches") {
+                choose("Alternative Trakt matches",state.matches.drop(1).map { it.item.label()+" • "+it.reason }) { i ->
+                    val item=state.matches[i+1].item
+                    BridgeDialogBuilder(this).setTitle("Use this match?").setMessage(item.label()).setNegativeButton("Cancel",null).setPositiveButton("Yes") { _,_->acceptSuggestion(r,item) }.show()
+                }
+            })
+            actions.add(UiAction("No, incorrect") { AutoMatchSuggestions.reject(this,r); refreshHistory() })
+        }
+        actions.add(UiAction("Search manually") { identify(r) })
+        return actions
+    }
     private fun titleEntry(g:ViewingTitle,expanded:Boolean):LazyTitleEntry {
         val r=g.representative
+        val suggestion=if(tab==2 && AutoMatchSuggestions.eligible(r)) AutoMatchSuggestions.read(this,r) else null
+        val candidate=suggestion?.matches?.firstOrNull()?.item
         val assessment=g.positionSession?.let { completionAssessment(it) }
         val completion=when { g.sessions.all { it.status=="restored_audit" } -> "Restored history • prior upload not repeated"; g.confirmed -> "Finished • synced to Trakt"; g.queued -> "Completion approved • sync pending"; g.active -> "Currently watching"; assessment?.suggested==true -> "Completion suggested • confirm manually"; g.positionMs>=0 -> "In progress"; else -> "Completion unknown" }
         val progress=if(g.durationMs>0 && g.positionMs>=0) (g.positionMs.toDouble()/g.durationMs*100).toInt().coerceIn(0,100) else null
         val position=if(progress!=null) durationText(g.positionMs)+" / "+durationText(g.durationMs)+" • "+durationText(g.remainingMs)+" left • "+g.positionSource else (if(g.catalogueRuntimeMs>0) "Catalogue runtime: "+durationText(g.catalogueRuntimeMs)+" • " else "")+"Remaining time unavailable"
         val diagnostics=buildString {
             if(g.bufferingMs>0 || g.pausedMs>0 || g.seeks>0 || g.uncertainMs>0) append("Paused: "+durationText(g.pausedMs)+" • Buffering: "+durationText(g.bufferingMs)+" • Seeks: "+g.seeks+" • Uncertain: "+durationText(g.uncertainMs))
-            if(r.traktId<=0) append(" Identify exact title to combine sessions.")
+            if(suggestion!=null) append("\n"+when(suggestion.status) { "ready"->"Suggested: "+suggestion.matches.first().reason+" • Original: "+r.title; "searching","waiting"->"Searching Trakt automatically…"; "none"->"No reliable Trakt match found."; "error"->"Catalogue unavailable; will retry."; "rejected"->"Suggestion rejected."; else->"" })
+            else if(r.traktId<=0) append(" Identify exact title to combine sessions.")
         }
-        val row=TitleUi(r.matchLabel.ifBlank { r.title.ifBlank { "Unidentified video" } },g.platforms.joinToString(" • ") { appLabel(it) },g.sessions.size.toString()+" viewing session(s) • "+java.text.DateFormat.getDateInstance().format(java.util.Date(g.latest.ended)),completion,"Total sampled watch time: "+if(g.sampledMs>0) durationText(g.sampledMs) else "Unknown",progress,position,diagnostics,if(r.matchType=="episode") "show" else "movie",if(r.matchType=="episode") r.showId else r.traktId)
+        val row=TitleUi(candidate?.label() ?: r.matchLabel.ifBlank { r.title.ifBlank { "Unidentified video" } },if(candidate!=null) "Suggested Trakt match • "+appLabel(r.source) else g.platforms.joinToString(" • ") { appLabel(it) },g.sessions.size.toString()+" viewing session(s) • "+java.text.DateFormat.getDateInstance().format(java.util.Date(g.latest.ended)),completion,"Total sampled watch time: "+if(g.sampledMs>0) durationText(g.sampledMs) else "Unknown",progress,position,diagnostics,if(candidate?.type in setOf("episode","show") || r.matchType=="episode") "show" else "movie",candidate?.let { if(it.type=="episode") it.showId else it.id } ?: if(r.matchType=="episode") r.showId else r.traktId)
         val actions=mutableListOf<UiAction>()
+        if(suggestion!=null) actions.addAll(suggestionActions(r,suggestion))
         if(r.traktId>0) actions.add(UiAction("Title details") { titleDetails(if(r.matchType=="episode") "show" else "movie",if(r.matchType=="episode") r.showId else r.traktId,r.matchLabel) })
         if(!g.confirmed) actions.add(UiAction("Open playback app") { openPlaybackApp(g.platforms) })
         if(r.traktId>0) actions.add(UiAction("Review possible duplicate titles") { duplicateTitles(r) })
@@ -2337,13 +2479,14 @@ class MainActivity : ComponentActivity() {
     private fun showSessions(g:ViewingTitle) {
         val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
         body.addView(txt("Original viewing sessions are retained. Synced viewing events: "+g.sessions.count { it.status=="synced" },14,muted))
+        val dialog=BridgeDialogBuilder(this).setTitle(g.representative.matchLabel.ifBlank { g.representative.title.ifBlank { "Viewing sessions" } }).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close") { _,_->refreshHistory() }.create()
         g.sessions.forEach { session ->
             if(session.id in g.possibleRewatchIds) body.addView(txt("Possible rewatch — review before approving",14,muted))
-            recordCard(body,session,true,g.confirmed || g.queued)
+            recordCard(body,session,true,g.confirmed || g.queued,onDeleted={ dialog.dismiss() })
         }
-        BridgeDialogBuilder(this).setTitle(g.representative.matchLabel.ifBlank { g.representative.title.ifBlank { "Viewing sessions" } }).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close") { _,_->refreshHistory() }.show()
+        dialog.show()
     }
-    private fun recordCard(parent:LinearLayout,r:WatchRecord,expanded:Boolean,completionAlreadyRecorded:Boolean=false) {
+    private fun recordCard(parent:LinearLayout,r:WatchRecord,expanded:Boolean,completionAlreadyRecorded:Boolean=false,onDeleted:()->Unit={}) {
         val status=when(r.status) { "synced"->"Synced to Trakt"; "active"->"Watching"; "pending"->"Needs review"; "reviewed"->"Ready to confirm"; "restored_audit"->"Restored audit • no upload"; else->r.status.replaceFirstChar { it.uppercase() } }
         val progress=if(r.duration>0 && r.position>=0) (r.position.toDouble()/r.duration*100).toInt().coerceIn(0,100) else null
         val evidence=buildString {
@@ -2370,7 +2513,21 @@ class MainActivity : ComponentActivity() {
                     val title=field.text.toString().trim(); if(title.isNotEmpty()) { history.review(r.id,title); ViewingNotifications.cancel(this,r.id); refreshHistory() }
                 }.show()
             })
-            if(r.status in setOf("pending","reviewed")) actions.add(UiAction("Delete viewing record") { BridgeDialogBuilder(this).setTitle("Delete this local record?").setNegativeButton("Cancel",null).setPositiveButton("Delete") { _,_-> history.trash(r.id); ViewingNotifications.cancel(this,r.id); refreshHistory() }.show() })
+            if(r.status in setOf("pending","reviewed")) actions.add(UiAction("Delete viewing record") {
+                BridgeDialogBuilder(this).setTitle("Delete this local record?").setNegativeButton("Cancel",null).setPositiveButton("Delete") { _,_->
+                    val deleted=runCatching { history.trash(r.id) }.getOrDefault(false)
+                    if(deleted) {
+                        AutoMatchSuggestions.remove(this,r.id)
+                        ViewingNotifications.cancel(this,r.id)
+                        onDeleted()
+                        refreshHistory()
+                        Toast.makeText(this,"Viewing record deleted",Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(this,"Record could not be deleted; refresh and try again",Toast.LENGTH_LONG).show()
+                        refreshHistory()
+                    }
+                }.show()
+            })
         }
         parent.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeTitleCard(violet,row,actions) } })
     }
@@ -2378,38 +2535,15 @@ class MainActivity : ComponentActivity() {
         packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg,0)).toString()
     }.getOrDefault(pkg)
     private fun chooseInstalledApps() {
-        val selected=(prefs.getStringSet("allowed",emptySet()) ?: emptySet()).toMutableSet()
-        val launch=Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-        val packages=(packageManager.queryIntentActivities(launch,0).map { it.activityInfo.packageName } + selected + apps.values)
-            .filter { it != packageName }.distinct().sortedBy { appLabel(it).lowercase() }
+        val packages=PlaybackDetectors.supported.toList()
+        val selected=PlaybackDetectors.selected(prefs.getStringSet("allowed",emptySet()).orEmpty()).toMutableSet()
         val checked=packages.map { it in selected }.toBooleanArray()
-        BridgeDialogBuilder(this).setTitle("Select only video apps you want tracked")
-            .setMultiChoiceItems(packages.map { appLabel(it)+" ("+it+")" }.toTypedArray(),checked) { _, index, enabled ->
+        BridgeDialogBuilder(this).setTitle("Supported playback apps")
+            .setMultiChoiceItems(packages.map { appLabel(it)+" — regular videos only" }.toTypedArray(),checked) { _,index,enabled ->
                 if(enabled) selected.add(packages[index]) else selected.remove(packages[index])
             }.setNegativeButton("Cancel",null).setPositiveButton("Save") { _,_ ->
-                prefs.edit().putStringSet("allowed",selected).apply(); recreate()
+                prefs.edit().putStringSet("allowed",selected).apply(); PlaybackListener.wake(); recreate()
             }.show()
-    }
-    private fun reviewUsage() {
-        if(!prefs.contains("usage_since") || !UsageFallback.allowed(this)) {
-            BridgeDialogBuilder(this).setMessage("Enable app-activity fallback and grant Usage access first. Only selected apps are queried, and app activity is not proof of video playback.").setPositiveButton("OK",null).show(); return
-        }
-        val selected=prefs.getStringSet("allowed",emptySet()) ?: emptySet()
-        val items=runCatching { UsageFallback.recent(this,selected,prefs.getLong("usage_since",System.currentTimeMillis())) }.getOrDefault(emptyList())
-            .filterNot { history.overlapsActivity(it.source,it.start,it.end) }
-        choose("Recent app activity — not watch time",items.map { appLabel(it.source)+" • "+((it.end-it.start)/60000)+" min in app • "+java.text.DateFormat.getDateTimeInstance().format(java.util.Date(it.start)) }) { i ->
-            val item=items[i]
-            val suggestion=TitleAccessibility.hint(this,item.source,item.start,item.end)
-            val field=EditText(this).apply { hint="What did you watch?"; setSingleLine(true); setText(suggestion?.first.orEmpty()) }
-            val dialog=BridgeDialogBuilder(this).setTitle("Confirm you watched a video").setMessage("App activity may include browsing or idle time. Confirm or correct any suggested title only if you watched something. Actual watch time is unknown.").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Add locally",null).create()
-            dialog.setOnShowListener { dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                val title=field.text.toString().trim()
-                if(title.isBlank()) { field.error="Enter title"; return@setOnClickListener }
-                val id=history.addManualActivity(item.source,title,item.start,item.end)
-                dialog.dismiss(); refreshHistory(); history.record(id)?.let { identify(it) }
-            } }
-            dialog.show()
-        }
     }
     private fun configureCompletionThreshold() {
         val options=listOf(75,80,85,90,95,100)
@@ -2501,7 +2635,7 @@ class MainActivity : ComponentActivity() {
         }
     }
     private fun confirmMatch(r: WatchRecord, item: CatalogueItem) {
-        BridgeDialogBuilder(this).setTitle("Save local match?").setMessage(item.label() + "\nTrakt ID: " + item.id + "\nThis does not mark it watched on Trakt.").setNegativeButton("Cancel",null).setPositiveButton("Save match") { _,_ -> history.match(r.id,item); ViewingNotifications.cancel(this,r.id); refreshHistory() }.show()
+        BridgeDialogBuilder(this).setTitle("Save local match?").setMessage(item.label() + "\nTrakt ID: " + item.id + "\nThis does not mark it watched on Trakt.").setNegativeButton("Cancel",null).setPositiveButton("Save match") { _,_ -> history.match(r.id,item); AutoMatchSuggestions.confirmed(this,r,item); AutoMatchSuggestions.remove(this,r.id); ViewingNotifications.cancel(this,r.id); refreshHistory() }.show()
     }
     private fun refresh() {
         val raw=prefs.getString("sessions","[]") ?: "[]"
@@ -2509,7 +2643,7 @@ class MainActivity : ComponentActivity() {
         val access=if(android.os.Build.VERSION.SDK_INT>=27) manager.isNotificationListenerAccessGranted(android.content.ComponentName(this,PlaybackListener::class.java)) else Settings.Secure.getString(contentResolver,"enabled_notification_listeners").orEmpty().split(":").any { android.content.ComponentName.unflattenFromString(it)==android.content.ComponentName(this,PlaybackListener::class.java) }
         val last=prefs.getLong("last_sample",0)
         val age=if(last>0) ((System.currentTimeMillis()-last)/1000).coerceAtLeast(0) else -1
-        val info=listOf("Sampling enabled: "+prefs.getBoolean("enabled",false),"Notification listener access: "+access,"Listener connected (last reported): "+prefs.getBoolean("listener_connected",false),"Last sample: "+(if(age<0) "never" else age.toString()+" sec ago"),"Selected apps: "+(prefs.getStringSet("allowed",emptySet())?.size ?: 0),"Usage fallback: "+(prefs.contains("usage_since") && UsageFallback.allowed(this)),"Review notifications permitted: "+ViewingNotifications.enabled(this),"Selected media sessions: "+prefs.getInt("session_count",0),"Tracked sessions: "+prefs.getInt("tracked_session_count",0),"Last error: "+prefs.getString("sample_error","none")).joinToString("\n")
+        val info=listOf("Sampling enabled: "+prefs.getBoolean("enabled",false),"Notification listener access: "+access,"Listener connected (last reported): "+prefs.getBoolean("listener_connected",false),"Last sample: "+(if(age<0) "never" else age.toString()+" sec ago"),"Selected apps: "+(prefs.getStringSet("allowed",emptySet())?.size ?: 0),"Review notifications permitted: "+ViewingNotifications.enabled(this),"Selected media sessions: "+prefs.getInt("session_count",0),"Tracked sessions: "+prefs.getInt("tracked_session_count",0),"Last error: "+prefs.getString("sample_error","none")).joinToString("\n")
         val current=runCatching { JSONArray(raw).toString(2) }.getOrDefault("[]")
         val previous=runCatching { JSONArray(prefs.getString("last_nonempty_sessions","[]") ?: "[]").toString(2) }.getOrDefault("[]")
         output.text=info+"\n\nCurrent selected media sessions:\n"+current+"\n\nLast nonempty selected media sessions:\n"+previous

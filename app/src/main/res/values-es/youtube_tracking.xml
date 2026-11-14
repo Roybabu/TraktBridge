@@ -1,0 +1,3 @@
+<resources>
+    <string name="youtube_player_identification_description">Identifica los controles del reproductor normal de YouTube para excluir Shorts y anuncios. No lee los títulos de los vídeos ni toma capturas de pantalla.</string>
+</resources>
