@@ -81,6 +81,7 @@ class PlaybackListener : NotificationListenerService() {
     }
     private fun notifyPending() {
         if (!getSharedPreferences("tracker",MODE_PRIVATE).getBoolean("enabled",false) || !ViewingNotifications.enabled(this)) return
+        history.applyLearned(100)
         for (record in history.pendingNotifications().take(3)) {
             if(RewatchAutomation.isKnownRewatch(this,record)) { history.markNotified(record.id); continue }
             val posted=ViewingNotifications.post(this,record); DebugTrace.event("notification","viewing review posted="+posted); if(posted) history.markNotified(record.id)
