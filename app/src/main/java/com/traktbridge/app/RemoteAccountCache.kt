@@ -13,9 +13,16 @@ object RemoteAccountCache {
     data class Status(val count:Int,val complete:Boolean,val updated:Long,val marker:String)
     private fun meta(c:Context)=c.getSharedPreferences(META,Context.MODE_PRIVATE)
     private fun store(c:Context,k:TraktData)=c.getSharedPreferences("trakt_account_cache_"+k.name.lowercase(java.util.Locale.ROOT),Context.MODE_PRIVATE)
+    private var activeBlob:String?=null
+    private var activeAccount:String?=null
     @Synchronized fun active(c:Context):String? {
-        if(!TraktAuth(c).hasConnection()) return null
-        return meta(c).getString(ACTIVE,null)?.let { runCatching { PrivateHistoryCache.open(it,ACTIVE) }.getOrNull() }
+        if(!TraktAuth(c).hasConnection()) { activeBlob=null; activeAccount=null; return null }
+        val encrypted=meta(c).getString(ACTIVE,null)
+        if(encrypted==null) { activeBlob=null; activeAccount=null; return null }
+        if(encrypted==activeBlob) return activeAccount
+        val account=runCatching { PrivateHistoryCache.open(encrypted,ACTIVE) }.getOrNull()
+        if(account!=null) { activeBlob=encrypted; activeAccount=account }
+        return account
     }
     @Synchronized fun activate(c:Context,account:String):Long {
         require(account.isNotBlank())
