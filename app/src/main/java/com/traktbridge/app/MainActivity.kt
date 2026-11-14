@@ -684,6 +684,10 @@ class MainActivity : ComponentActivity() {
                 }
                 val selected=PlaybackDetectors.selected(prefs.getStringSet("allowed",emptySet()).orEmpty())
                 settingRow(group ?: root,"Tracked apps",if(selected.isEmpty()) "No apps selected" else selected.joinToString(" · ") { appLabel(it) }) { chooseInstalledApps() }
+                settingToggle(group ?: root,"Automatically mark completed watches on Trakt","Opt in: verified titles with strong measured playback only; uncertain matches remain in Review",prefs.getBoolean("auto_watch_sync",false)) { _,checked ->
+                    prefs.edit().putBoolean("auto_watch_sync",checked).putLong("auto_watch_since",if(checked) System.currentTimeMillis() else 0L).apply()
+                    RewatchAutomation.request(this)
+                }
                 settingToggle(group ?: root,"Automatically sync completed rewatches","Only after sufficient measured playback; original watched dates stay unchanged",prefs.getBoolean("auto_rewatch_sync",false)) { _,checked -> prefs.edit().putBoolean("auto_rewatch_sync",checked).apply(); RewatchAutomation.request(this) }
                 settingRow(group ?: root,"Completion review threshold",CompletionPolicy.threshold(prefs.getInt("completion_threshold",CompletionPolicy.DEFAULT_THRESHOLD)).toString()+"% • confirmation still required") { configureCompletionThreshold() }
                 heading("YouTube player identification")
@@ -1428,7 +1432,7 @@ class MainActivity : ComponentActivity() {
             "continue" -> {
         if("continue" !in hidden && continuing.isNotEmpty()) {
             section(dashboard,"Continue watching")
-            val items=continueCards(groups,limit=7)
+            val items=continueCards(groups,limit=7,readOnly=true)
             modernContent { PosterLibraryShelf(violet,items) }
         }
         if("continue" !in hidden) {
@@ -1451,7 +1455,7 @@ class MainActivity : ComponentActivity() {
             "recent" -> {
         if("recent" !in hidden && recent.isNotEmpty()) {
             section(dashboard,"Recently watched")
-            recent.forEach { g -> val item=groupPoster(g); modernContent { ModernActionRow(violet,item.title,if(g.confirmed) java.text.DateFormat.getDateTimeInstance().format(java.util.Date(g.latest.ended))+" · "+appLabel(g.latest.source) else item.subtitle){ showSessions(g) } } }
+            recent.forEach { g -> val item=groupPoster(g); modernContent { ModernActionRow(violet,item.title,if(g.confirmed) java.text.DateFormat.getDateTimeInstance().format(java.util.Date(g.latest.ended))+" · "+appLabel(g.latest.source) else item.subtitle){ showHomeViewing(listOf(g)) } } }
         }
 
             }
@@ -2374,7 +2378,7 @@ class MainActivity : ComponentActivity() {
             else -> g.key
         }
     }
-    private fun continueCards(groups:List<ViewingTitle>,category:String="All",limit:Int=10):List<PosterLibraryItem> {
+    private fun continueCards(groups:List<ViewingTitle>,category:String="All",limit:Int=10,readOnly:Boolean=false):List<PosterLibraryItem> {
         val continuing=SeriesLibrary.continueWatching(groups)
         val buckets=continuing.groupBy { continueIdentity(it) }
         return buckets.entries.filter { (key,_) ->
@@ -2383,12 +2387,22 @@ class MainActivity : ComponentActivity() {
             // Prefer most recently played unfinished episode, not historical completion.
             val current=episodes.first()
             val poster=groupPoster(current)
+            if(readOnly) return@map poster.copy(open={ showHomeViewing(episodes) },menu={},showMenu=false)
             if(key.startsWith("show:") && episodes.size>1) poster.copy(
                 subtitle=poster.subtitle+" · "+episodes.size+" in progress",
                 open={ showContinueEpisodes(poster.title,episodes) },
                 menu={ showContinueEpisodes(poster.title,episodes) }
             ) else poster
         }
+    }
+    private fun showHomeViewing(episodes:List<ViewingTitle>) {
+        val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(12),dp(16),dp(12)) }
+        episodes.forEach { g ->
+            val item=groupPoster(g)
+            body.addView(txt(item.title+" · "+item.subtitle,16,ink))
+            if(g.durationMs>0 && g.positionMs>=0) body.addView(txt(durationText(g.positionMs)+" / "+durationText(g.durationMs),14,muted))
+        }
+        BridgeDialogBuilder(this).setTitle("Viewing progress").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
     }
     private fun showContinueEpisodes(title:String,episodes:List<ViewingTitle>) {
         modernDetailWindow { close -> ModernContinueEpisodes(violet,title,episodes.map { groupPoster(it) },{ index -> close(); showSessions(episodes[index]) },close) }
@@ -2590,7 +2604,7 @@ class MainActivity : ComponentActivity() {
                 if(item.progress in 0.0..100.0) card.addView(txt("Saved progress: "+item.progress.toInt()+"%",13,violet))
                 if(item.type in setOf("movie","show")) card.addView(actionButton("Title details (online)") { titleDetails(item.type,item.id,item.title) })
                 if(item.showId>0) card.addView(actionButton("Series progress (online)") { remoteSeriesProgress(item.showId,item.title.substringBefore(" — ")) })
-                card.addView(actionButton("Watchlist / rating actions (online)") { remoteActions(item,accountId) })
+                if(item.type=="episode" && item.showId>0) card.addView(actionButton("Title details (online)") { titleDetails("show",item.showId,item.title.substringBefore(" — ")) })
             }
             if(rows.isEmpty()) body.addView(txt("No matching downloaded entries.",14,muted))
             if(current>1) body.addView(actionButton("Previous page") { dialog?.dismiss(); browseDownloadedTrakt(accountId,kind,current-1,query) })
@@ -2638,7 +2652,8 @@ class MainActivity : ComponentActivity() {
             if(item.rating>0) card.addView(txt("Your rating: "+item.rating+"/10",13,violet))
             if(item.progress in 0.0..100.0) card.addView(txt("Trakt saved progress: "+item.progress.toInt()+"%",13,violet))
             local[item.type+":"+item.id]?.let { g -> card.addView(actionButton("View matching local sessions") { showSessions(g) }) }
-            card.addView(actionButton("Watchlist / rating actions") { remoteActions(item,page.account) })
+            if(item.type in setOf("movie","show")) card.addView(actionButton("Title details") { titleDetails(item.type,item.id,item.title) })
+            else if(item.type=="episode" && item.showId>0) card.addView(actionButton("Title details") { titleDetails("show",item.showId,item.title.substringBefore(" — ")) })
             val showId=if(item.type=="show") item.id else item.showId
             if(showId>0) card.addView(actionButton("Series progress") { remoteSeriesProgress(showId,item.title.substringBefore(" — ")) })
         }
@@ -2807,11 +2822,11 @@ class MainActivity : ComponentActivity() {
         val actions=mutableListOf<UiAction>()
         if(!expanded) actions.add(UiAction("View details") { BridgeDialogBuilder(this).setTitle("Viewing details").setMessage(r.matchLabel.ifBlank { r.title.ifBlank { "Unidentified video" } }+"\n"+r.subtitle).setNegativeButton("Close",null).setPositiveButton("Open history") { _,_->showTab(1) }.show() })
         else {
-            if(r.traktId>0) actions.add(UiAction("Trakt watchlist / rating") { lookup("Checking account",{ done -> TraktLibrary.accountId(this,done) }) { account:String -> remoteActions(RemoteItem(r.matchType,r.traktId,r.matchLabel,r.showId,r.season,r.episode),account) } })
+            if(r.traktId>0 && (r.matchType=="movie" || r.matchType=="episode" && r.showId>0)) actions.add(UiAction("Title details") { titleDetails(if(r.matchType=="episode") "show" else "movie",if(r.matchType=="episode") r.showId else r.traktId,r.matchLabel.substringBefore(" — ")) })
             if(r.id.startsWith("import:") && r.status=="pending") actions.add(UiAction("Reconcile with local history") { reconcileImported(r) })
             if(r.status in setOf("pending","reviewed")) actions.add(UiAction(if(r.traktId>0) "Change Trakt match" else "Identify on Trakt") { identify(r) })
             if(r.traktId>0 && r.status in setOf("pending","reviewed")) actions.add(UiAction("Remove Trakt match") { history.clearMatch(r.id); onNavigate(); refreshHistory() })
-            if(r.status=="reviewed" && r.traktId>0 && !completionAlreadyRecorded) actions.add(UiAction("Mark watched on Trakt") { approveUpload(r,false) })
+            if(tab==2 && r.status=="reviewed" && r.traktId>0 && !completionAlreadyRecorded) actions.add(UiAction("Mark watched on Trakt") { approveUpload(r,false) })
             if(r.status=="blocked") actions.add(UiAction("Retry blocked upload") { history.retryBlocked(r.id); HistorySync.schedule(this); refreshHistory() })
             if(r.status in setOf("queued","blocked")) actions.add(UiAction("Cancel queued upload") { history.cancelQueued(r.id); refreshHistory() })
             if(r.status=="uncertain") actions.add(UiAction("Reconcile with Trakt (no resend)") { HistorySync.schedule(this); refreshHistory() })
@@ -2864,7 +2879,7 @@ class MainActivity : ComponentActivity() {
     private fun configureCompletionThreshold() {
         val options=listOf(75,80,85,90,95,100)
         val current=CompletionPolicy.threshold(prefs.getInt("completion_threshold",CompletionPolicy.DEFAULT_THRESHOLD))
-        BridgeDialogBuilder(this).setTitle("Completion review threshold").setMessage("Current: "+current+"%. A suggestion never uploads a completed watch. You must still approve it.").setNeutralButton("Change") { _,_->
+        BridgeDialogBuilder(this).setTitle("Completion review threshold").setMessage("Current: "+current+"%. Manual review suggestions require approval. Optional automatic sync also requires at least 90% measured playback and a verified title.").setNeutralButton("Change") { _,_->
             choose("Suggest completion at",options.map { it.toString()+"%" }) { i -> prefs.edit().putInt("completion_threshold",options[i]).apply(); refreshHistory() }
         }.setPositiveButton("Close",null).show()
     }
