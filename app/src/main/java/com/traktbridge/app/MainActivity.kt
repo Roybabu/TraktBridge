@@ -1227,33 +1227,68 @@ class MainActivity : ComponentActivity() {
         }
     }
     private fun setupGuide() {
-        val box=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(8),dp(16),dp(8)) }
-        val nm=getSystemService(android.app.NotificationManager::class.java)
-        val component=android.content.ComponentName(this,PlaybackListener::class.java)
-        val access=if(android.os.Build.VERSION.SDK_INT>=27) nm.isNotificationListenerAccessGranted(component) else Settings.Secure.getString(contentResolver,"enabled_notification_listeners").orEmpty().split(":").any { android.content.ComponentName.unflattenFromString(it)==component }
-        fun step(title:String,detail:String,buttonLabel:String="Open "+title,action:()->Unit) {
-            box.addView(txt(title,17,ink,true)); box.addView(txt(detail,13,muted)); box.addView(actionButton(buttonLabel,action))
-        }
-        for(check in PermissionDiagnostics.read(this)) box.addView(txt((if(check.ready) "Ready" else if(check.required) "Action needed" else "Optional / unavailable")+" • "+check.name+"\n"+check.detail,14,if(check.ready) ink else muted))
-        step("Notification access",if(access) "Granted" else "Required for media-session detection.") { runCatching { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }.onFailure { Toast.makeText(this,"This device does not expose the notification access settings screen.",Toast.LENGTH_LONG).show() } }
-        step("Video app selection",(prefs.getStringSet("allowed",emptySet())?.size ?: 0).toString()+" selected. Choose only apps you want tracked.") { chooseInstalledApps() }
-        step("Battery settings",BatteryCompatibility.guidance(android.os.Build.MANUFACTURER)+" Optional; no setting is changed automatically.") { runCatching { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) } }
-        val trackingFeedback=txt(TrackingRecovery.status(this),14,muted).apply { accessibilityLiveRegion=android.view.View.ACCESSIBILITY_LIVE_REGION_POLITE }
-        step("Start tracking","Enable background sampling after selecting apps and granting access.","Start tracking") {
-            if(TrackingRecovery.listenerGranted(this) && !prefs.getStringSet("allowed",emptySet()).isNullOrEmpty()) {
-                prefs.edit().putBoolean("enabled",true).apply()
-                startTracking()
-                // Service startup and permission prompts are asynchronous; acknowledge the request without claiming success.
-                trackingFeedback.text="Tracking start requested. Check tracking status in Settings."
-                if(settingsCategory=="tracking") refreshSettingsState("tracking")
-            } else {
-                trackingFeedback.text="Grant notification access and choose playback apps first."
-                Toast.makeText(this,trackingFeedback.text,Toast.LENGTH_LONG).show()
+        val dialog=android.app.Dialog(this)
+        val root=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(bg); setPadding(dp(20),dp(16),dp(20),dp(12)) }
+        val scroll=ScrollView(this).apply { isFillViewport=true }
+        val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
+        scroll.addView(body)
+        root.addView(txt("Set up TraktBridge",24,ink,true))
+        root.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
+        val footer=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL }
+        root.addView(footer)
+        val later=actionButton("Later"){dialog.dismiss()}
+        val done=actionButton("Done"){dialog.dismiss();showTab(4)}
+        footer.addView(later,LinearLayout.LayoutParams(0,-2,1f).apply { marginEnd=dp(8) })
+        footer.addView(done,LinearLayout.LayoutParams(0,-2,1f))
+        var feedback=""
+        var signature=""
+        fun render() {
+            val checks=PermissionDiagnostics.read(this)
+            val status=TrackingRecovery.status(this)
+            val next=checks.toString()+status+feedback
+            if(next==signature) return
+            signature=next
+            body.removeAllViews()
+            val required=checks.filter { it.required }
+            val ready=required.count { it.ready }
+            val summary=panel(body)
+            summary.addView(txt(if(ready==required.size) "Required setup complete" else "Complete your tracking setup",20,ink,true))
+            summary.addView(txt("$ready of ${required.size} required steps complete",14,violet))
+            summary.addView(android.widget.ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal).apply { max=required.size; progress=ready; progressTintList=android.content.res.ColorStateList.valueOf(violet) })
+            summary.addView(txt(status,14,muted))
+            if(feedback.isNotBlank()) summary.addView(txt(feedback,14,muted))
+            fun step(index:Int,title:String,detail:String,label:String,action:()->Unit) {
+                val check=checks[index]
+                val card=panel(body)
+                card.addView(txt((if(check.ready) "✓  " else "")+title,17,ink,true))
+                card.addView(txt(if(check.ready) "Ready" else if(check.required) "Required" else "Optional",13,violet))
+                card.addView(txt(detail,14,muted))
+                if(!check.ready || index==1) card.addView(actionButton(label,action))
             }
+            body.addView(txt("Required steps",18,ink,true))
+            step(0,"Notification access","Allows Android media-session detection.","Grant access") { runCatching { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }.onFailure { Toast.makeText(this,"Notification access settings unavailable.",Toast.LENGTH_LONG).show() } }
+            step(1,"Playback apps","Choose YouTube or experimental JioHotstar tracking.","Choose apps") { dialog.dismiss();chooseInstalledApps() }
+            step(2,"Start tracking","Enable background playback sampling.","Start tracking") {
+                if(TrackingRecovery.listenerGranted(this) && PlaybackDetectors.selected(prefs.getStringSet("allowed",emptySet()).orEmpty()).isNotEmpty()) {
+                    prefs.edit().putBoolean("enabled",true).apply();startTracking()
+                    feedback="Tracking start requested. Waiting for confirmation."
+                } else feedback="Grant notification access and select playback apps first."
+                render()
+            }
+            body.addView(txt("Optional improvements",18,ink,true))
+            step(3,"Foreground service","Keep the tracking service running.","Repair tracking") { dialog.dismiss();repairTracking() }
+            step(4,"Review notifications","Receive review alerts. Local history works without them.","Notification settings") { runCatching { startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE,packageName)) } }
+            step(5,"Battery settings",BatteryCompatibility.guidance(android.os.Build.MANUFACTURER),"Battery settings") { runCatching { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) } }
+            body.addView(txt("YouTube player identification may require separate Accessibility consent. Trakt sign-in is optional for local tracking.",13,muted))
         }
-        box.addView(trackingFeedback)
-        box.addView(txt("YouTube player identification requires separate Accessibility consent in Settings when the media session does not identify the player type. Trakt sign-in is not required for local tracking.",14,muted))
-        BridgeDialogBuilder(this).setTitle("Set up TraktBridge").setView(ScrollView(this).apply { addView(box) }).setNegativeButton("Later",null).setPositiveButton("Done") { _,_->showTab(4) }.show()
+        render()
+        dialog.setContentView(root)
+        val handler=android.os.Handler(android.os.Looper.getMainLooper())
+        val tick=object:Runnable { override fun run() { if(dialog.isShowing && !isDestroyed) { render();handler.postDelayed(this,1500) } } }
+        dialog.setOnDismissListener { handler.removeCallbacks(tick) }
+        dialog.show()
+        dialog.window?.apply { setBackgroundDrawable(android.graphics.drawable.ColorDrawable(bg));setLayout(if(wide) dp(640).coerceAtMost(resources.displayMetrics.widthPixels) else -1,-1) }
+        handler.post(tick)
     }
     private fun handleTrackingShortcut(intent:Intent) {
         if(intent.action!="com.traktbridge.app.OPEN_TRACKING") return
@@ -1566,8 +1601,12 @@ class MainActivity : ComponentActivity() {
         val groups=ViewingGroups.build(scoped)
         val historical=scoped.filter { it.status=="synced" }
         val activeDays=scoped.filter { it.watched>0 || it.status=="synced" }.map { ViewingAnalytics.day(it.ended) }.distinct().size
-        val total=scoped.sumOf { it.watched.coerceAtLeast(0) }
-        val daily=scoped.filter { it.watched>0 }.groupBy { ViewingAnalytics.day(it.ended) }.mapValues { (_,rows)->rows.sumOf { it.watched } }
+        val sampledTotal=scoped.sumOf { it.watched.coerceAtLeast(0) }
+        val runtimeByTitle=records.filter { it.traktId>0 && it.catalogueRuntime>0 }.groupBy { ViewingGroups.key(it) }.mapValues { (_,rows)->rows.maxOf { it.catalogueRuntime } }
+        fun watchTime(r:WatchRecord):Long { val measured=r.watched.coerceAtLeast(0); return if(r.status=="synced") maxOf(measured,r.catalogueRuntime,runtimeByTitle[ViewingGroups.key(r)] ?: 0L) else measured }
+        val total=scoped.sumOf(::watchTime)
+        val missingRuntime=historical.count { watchTime(it)==0L }
+        val daily=scoped.filter { watchTime(it)>0 }.groupBy { ViewingAnalytics.day(it.ended) }.mapValues { (_,rows)->rows.sumOf(::watchTime) }
         val today=java.time.LocalDate.now()
         val start=if(analyticsPeriod>0) today.minusDays(analyticsPeriod.toLong()-1) else scoped.minOfOrNull { ViewingAnalytics.day(it.ended) } ?: today
         val monthly=analyticsPeriod==365 || analyticsPeriod==0
@@ -1582,13 +1621,13 @@ class MainActivity : ComponentActivity() {
             choose("Filter by platform",listOf("All platforms")+sources.map { appLabel(it) }){ i -> analyticsSource=if(i==0) "" else sources[i-1];refreshHistory() }
         },onMenu={choose("Activity options",listOf("Subscription costs","Streaming service dashboard","Viewing journal and yearly recap","Playback diagnostics","Refresh")){ i->when(i){0->subscriptions();1->serviceDashboard();2->viewingJournal();3->BridgeDialogBuilder(this).setTitle("Playback diagnostics").setMessage("Paused: "+durationText(scoped.sumOf{it.pausedMs})+"\nBuffering: "+durationText(scoped.sumOf{it.bufferingMs})+"\nSeeks: "+scoped.sumOf{it.seeks}+"\nUncertain: "+durationText(scoped.sumOf{it.uncertainMs})).setPositiveButton("Close",null).show();4->refreshHistory()}}}) }
         modernContent { ModernCategories(violet,listOf("7" to "Week","30" to "Month","365" to "Year","0" to "All time"),analyticsPeriod.toString()){ analyticsPeriod=it.toInt();refreshHistory() } }
-        modernContent { ModernWatchChart(violet,durationText(total),dates.map { if(monthly) it.format(java.time.format.DateTimeFormatter.ofPattern("MMM yy")) else it.format(java.time.format.DateTimeFormatter.ofPattern("d MMM")) },values){} }
+        modernContent { ModernWatchChart(violet,durationText(total),dates.map { if(monthly) it.format(java.time.format.DateTimeFormatter.ofPattern("MMM yy")) else it.format(java.time.format.DateTimeFormatter.ofPattern("d MMM")) },values,heading="Estimated watch time"){} }
+        dashboard.addView(txt("Measured playback: "+durationText(sampledTotal)+" · Completed watches use known catalogue runtimes. "+if(missingRuntime>0) "$missingRuntime completed watches have unknown runtime." else "",13,muted))
         val days=(java.time.temporal.ChronoUnit.DAYS.between(start,today)+1).coerceAtLeast(1)
-        modernContent { ModernMetricTiles(violet,listOf("Movies synced" to groups.count { it.confirmed && it.representative.matchType=="movie" }.toString(),"Episodes synced" to groups.count { it.confirmed && it.representative.matchType=="episode" }.toString(),"Active days" to activeDays.toString(),"Daily average" to durationText(total/days))) }
-        modernContent { ModernMetricTiles(violet,listOf("Movie watches" to historical.count { it.matchType=="movie" }.toString(),"Episode watches" to historical.count { it.matchType=="episode" }.toString(),"Repeat watches in period" to groups.sumOf { (it.completedWatches.size-1).coerceAtLeast(0) }.toString())) }
+        modernContent { ModernMetricTiles(violet,listOf("Movies synced" to groups.count { it.confirmed && it.representative.matchType=="movie" }.toString(),"Episodes synced" to groups.count { it.confirmed && it.representative.matchType=="episode" }.toString(),"Active days" to activeDays.toString(),"Estimated daily average" to durationText(total/days),"Movie watches" to historical.count { it.matchType=="movie" }.toString(),"Episode watches" to historical.count { it.matchType=="episode" }.toString(),"Repeat watches in period" to groups.sumOf { (it.completedWatches.size-1).coerceAtLeast(0) }.toString())) }
         section(dashboard,"Watch time by platform")
         ViewingAnalytics.platforms(scoped).filter { it.sampledMs>0 }.forEach { platform ->
-            modernContent { ModernActionRow(violet,appLabel(platform.source),durationText(platform.sampledMs)+" · "+(if(total>0) platform.sampledMs*100/total else 0)+"% of sampled time"){analyticsSource=platform.source;refreshHistory()} }
+            modernContent { ModernActionRow(violet,appLabel(platform.source),durationText(platform.sampledMs)+" · "+(if(sampledTotal>0) platform.sampledMs*100/sampledTotal else 0)+"% of sampled time"){analyticsSource=platform.source;refreshHistory()} }
         }
         if(daily.isNotEmpty()) {
             var streak=0;var longest=0;var previous:java.time.LocalDate?=null
@@ -1599,7 +1638,7 @@ class MainActivity : ComponentActivity() {
         }
         section(dashboard,"Viewing calendar")
         calendarView(dashboard,if(analyticsSource.isBlank()) records else records.filter { it.source==analyticsSource })
-        dashboard.addView(txt("Calendar and watch counts include Trakt history. Sampled watch time excludes historical watches without measured duration.",12,muted))
+        dashboard.addView(txt("Calendar and watch counts include Trakt history. Estimated time includes known runtimes; platform breakdown shows measured playback only.",12,muted))
     }
     private fun streamingAvailability(type:String,id:Long,title:String) {
         val initial=prefs.getString("availability_region",java.util.Locale.getDefault().country).orEmpty()
