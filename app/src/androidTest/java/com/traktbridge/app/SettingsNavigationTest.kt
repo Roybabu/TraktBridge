@@ -51,7 +51,7 @@ class SettingsNavigationTest {
                     assertFalse(trackingLabels.contains("Start persistent tracking"))
                     assertFalse(trackingLabels.contains("Stop persistent tracking"))
                     assertTrue(trackingLabels.contains("YouTube player identification"))
-                    assertTrue(trackingLabels.contains("Choose apps to track"))
+                    assertEquals(1,trackingLabels.count { it=="Tracked apps" })
                     assertFalse(trackingLabels.contains("Scan player title (one-shot OCR)"))
                     assertFalse(trackingLabels.contains("App activity fallback"))
                     assertFalse(trackingLabels.contains("Connect media servers"))

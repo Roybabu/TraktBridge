@@ -1,8 +1,13 @@
 package com.traktbridge.app
 
 import androidx.activity.ComponentActivity
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.setViewTreeLifecycleOwner
+import androidx.lifecycle.setViewTreeViewModelStoreOwner
+import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import android.os.Bundle
@@ -31,6 +36,9 @@ class MainActivity : ComponentActivity() {
     private val bridgeModel by lazy { androidx.lifecycle.ViewModelProvider(this)[BridgeViewModel::class.java] }
     private val selectedNav get()=bridgeModel.selectedTab
     private lateinit var dashboard: LinearLayout
+    private lateinit var libraryHost: LinearLayout
+    private lateinit var libraryCompose: ComposeView
+    private var libraryContent by androidx.compose.runtime.mutableStateOf<(@androidx.compose.runtime.Composable ()->Unit)?>(null)
     private var tab=0
     private var privacyPrompt=false
     private var unlocked=false
@@ -38,6 +46,7 @@ class MainActivity : ComponentActivity() {
     private val lowRam get()=getSystemService(android.app.ActivityManager::class.java).isLowRamDevice
     private var historyLimit=100
     private var librarySelection=""
+    private var libraryCategory="All"
     private var restoreContentFocus=false
     private var restoreScrollY=0
     private var analyticsPeriod=30
@@ -52,7 +61,7 @@ class MainActivity : ComponentActivity() {
     private val amoled:Boolean get()=AppearancePolicy.mode(prefs.getString("appearance_mode","dark").orEmpty())=="amoled"
     private val surface:Int get()=if(amoled) 0xff101010.toInt() else BridgeDesign.surface
     private val bg:Int get()=if(amoled) 0xff000000.toInt() else BridgeDesign.background
-    private fun showAuth(message: String = auth.status()) { account.text = message }
+    private fun showAuth(message: String = auth.status()) { account.text = message; if(!auth.hasConnection()) { unifiedRows=emptyList(); bridgeModel.cancel(); if(::libraryHost.isInitialized) libraryContent=null; refreshHistory() } }
     private fun handleCallback(i: Intent) {
         val uri = i.data ?: return
         if (uri.scheme != "traktbridge" || uri.encodedAuthority != "callback" || !uri.encodedPath.isNullOrEmpty() || uri.fragment!=null) return
@@ -71,7 +80,7 @@ class MainActivity : ComponentActivity() {
             Thread { val result=runCatching { PairingQr.decode(bitmap) }; runOnUiThread { if(!isDestroyed && !isFinishing) result.fold({ approvePairingInvitation(it) },{ Toast.makeText(this,"QR unreadable. Try closer or import a full-resolution image.",Toast.LENGTH_LONG).show() }) } }.start(); return
         }
         if(requestCode==97 && resultCode==RESULT_OK) { data?.data?.let { readPairingQr(it) }; return }
-        if(requestCode==96) { privacyPrompt=false; unlocked=resultCode==RESULT_OK; if(unlocked) { shell.visibility=android.view.View.VISIBLE; refreshHistory() } else finish(); return }
+        if(requestCode==96) { privacyPrompt=false; unlocked=resultCode==RESULT_OK; if(unlocked) { shell.visibility=android.view.View.VISIBLE; refreshHistory(); maybeShowCrashReport() } else finish(); return }
         if(requestCode==57 && resultCode==RESULT_OK) data?.data?.let { inspectVideo(it) }
         if(requestCode==58 && resultCode==RESULT_OK) data?.data?.let { inspectImport(it) }
         if(resultCode==RESULT_OK && requestCode in 65..66) data?.data?.let { settingsTransfer(requestCode,it) }
@@ -382,11 +391,13 @@ class MainActivity : ComponentActivity() {
         tab=(savedInstanceState?.getInt("tab") ?: DashboardPreferences.startTab(prefs.getInt("startup_tab",0))).coerceIn(0,4)
         settingsCategory=savedInstanceState?.getString("settings_category").orEmpty()
         librarySelection=savedInstanceState?.getString("library_selection").orEmpty()
+        libraryCategory=savedInstanceState?.getString("library_category") ?: "All"
+        reviewCategory=savedInstanceState?.getString("review_category") ?: "match"
         restoreContentFocus=savedInstanceState?.getBoolean("content_focus",false) ?: false
         restoreScrollY=savedInstanceState?.getInt("content_scroll",0) ?: 0
         importSource=savedInstanceState?.getString("import_source") ?: "com.netflix.mediaclient"
         historyFilter=HistoryFilter(savedInstanceState?.getString("filter_q").orEmpty(),savedInstanceState?.getString("filter_source").orEmpty(),savedInstanceState?.getInt("filter_period") ?: 0,savedInstanceState?.getString("filter_type").orEmpty(),savedInstanceState?.getString("filter_status").orEmpty(),savedInstanceState?.getString("filter_sort") ?: "recent")
-        analyticsPeriod=savedInstanceState?.getInt("analytics_period") ?: 30
+        analyticsPeriod=(savedInstanceState?.getInt("analytics_period") ?: 30).let { if(it in setOf(0,7,30,365)) it else 30 }
         analyticsSource=savedInstanceState?.getString("analytics_source").orEmpty()
         calendarMonth=runCatching { java.time.YearMonth.parse(savedInstanceState?.getString("calendar_month").orEmpty()) }.getOrDefault(java.time.YearMonth.now())
         shell=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(bg) }
@@ -401,7 +412,11 @@ class MainActivity : ComponentActivity() {
         settingsPage=ScrollView(this).apply { isFillViewport=true; visibility=android.view.View.GONE; addView(root) }; frame.addView(settingsPage)
         dashboard=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(adaptiveLayout.padding),dp(8),dp(adaptiveLayout.padding),dp(24)) }
         contentPage=ScrollView(this).apply { isFillViewport=true; addView(dashboard) }; frame.addView(contentPage)
-        nav=LinearLayout(this).apply { orientation=if(wide) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL; setPadding(dp(8),dp(8),dp(8),dp(8)); setBackgroundColor(surface) }
+        libraryHost=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; visibility=android.view.View.GONE }
+        libraryCompose=ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed); setContent { libraryContent?.invoke() } }
+        libraryHost.addView(libraryCompose,LinearLayout.LayoutParams(-1,0,1f))
+        frame.addView(libraryHost,android.widget.FrameLayout.LayoutParams(-1,-1))
+        nav=LinearLayout(this).apply { orientation=if(wide) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL; val padding=if(wide || tvMode) dp(8) else 0; setPadding(padding,padding,padding,padding); setBackgroundColor(if(wide || tvMode) surface else bg) }
         if(wide) { workspace.addView(nav,LinearLayout.LayoutParams(dp(adaptiveLayout.rail),-1)); workspace.addView(frame,LinearLayout.LayoutParams(0,-1,1f)) }
         else { workspace.addView(frame,LinearLayout.LayoutParams(-1,0,1f)); workspace.addView(nav,LinearLayout.LayoutParams(-1,-2)) }
         val navLabels=listOf(getString(R.string.nav_home),getString(R.string.nav_library),getString(R.string.nav_review),getString(R.string.nav_activity),getString(R.string.nav_settings))
@@ -439,19 +454,62 @@ class MainActivity : ComponentActivity() {
         handleTrackingShortcut(intent)
         handleAutomation(intent)
         if(!prefs.getBoolean("setup_seen",false)) { prefs.edit().putBoolean("setup_seen",true).apply(); setupGuide() }
-        CrashRecovery.consume(this)?.let { DebugTrace.event("recovery","Previous process ended with "+it); Toast.makeText(this,"Previous session ended unexpectedly. Check tracking health if needed.",Toast.LENGTH_LONG).show() }
+        CrashRecovery.consume(this)?.let { DebugTrace.event("recovery","Previous process ended with "+it) }
+        Thread { CrashRecovery.recoverSystemExit(applicationContext); runOnUiThread { if(!isDestroyed && !isFinishing) maybeShowCrashReport() } }.start()
         StartupTiming.report(startup,"activity-created")
         shell.viewTreeObserver.addOnPreDrawListener(object:android.view.ViewTreeObserver.OnPreDrawListener {
             override fun onPreDraw():Boolean { shell.viewTreeObserver.removeOnPreDrawListener(this); StartupTiming.report(startup,"first-pre-draw"); return true }
         })
     }
 
+    private lateinit var settingsStatus:TextView
+    private fun settingsIcon(name:String):android.view.View {
+        return object:android.view.View(this@MainActivity) {
+            private val paint=android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color=violet; style=android.graphics.Paint.Style.STROKE; strokeWidth=1.8f; strokeCap=android.graphics.Paint.Cap.ROUND; strokeJoin=android.graphics.Paint.Join.ROUND }
+            override fun onDraw(canvas:android.graphics.Canvas) {
+                super.onDraw(canvas)
+                canvas.save()
+                canvas.translate(width/2f,height/2f)
+                canvas.scale(dp(22)/24f,dp(22)/24f)
+                canvas.translate(-12f,-12f)
+                fun line(x:Float,y:Float,u:Float,v:Float)=canvas.drawLine(x,y,u,v,paint)
+                fun rect(l:Float,t:Float,r:Float,b:Float)=canvas.drawRoundRect(l,t,r,b,2f,2f,paint)
+                fun circle(x:Float,y:Float,r:Float)=canvas.drawCircle(x,y,r,paint)
+                fun path(vararg points:Float) { val p=android.graphics.Path();p.moveTo(points[0],points[1]);for(i in 2 until points.size step 2)p.lineTo(points[i],points[i+1]);canvas.drawPath(p,paint) }
+                when(name) {
+                    "account"->{circle(12f,8f,4f);canvas.drawArc(4f,13f,20f,25f,180f,180f,false,paint)}
+                    "tracking"->{rect(3f,4f,21f,20f);path(10f,8f,16f,12f,10f,16f,10f,8f)}
+                    "devices"->{rect(2f,4f,16f,15f);line(9f,15f,9f,20f);line(5f,20f,13f,20f);rect(15f,9f,22f,22f)}
+                    "appearance"->{circle(12f,12f,9f);path(12f,3f,12f,21f);line(12f,7f,18f,7f);line(12f,12f,21f,12f);line(12f,17f,18f,17f)}
+                    "library"->{rect(3f,4f,7f,20f);rect(9f,4f,13f,20f);path(15f,5f,19f,4f,22f,19f,18f,20f,15f,5f)}
+                    "privacy"->{path(12f,2f,21f,6f,20f,15f,16f,20f,12f,22f,8f,20f,4f,15f,3f,6f,12f,2f);path(8f,12f,11f,15f,16f,9f)}
+                    "data"->{rect(3f,4f,21f,20f);line(3f,9f,21f,9f);line(9f,15f,15f,15f)}
+                    "advanced"->{circle(12f,12f,9f);line(12f,11f,12f,17f);circle(12f,7f,0.6f)}
+                    else->{circle(12f,12f,8f);path(9f,12f,12f,15f,16f,9f)}
+                }
+                canvas.restore()
+            }
+        }.apply { background=rounded((violet and 0x00ffffff) or 0x22000000,12); importantForAccessibility=android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO }
+    }
+    private fun updateSettingsStatus() {
+        if(!::settingsStatus.isInitialized) return
+        val enabled=prefs.getBoolean("enabled",false)
+        val selected=PlaybackDetectors.selected(prefs.getStringSet("allowed",emptySet()).orEmpty()).isNotEmpty()
+        val connected=PlaybackListener.liveConnected()
+        settingsStatus.text=if(enabled && !selected) "Choose YouTube to start tracking" else TrackingRecovery.status(this)
+        settingsStatus.setTextColor(if(enabled && selected && connected) violet else muted)
+    }
     private fun buildSettingsCategories() {
         val definitions=SettingsCatalog.categories
         settingsOverview=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
         settingsRoot.addView(settingsOverview)
         settingsOverview.addView(txt("Settings",28,ink,true))
         settingsOverview.addView(txt("Manage your viewing experience",14,muted))
+        val status=panel(settingsOverview).apply { setPadding(dp(14),dp(12),dp(14),dp(12)) }
+        settingsStatus=txt("",15,violet,true)
+        status.addView(settingsStatus)
+        status.addView(txt(if(auth.hasConnection()) "Trakt account connected" else "Trakt account not connected",13,muted))
+        updateSettingsStatus()
         val sections=listOf(
             "Account & playback" to listOf("account","tracking","devices"),
             "Personalization" to listOf("appearance","library"),
@@ -462,15 +520,17 @@ class MainActivity : ComponentActivity() {
             val card=settingGroup(settingsOverview,title)
             for(id in ids) {
                 val category=definitions.first { it.id==id }
-                settingRow(card,category.title,category.description) { showSettingsCategory(category.id) }
+                settingRow(card,category.title,category.description,icon=id) { showSettingsCategory(category.id) }
             }
         }
+        val version=runCatching { packageManager.getPackageInfo(packageName,0).versionName }.getOrNull().orEmpty()
+        settingsOverview.addView(txt("TraktBridge • "+version,12,muted).apply { gravity=android.view.Gravity.CENTER; setPadding(0,dp(10),0,dp(12)) })
         for(category in definitions) {
             val page=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; visibility=android.view.View.GONE }
             settingsRoot.addView(page)
             settingsGroups[category.id]=page
-            page.addView(TextView(this).apply { text="‹ All settings"; contentDescription="All settings"; setTextColor(violet); textSize=15f; isFocusable=true; isClickable=true; minimumHeight=dp(adaptiveLayout.touch); gravity=android.view.Gravity.CENTER_VERTICAL; setOnClickListener { showSettingsCategory("") } })
-            page.addView(txt(category.title,26,ink,true))
+            page.addView(TextView(this).apply { text="‹  Settings"; contentDescription="All settings"; setTextColor(violet); textSize=16f; isFocusable=true; isClickable=true; minimumHeight=dp(adaptiveLayout.touch); gravity=android.view.Gravity.CENTER_VERTICAL; setOnClickListener { showSettingsCategory("") } })
+            page.addView(txt(category.title,28,ink,true))
             page.addView(txt(category.description,14,muted))
         }
         for(category in definitions) populateSettings(category.id,requireNotNull(settingsGroups[category.id]))
@@ -480,46 +540,51 @@ class MainActivity : ComponentActivity() {
         settingsCategory=id.takeIf { it in settingsGroups }.orEmpty()
         settingsOverview.visibility=if(settingsCategory.isEmpty()) android.view.View.VISIBLE else android.view.View.GONE
         settingsGroups.forEach { (key,page) -> page.visibility=if(key==settingsCategory) android.view.View.VISIBLE else android.view.View.GONE }
-        if(settingsCategory in setOf("devices","tracking","privacy")) refreshSettingsState(settingsCategory)
+        updateSettingsStatus()
+        if(settingsCategory in setOf("account","devices","tracking","privacy")) refreshSettingsState(settingsCategory)
         if(resetScroll) settingsPage.scrollTo(0,0)
         if(tvMode && tab==4) settingsPage.post { if(tab==4) TvFocus.firstContent(settingsPage) }
     }
 
     private fun settingGroup(parent:LinearLayout,title:String):LinearLayout {
-        parent.addView(txt(title,13,violet,true).apply { setPadding(dp(4),dp(12),dp(4),dp(6)) })
-        return panel(parent).apply { setPadding(dp(12),dp(4),dp(12),dp(4)) }
+        parent.addView(txt(title,13,violet,true).apply { setPadding(dp(4),dp(14),dp(4),dp(8)) })
+        return panel(parent).apply { setPadding(dp(10),dp(2),dp(10),dp(2)) }
     }
-    private fun settingRow(parent:LinearLayout,title:String,detail:String="",action:()->Unit) {
+    private fun settingDivider(parent:LinearLayout) {
+        if(parent.childCount>0) parent.addView(android.view.View(this).apply { setBackgroundColor(0x167F7F7F) },LinearLayout.LayoutParams(-1,dp(1)).apply { marginStart=dp(4); marginEnd=dp(4) })
+    }
+    private fun settingRow(parent:LinearLayout,title:String,detail:String="",action:()->Unit) = settingRow(parent,title,detail,null,action)
+    private fun settingRow(parent:LinearLayout,title:String,detail:String="",icon:String?,action:()->Unit) {
         val row=LinearLayout(this).apply {
             orientation=LinearLayout.HORIZONTAL; gravity=android.view.Gravity.CENTER_VERTICAL
             isFocusable=true; isClickable=true; contentDescription=if(detail.isBlank()) title else "$title. $detail"
-            minimumHeight=dp(adaptiveLayout.touch); setPadding(dp(4),dp(10),dp(4),dp(10))
-            background=if(tvMode) TvFocus.background(this@MainActivity,surface,violet) else android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x227F73FF),rounded(surface,8),null)
+            minimumHeight=dp(adaptiveLayout.touch); setPadding(dp(6),dp(12),dp(6),dp(12))
+            background=if(tvMode) TvFocus.background(this@MainActivity,surface,violet) else android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf((violet and 0x00ffffff) or 0x22000000),rounded(surface,10),null)
             setOnClickListener { BridgeHaptics.tap(this); action() }
         }
-        val text=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; addView(txt(title,16,ink,true)); if(detail.isNotBlank()) addView(txt(detail,13,muted)) }
+        if(icon!=null) row.addView(settingsIcon(icon),LinearLayout.LayoutParams(dp(40),dp(40)).apply { marginEnd=dp(12) })
+        val text=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; addView(txt(title,16,ink,true)); if(detail.isNotBlank()) addView(txt(detail,13,muted).apply { setPadding(0,dp(3),0,0) }) }
         row.addView(text,LinearLayout.LayoutParams(0,-2,1f))
-        row.addView(txt("›",22,muted).apply { setPadding(dp(12),0,0,0) })
-        if(parent.childCount>0) parent.addView(android.view.View(this).apply { setBackgroundColor(0x227F7F7F) },LinearLayout.LayoutParams(-1,dp(1)))
+        row.addView(txt("›",24,muted).apply { setPadding(dp(12),0,0,0); importantForAccessibility=android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO })
+        settingDivider(parent)
         parent.addView(row,LinearLayout.LayoutParams(-1,-2))
     }
     private fun settingToggle(parent:LinearLayout,title:String,detail:String,checked:Boolean,onChange:(Switch,Boolean)->Unit) {
-        if(parent.childCount>0) parent.addView(android.view.View(this).apply { setBackgroundColor(0x227F7F7F) },LinearLayout.LayoutParams(-1,dp(1)))
+        settingDivider(parent)
         val row=LinearLayout(this).apply {
-            orientation=LinearLayout.HORIZONTAL
-            gravity=android.view.Gravity.CENTER_VERTICAL
-            minimumHeight=dp(adaptiveLayout.touch)
-            setPadding(dp(4),dp(10),dp(4),dp(10))
+            orientation=LinearLayout.HORIZONTAL; gravity=android.view.Gravity.CENTER_VERTICAL
+            minimumHeight=dp(adaptiveLayout.touch); setPadding(dp(6),dp(12),dp(6),dp(12))
         }
         val labels=LinearLayout(this).apply {
             orientation=LinearLayout.VERTICAL
             addView(txt(title,16,ink,true))
-            addView(txt(detail,13,muted))
+            addView(txt(detail,13,muted).apply { setPadding(0,dp(3),0,0) })
         }
+        val states=arrayOf(intArrayOf(android.R.attr.state_checked),intArrayOf())
         val toggle=Switch(this).apply {
-            contentDescription="$title. $detail"
-            isChecked=checked
-            isFocusable=true
+            contentDescription="$title. $detail"; isChecked=checked; isFocusable=true
+            thumbTintList=android.content.res.ColorStateList(states,intArrayOf(violet,muted))
+            trackTintList=android.content.res.ColorStateList(states,intArrayOf((violet and 0x00ffffff) or 0x66000000,0xff45454a.toInt()))
         }
         toggle.setOnCheckedChangeListener { _,value -> onChange(toggle,value) }
         row.addView(labels,LinearLayout.LayoutParams(0,-2,1f))
@@ -529,8 +594,10 @@ class MainActivity : ComponentActivity() {
     }
     private fun refreshSettingsState(id:String) {
         val page=settingsGroups[id] ?: return
+        if(id=="account") (account.parent as? ViewGroup)?.removeView(account)
         if(page.childCount>3) page.removeViews(3,page.childCount-3)
         populateSettings(id,page)
+        updateSettingsStatus()
     }
     private fun refreshDeviceSettings() = refreshSettingsState("devices")
     private fun disableTitleDetection() {
@@ -593,51 +660,52 @@ class MainActivity : ComponentActivity() {
                 heading("Synchronization")
                 settingRow(group ?: root,"Automatic sync","Refresh your downloaded Trakt library daily") { configureAccountRefresh() }
                 settingRow(group ?: root,"Sync now","Download existing watches, watchlists, ratings and more") { offerTraktSync() }
-                settingRow(group ?: root,"Trakt library","Browse downloaded data or open the online library") { openDownloadedTrakt() }
+                settingRow(group ?: root,"Trakt library","Browse downloaded watchlist, ratings, favorites, collections and playback") { openDownloadedTrakt() }
+                val cacheAccount=RemoteAccountCache.active(this)
+                val lastHistory=cacheAccount?.let { RemoteAccountCache.status(this,it,TraktData.HISTORY) }
+                settingRow(group ?: root,"History sync status",lastHistory?.let { it.count.toString()+" watches • "+(if(it.complete) "Complete" else "Partial")+" • "+java.text.DateFormat.getDateTimeInstance().format(java.util.Date(it.updated)) } ?: "Not downloaded") { offerTraktSync() }
                 heading("Data & maintenance")
                 settingRow(group ?: root,"Sync maintenance","Retry approved uploads or clear downloaded account data") {
                     choose("Sync maintenance",listOf("Retry approved uploads","Clear downloaded library")) { index ->
                         if(index==0) { HistorySync.schedule(this); refreshHistory(); Toast.makeText(this,"Approved sync queue scheduled",Toast.LENGTH_SHORT).show() }
-                        else BridgeDialogBuilder(this).setTitle("Clear downloaded Trakt library?").setMessage("Stops automatic refresh and deletes downloaded account data on this device. Local viewing records and your Trakt account are unchanged.").setNegativeButton("Cancel",null).setPositiveButton("Clear") { _,_-> RemoteRefreshSchedule.disable(this); TraktLibrary.clearCache(this) }.show()
+                        else BridgeDialogBuilder(this).setTitle("Clear downloaded Trakt library?").setMessage("Stops automatic refresh and deletes downloaded account data on this device. Local viewing records and your Trakt account are unchanged.").setNegativeButton("Cancel",null).setPositiveButton("Clear") { _,_-> RemoteRefreshSchedule.disable(this); TraktLibrary.clearCache(this); bridgeModel.cancel(); libraryContent=null; unifiedRows=emptyList(); refreshSettingsState("account"); refreshHistory() }.show()
                     }
                 }
                 settingRow(group ?: root,"About Trakt sync","Data usage and upload permissions") {
-                    BridgeDialogBuilder(this).setTitle("About Trakt sync").setMessage("Uses Trakt but is not endorsed or certified by Trakt. Only selected apps are tracked locally. Catalogue search sends only the search text you choose to Trakt. Only explicitly approved completed watches are uploaded. Downloaded account history is separate from measured local viewing.").setPositiveButton("Close",null).show()
+                    BridgeDialogBuilder(this).setTitle("About Trakt sync").setMessage("Uses Trakt but is not endorsed or certified by Trakt. Only selected apps are tracked locally. Automatic and manual catalogue searches send title queries to Trakt to identify viewing records. Suggestions do not upload watches. Only explicitly approved completed watches are uploaded. Downloaded account history is separate from measured local viewing.").setPositiveButton("Close",null).show()
                 }
             }
             "tracking" -> {
-                heading("Tracking preferences")
-                settingRow(group ?: root,"Guided tracking setup","Walk through app selection and Android permissions") { setupGuide() }
-                button("Completion review threshold") { configureCompletionThreshold() }
-                heading("Permissions & notifications")
-                button("Grant notification access") { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
-                button("Reconnect playback listener") { runCatching { android.service.notification.NotificationListenerService.requestRebind(android.content.ComponentName(this,PlaybackListener::class.java)) }; refresh() }
-                (group ?: root).addView(Switch(this).apply {
-                    text="Viewing review notifications"; isChecked=prefs.getBoolean("review_notifications",false)
-                    setOnCheckedChangeListener { _, checked ->
-                        prefs.edit().putBoolean("review_notifications",checked).apply()
-                        if (checked && android.os.Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),41)
-                        if (!checked) history.records().forEach { ViewingNotifications.cancel(this@MainActivity,it.id) }
-                    }
-                })
-                button("Notification settings") { startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE,packageName)) }
-                (group ?: root).addView(Switch(this).apply {
-                    text="Playback tracking"; isChecked=prefs.getBoolean("enabled",false)
-                    setOnCheckedChangeListener { _, checked -> prefs.edit().putBoolean("enabled",checked).apply(); if(checked) startTracking() else stopService(Intent(this@MainActivity,TrackingService::class.java)); refresh() }
-                })
-                button("Battery optimization settings") { runCatching { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) } }
+                heading("Playback")
+                settingToggle(group ?: root,"Playback tracking","Record viewing from supported apps",prefs.getBoolean("enabled",false)) { _,checked ->
+                    prefs.edit().putBoolean("enabled",checked).apply()
+                    if(checked) startTracking() else stopService(Intent(this@MainActivity,TrackingService::class.java))
+                    refresh(); updateSettingsStatus()
+                }
+                val selected=PlaybackDetectors.selected(prefs.getStringSet("allowed",emptySet()).orEmpty())
+                settingRow(group ?: root,"Tracked apps",if(selected.isEmpty()) "No apps selected" else "YouTube • regular videos only") { chooseInstalledApps() }
+                settingRow(group ?: root,"Completion review threshold",CompletionPolicy.threshold(prefs.getInt("completion_threshold",CompletionPolicy.DEFAULT_THRESHOLD)).toString()+"% • confirmation still required") { configureCompletionThreshold() }
                 heading("YouTube player identification")
-                label("YouTube titles come from Android media metadata. Accessibility reads only YouTube player control IDs to exclude Shorts and ads.")
-                button(if(prefs.getBoolean("title_optin",false)) "YouTube player identification • On" else "YouTube player identification • Off") {
+                settingRow(group ?: root,"Accessibility access",if(!prefs.getBoolean("title_optin",false)) "Off • needed to distinguish Shorts and ads when metadata is incomplete" else if(prefs.getBoolean("title_connected",false)) "On • reads player control IDs only" else "Enabled in app • connect in Android settings") {
                     if(prefs.getBoolean("title_optin",false)) {
                         choose("YouTube player identification",listOf("Open Android Accessibility settings","Turn off player identification")) { i -> if(i==0) startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) else disableTitleDetection() }
                     } else {
                         BridgeDialogBuilder(this).setTitle("YouTube player identification").setMessage("Allow TraktBridge to read visible YouTube player control IDs to distinguish regular videos from Shorts and ads. It does not read screen titles or capture screenshots.").setNegativeButton("Cancel",null).setPositiveButton("Agree and open settings") { _,_ -> prefs.edit().putBoolean("title_optin",true).apply(); startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }.show()
                     }
                 }
-                heading("Tracked apps")
-                label("Only regular YouTube videos are currently supported. Other apps will be added individually.")
-                button("Choose apps to track") { chooseInstalledApps() }
+                heading("Android permissions")
+                settingRow(group ?: root,"Notification access",if(TrackingRecovery.listenerGranted(this)) "Granted" else "Required for MediaSession tracking") { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
+                settingRow(group ?: root,"Battery optimization",if(getSystemService(android.os.PowerManager::class.java).isIgnoringBatteryOptimizations(packageName)) "Exempt • background tracking allowed" else "Manage background battery restrictions") { runCatching { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) } }
+                heading("Notifications")
+                settingToggle(group ?: root,"Viewing review notifications","Notify when a viewing record needs attention",prefs.getBoolean("review_notifications",false)) { _,checked ->
+                    prefs.edit().putBoolean("review_notifications",checked).apply()
+                    if(checked && android.os.Build.VERSION.SDK_INT>=33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)!=android.content.pm.PackageManager.PERMISSION_GRANTED) requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),41)
+                    if(!checked) history.records().forEach { ViewingNotifications.cancel(this@MainActivity,it.id) }
+                }
+                settingRow(group ?: root,"Android notification settings","Manage channels and notification permissions") { startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE,packageName)) }
+                heading("Setup & troubleshooting")
+                settingRow(group ?: root,"Guided tracking setup","Step-by-step permission and app setup") { setupGuide() }
+                settingRow(group ?: root,"Repair tracking",TrackingRecovery.status(this)) { repairTracking() }
             }
 
             "devices" -> {
@@ -699,32 +767,9 @@ class MainActivity : ComponentActivity() {
                     settingRow(group ?: root,title,detail,action)
                 }
                 fun appearanceToggle(title:String,detail:String,key:String,default:Boolean,onChange:(android.view.View,Boolean)->Unit={ _,_-> }) {
-                    val parent=group ?: root
-                    if(parent.childCount>0) parent.addView(android.view.View(this).apply { setBackgroundColor(0x227F7F7F) },LinearLayout.LayoutParams(-1,dp(1)))
-                    val row=LinearLayout(this).apply {
-                        orientation=LinearLayout.HORIZONTAL
-                        gravity=android.view.Gravity.CENTER_VERTICAL
-                        minimumHeight=dp(adaptiveLayout.touch)
-                        setPadding(dp(4),dp(10),dp(4),dp(10))
+                    settingToggle(group ?: root,title,detail,prefs.getBoolean(key,default)) { view,checked ->
+                        prefs.edit().putBoolean(key,checked).apply(); onChange(view,checked)
                     }
-                    val labels=LinearLayout(this).apply {
-                        orientation=LinearLayout.VERTICAL
-                        addView(txt(title,16,ink,true))
-                        addView(txt(detail,13,muted))
-                    }
-                    row.addView(labels,LinearLayout.LayoutParams(0,-2,1f))
-                    val toggle=Switch(this).apply {
-                        contentDescription="$title. $detail"
-                        isChecked=prefs.getBoolean(key,default)
-                        isFocusable=true
-                        setOnCheckedChangeListener { view,checked ->
-                            prefs.edit().putBoolean(key,checked).apply()
-                            onChange(view,checked)
-                        }
-                    }
-                    row.addView(toggle,LinearLayout.LayoutParams(-2,-2))
-                    labels.setOnClickListener { toggle.isChecked=!toggle.isChecked }
-                    parent.addView(row,LinearLayout.LayoutParams(-1,-2))
                 }
                 heading("Theme & colors")
                 preferenceRow("Theme",themes[themeKeys.indexOf(prefs.getString("appearance_mode","dark").orEmpty()).coerceAtLeast(0)]) { choose("Theme",themes) { prefs.edit().putString("appearance_mode",themeKeys[it]).apply(); recreate() } }
@@ -901,6 +946,7 @@ class MainActivity : ComponentActivity() {
                     supportMenu("Diagnostics",listOf(
                         Triple("Live recognition","Inspect current playback detection") { liveInspector() },
                         Triple("Diagnostic recorder","Open the diagnostic recording tool") { startActivity(Intent(this,DebugActivity::class.java)) },
+                        Triple("Last crash report","View, copy or clear the saved crash report") { showCrashReport() },
                         Triple("Technical status","Refresh and view detailed diagnostic information") {
                             refresh()
                             val detail=TextView(this).apply { text=output.text; setTextIsSelectable(true); setPadding(dp(16),dp(12),dp(16),dp(12)); setTextColor(ink) }
@@ -913,6 +959,37 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+    private var crashDialogShowing=false
+    private fun maybeShowCrashReport() {
+        if(!isDestroyed && !isFinishing && (!prefs.getBoolean("privacy_lock",false) || unlocked) && CrashRecovery.pending(this)) showCrashReport()
+    }
+    private fun showCrashReport() {
+        if(crashDialogShowing || isDestroyed || isFinishing || (prefs.getBoolean("privacy_lock",false) && !unlocked)) return
+        val report=CrashRecovery.report(this)
+        if(report==null) {
+            CrashRecovery.acknowledge(this)
+            BridgeDialogBuilder(this).setTitle("Crash report").setMessage("No saved crash report is available.").setPositiveButton("OK",null).show()
+            return
+        }
+        crashDialogShowing=true
+        val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(18),dp(8),dp(18),dp(12)) }
+        body.addView(txt("TraktBridge stopped unexpectedly. Copy this report to help diagnose the issue. Nothing is sent automatically.",14,ink))
+        body.addView(txt(report,12,muted).apply { setTextIsSelectable(true); typeface=android.graphics.Typeface.MONOSPACE; setPadding(0,dp(12),0,0) })
+        val dialog=BridgeDialogBuilder(this).setTitle("Previous crash report").setView(ScrollView(this).apply { addView(body) })
+            .setNegativeButton("Later",null).setNeutralButton("Clear",null).setPositiveButton("Copy report",null).create()
+        dialog.setOnDismissListener { crashDialogShowing=false; CrashRecovery.acknowledge(this) }
+        dialog.setOnShowListener {
+            dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(android.content.ClipData.newPlainText("TraktBridge crash report",report))
+                Toast.makeText(this,"Crash report copied",Toast.LENGTH_SHORT).show()
+                dialog.dismiss()
+            }
+            dialog.getButton(android.app.AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                CrashRecovery.clear(this); dialog.dismiss()
+            }
+        }
+        dialog.show()
     }
     private fun betaFeedback() {
         val field=EditText(this).apply { hint="Describe the issue and steps to reproduce"; minLines=4; maxLines=8 }
@@ -1173,15 +1250,21 @@ class MainActivity : ComponentActivity() {
     private fun startTracking() {
         runCatching {
             startForegroundService(Intent(this,TrackingService::class.java))
-            android.service.notification.NotificationListenerService.requestRebind(android.content.ComponentName(this,PlaybackListener::class.java))
+            TrackingRecovery.request(this,"tracking started")
         }.onFailure { DebugTrace.failure("foreground",it); Toast.makeText(this,"Unable to start tracking",Toast.LENGTH_LONG).show() }
     }
     override fun onPause() { AutoMatchSuggestions.store(this).unregisterOnSharedPreferenceChangeListener(suggestionListener); super.onPause(); if(prefs.getBoolean("privacy_lock",false) && !privacyPrompt) { unlocked=false; if(::shell.isInitialized) shell.visibility=android.view.View.INVISIBLE } }
-    override fun onResume() { super.onResume(); AutoMatchSuggestions.store(this).registerOnSharedPreferenceChangeListener(suggestionListener); if (::output.isInitialized) refresh(); if (::historyList.isInitialized) refreshHistory(); requirePrivacyUnlock(); recoverTrackingWhenVisible(); if(::settingsOverview.isInitialized && settingsCategory in setOf("devices","tracking","privacy")) refreshSettingsState(settingsCategory) }
+    override fun onResume() { super.onResume(); AutoMatchSuggestions.store(this).registerOnSharedPreferenceChangeListener(suggestionListener); if (::output.isInitialized) refresh(); if (::historyList.isInitialized) refreshHistory(); requirePrivacyUnlock(); recoverTrackingWhenVisible(); if(::settingsOverview.isInitialized) { updateSettingsStatus(); if(settingsCategory in setOf("devices","tracking","privacy")) refreshSettingsState(settingsCategory) } }
+    private fun repairTracking() {
+        if(prefs.getBoolean("enabled",false) && TrackingRecovery.listenerGranted(this)) {
+            if(!TrackingService.running) startTracking() else TrackingRecovery.request(this,"manual repair")
+        }
+        BridgeDialogBuilder(this).setTitle("Repair tracking").setMessage("Android controls notification listener binding. If tracking remains disconnected, open Notification access, turn TraktBridge off and back on, then return here. This does not delete your history.").setNegativeButton("Close",null).setPositiveButton("Notification access"){_,_->startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))}.show()
+    }
     private fun recoverTrackingWhenVisible() {
         val permitted=!prefs.getBoolean("privacy_lock",false) || unlocked
         if(TrackingRecovery.shouldStart(prefs.getBoolean("enabled",false),permitted,TrackingService.running,TrackingRecovery.listenerGranted(this))) startTracking()
-        else if(permitted && prefs.getBoolean("enabled",false) && TrackingRecovery.listenerGranted(this) && !PlaybackListener.wake()) runCatching { android.service.notification.NotificationListenerService.requestRebind(android.content.ComponentName(this,PlaybackListener::class.java)) }
+        else if(permitted && prefs.getBoolean("enabled",false) && !PlaybackListener.liveConnected()) TrackingRecovery.request(this,"app resumed")
     }
     private fun requirePrivacyUnlock() {
         if(!::shell.isInitialized) return
@@ -1195,7 +1278,7 @@ class MainActivity : ComponentActivity() {
         runCatching { startActivityForResult(intent,96) }.onFailure { privacyPrompt=false; finish() }
     }
     override fun onDestroy() { bridgeModel.cancel(); if (::history.isInitialized) history.close(); super.onDestroy() }
-    override fun onSaveInstanceState(outState: Bundle) { outState.putInt("content_scroll",if(::contentPage.isInitialized) (if(tab==4) settingsPage else contentPage).scrollY else 0); outState.putBoolean("content_focus",tvMode && ::nav.isInitialized && !nav.hasFocus()); outState.putString("settings_category",settingsCategory); outState.putString("library_selection",librarySelection); outState.putInt("tab",tab); outState.putString("import_source",importSource); outState.putString("filter_q",historyFilter.query); outState.putString("filter_source",historyFilter.source); outState.putInt("filter_period",historyFilter.period); outState.putString("filter_type",historyFilter.type); outState.putString("filter_status",historyFilter.status); outState.putString("filter_sort",historyFilter.sort); outState.putInt("analytics_period",analyticsPeriod); outState.putString("analytics_source",analyticsSource); outState.putString("calendar_month",calendarMonth.toString()); super.onSaveInstanceState(outState) }
+    override fun onSaveInstanceState(outState: Bundle) { outState.putInt("content_scroll",if(::contentPage.isInitialized) (if(tab==4) settingsPage else contentPage).scrollY else 0); outState.putBoolean("content_focus",tvMode && ::nav.isInitialized && !nav.hasFocus()); outState.putString("settings_category",settingsCategory); outState.putString("library_selection",librarySelection); outState.putString("library_category",libraryCategory); outState.putString("review_category",reviewCategory); outState.putInt("tab",tab); outState.putString("import_source",importSource); outState.putString("filter_q",historyFilter.query); outState.putString("filter_source",historyFilter.source); outState.putInt("filter_period",historyFilter.period); outState.putString("filter_type",historyFilter.type); outState.putString("filter_status",historyFilter.status); outState.putString("filter_sort",historyFilter.sort); outState.putInt("analytics_period",analyticsPeriod); outState.putString("analytics_source",analyticsSource); outState.putString("calendar_month",calendarMonth.toString()); super.onSaveInstanceState(outState) }
     private fun dp(n:Int)= (n*resources.displayMetrics.density+0.5f).toInt()
     private fun rounded(color:Int,radius:Int=16)=android.graphics.drawable.GradientDrawable().apply { setColor(color); cornerRadius=dp(radius).toFloat() }
     private fun txt(value:String,size:Int=15,color:Int=ink,bold:Boolean=false)=TextView(this).apply {
@@ -1224,30 +1307,80 @@ class MainActivity : ComponentActivity() {
     private fun showTab(index:Int) {
         if(index !in 0..4) return
         if(tab!=index) { restoreContentFocus=false; restoreScrollY=0 }
-        tab=index; bridgeModel.select(index); settingsPage.visibility=if(index==4) android.view.View.VISIBLE else android.view.View.GONE
-        contentPage.visibility=if(index==4) android.view.View.GONE else android.view.View.VISIBLE
+        tab=index; CrashRecovery.markScreen(listOf("Home","Library","Review","Activity","Settings")[index]); bridgeModel.select(index); settingsPage.visibility=if(index==4) android.view.View.VISIBLE else android.view.View.GONE
+        contentPage.visibility=if(index==4 || index==1) android.view.View.GONE else android.view.View.VISIBLE
+        libraryHost.visibility=if(index==1) android.view.View.VISIBLE else android.view.View.GONE
         if(tvMode) for(i in 0 until nav.childCount) (nav.getChildAt(i) as TextView).apply { setTextColor(if(i==index) violet else muted); background=TvFocus.background(this@MainActivity,if(i==index) BridgeDesign.action else surface,violet,i==index); isSelected=i==index }
-        refreshHistory(); contentPage.scrollTo(0,0)
+        clearHistoryProgress(); refreshHistory(navigation=true); contentPage.scrollTo(0,0)
         if(index==4 && restoreScrollY>0) { val y=restoreScrollY; restoreScrollY=0; settingsPage.post { if(tab==4) settingsPage.scrollTo(0,y) } }
         if(tvMode && index==4 && (!nav.hasFocus() || restoreContentFocus)) { settingsPage.post { if(tab==4) TvFocus.firstContent(settingsPage) }; restoreContentFocus=false }
     }
     private fun emptyState(parent:LinearLayout,title:String,detail:String,label:String,action:()->Unit) {
         parent.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeEmptyState(violet,title,detail,label,action) } })
     }
-    private fun refreshHistory() {
+    private var historyLoadPanel:LinearLayout?=null
+    private var historyLoadLabel:TextView?=null
+    private var historyLoadBar:ProgressBar?=null
+    private var renderedHistoryTab=-1
+    private fun showHistoryProgress(progress:HistoryLoadProgress) {
+        if(tab==4 || isDestroyed || isFinishing) return
+        val host=if(tab==1) libraryHost else dashboard
+        if(historyLoadPanel?.parent!=host || historyLoadBar==null) {
+            clearHistoryProgress()
+            val panel=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(8),dp(12),dp(8)) }
+            val label=txt("",13,muted)
+            val bar=ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal).apply { max=1000; progressTintList=android.content.res.ColorStateList.valueOf(violet); indeterminateTintList=android.content.res.ColorStateList.valueOf(violet) }
+            panel.addView(label); panel.addView(bar,LinearLayout.LayoutParams(-1,dp(8)))
+            host.addView(panel,0); historyLoadPanel=panel; historyLoadLabel=label; historyLoadBar=bar
+        }
+        val known=progress.total>0
+        historyLoadLabel?.text=progress.stage+if(known) " • "+progress.completed+" / "+progress.total+" records ("+(progress.completed.toLong()*100/progress.total)+"%)" else "…"
+        historyLoadBar?.isIndeterminate=!known
+        if(known) historyLoadBar?.progress=(progress.completed.toLong()*1000/progress.total).toInt().coerceIn(0,1000)
+    }
+    private fun clearHistoryProgress() {
+        historyLoadPanel?.let { (it.parent as? android.view.ViewGroup)?.removeView(it) }
+        historyLoadPanel=null; historyLoadLabel=null; historyLoadBar=null
+    }
+    private var historyProgressEpoch=0L
+    private val historyProgressHandler=android.os.Handler(android.os.Looper.getMainLooper())
+    private fun refreshHistory(navigation:Boolean=false) {
         if(!::dashboard.isInitialized || tab==4 || isFinishing || isDestroyed) return
         val selectedTab=tab
-        dashboard.removeAllViews()
-        dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeLoading(violet) } })
+        val epoch=++historyProgressEpoch
+        var completed=false
+        var pendingProgress:HistoryLoadProgress?=null
+        var progressVisible=false
+        historyProgressHandler.postDelayed({ if(!completed && epoch==historyProgressEpoch && tab==selectedTab && !isDestroyed && !isFinishing) { progressVisible=true; pendingProgress?.let { showHistoryProgress(it) } } },700)
+        if(renderedHistoryTab!=selectedTab) { dashboard.removeAllViews(); clearHistoryProgress() }
         if(tvMode && contentPage.hasFocus()) restoreContentFocus=true
-        bridgeModel.load { result ->
-            if(isDestroyed || isFinishing || tab!=selectedTab) return@load
-            result.fold({ snapshot -> renderHistory(snapshot.records,snapshot.groups); if(restoreScrollY>0) { val y=restoreScrollY; restoreScrollY=0; contentPage.post { if(tab==selectedTab) contentPage.scrollTo(0,y) } }; if(tvMode && restoreContentFocus) { restoreContentFocus=false; contentPage.post { if(tab==selectedTab) TvFocus.firstContent(contentPage) } } }, {
-                dashboard.removeAllViews()
-                emptyState(dashboard,"History unavailable","Existing viewing data has not been cleared.","Retry") { refreshHistory() }
-                dashboard.addView(actionButton("Check database integrity") { checkHistoryIntegrity() })
-            })
-        }
+        bridgeModel.load({ result,finished ->
+            if(!isDestroyed && !isFinishing && tab==selectedTab && epoch==historyProgressEpoch) {
+                if(finished) completed=true
+                result.fold({ snapshot ->
+                    val y=if(restoreScrollY>0) restoreScrollY else if(renderedHistoryTab==selectedTab) contentPage.scrollY else 0
+                    val drawn=runCatching { renderHistory(snapshot.records,snapshot.groups,snapshot.unified) }
+                    if(drawn.isSuccess) {
+                        renderedHistoryTab=selectedTab
+                        clearHistoryProgress()
+                        if(!finished && progressVisible) pendingProgress?.let { showHistoryProgress(it) }
+                        restoreScrollY=0
+                        if(y>0) contentPage.post { if(tab==selectedTab) contentPage.scrollTo(0,y) }
+                        if(tvMode && restoreContentFocus) { restoreContentFocus=false; contentPage.post { if(tab==selectedTab) TvFocus.firstContent(contentPage) } }
+                    } else {
+                        clearHistoryProgress()
+                        emptyState(if(tab==1) libraryHost else dashboard,"Unable to display history","Existing viewing records are unchanged.","Retry"){refreshHistory()}
+                    }
+                }, {
+                    clearHistoryProgress()
+                    val warning=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(8),dp(12),dp(8)) }
+                    warning.addView(txt("History loading interrupted",16,ink,true))
+                    warning.addView(txt("Some history may be unavailable. Existing records have not been cleared.",13,muted))
+                    warning.addView(actionButton("Retry loading"){refreshHistory()})
+                    (if(tab==1) libraryHost else dashboard).addView(warning,0); historyLoadPanel=warning
+                })
+            }
+        },{ progress -> if(tab==selectedTab && epoch==historyProgressEpoch && !isDestroyed && !isFinishing) { pendingProgress=progress; completed=false; if(progressVisible) showHistoryProgress(progress) } },navigation=navigation)
     }
 
     private fun customizeDashboard() {
@@ -1277,127 +1410,133 @@ class MainActivity : ComponentActivity() {
             refreshHistory()
         }.show()
     }
-    private fun renderHistory(records:List<WatchRecord>,groups:List<ViewingTitle>) {
+    private var unifiedRows:List<WatchRecord> = emptyList()
+    private fun renderHistory(records:List<WatchRecord>,groups:List<ViewingTitle>,unified:List<WatchRecord> = records) {
+        unifiedRows=unified
+        val allGroups=if(tab==0) ViewingGroups.build(unified) else groups
         dashboard.removeAllViews()
         val pending=groups.count { it.queued || it.pending }
         if(tab==2) requestReviewSuggestions(records)
         when(tab) {
-            0 -> {
-                val age=System.currentTimeMillis()-prefs.getLong("last_sample",0)
-                val live=prefs.getBoolean("enabled",false) && prefs.getBoolean("listener_connected",false) && age in 0..20000
-                val weekly=ViewingAnalytics.filter(records,HistoryFilter(period=7))
-                dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { if(tvMode) BridgeTvHome(violet,live,pending,durationText(weekly.sumOf { it.watched }),{ nowPlaying() },{ showTab(2) },{ discover() },{ showTab(4) },{ viewingPlanner() }) else if(adaptiveLayout.mode==AdaptiveUi.Mode.EXPANDED) BridgeExpandedHome(violet,live,pending,durationText(weekly.sumOf { it.watched }),{ showTab(4) },{ showTab(2) },{ discover() },{ viewingPlanner() },{ nowPlaying() }) else BridgeHomeSummary(violet,live,pending,durationText(weekly.sumOf { it.watched }),{ showTab(4) },{ showTab(2) },{ discover() },{ viewingPlanner() }) } })
-                val hidden=DashboardPreferences.visible(prefs.getString("dashboard_hidden","").orEmpty())
-                for(key in DashboardPreferences.order(prefs.getString("dashboard_order","").orEmpty())) {
-                    if(key in hidden) continue
-                    when(key) {
-                    "metrics" -> {
-                metricGrid(dashboard,listOf("This week" to durationText(weekly.sumOf { it.watched }),"Movies synced" to groups.count { it.confirmed && it.representative.matchType=="movie" }.toString(),"Episodes synced" to groups.count { it.confirmed && it.representative.matchType=="episode" }.toString(),"Needs review" to pending.toString()))
-
-                    }
-                    "goal" -> {
-                if(prefs.getBoolean("show_monthly_goal",true)) monthlyGoalCard(dashboard,records)
-
-                    }
-                    "now" -> {
-                section(dashboard,"Now watching")
-                dashboard.addView(actionButton("Now Playing • All devices") { nowPlaying() })
-                val active=groups.filter { it.active }
-                if(active.isEmpty()) emptyState(dashboard,"Nothing playing","Play a video in a selected app to see live observations.","Tracking settings") { showTab(4) } else cards(dashboard,active.take(2)) { parent,g -> titleCard(parent,g,false) }
-
-                    }
-                    "continue" -> {
-                section(dashboard,"Continue watching")
-                SeriesLibrary.continueWatching(groups).firstOrNull()?.let { heroCard(dashboard,it) }
-                val continuing=SeriesLibrary.continueWatching(groups)
-                if(continuing.isEmpty()) emptyState(dashboard,"Nothing to resume","Unfinished sampled viewing appears here.","Discover") { discover() } else cards(dashboard,continuing.drop(1).take(6)) { parent,g -> titleCard(parent,g,false) }
-
-                    }
-                    "review" -> {
-                section(dashboard,"Review queue")
-                val q=panel(dashboard); q.addView(txt("$pending awaiting action",22,ink,true)); q.addView(actionButton("Open review queue") { showTab(2) })
-
-                    }
-                    "discover" -> {
-                dashboard.addView(actionButton("Ask your viewing assistant") { localAssistant() })
-                dashboard.addView(actionButton("Upcoming episodes") { upcomingEpisodes() })
-                dashboard.addView(actionButton("Recommendations from your history") { recommendFromHistory() })
-                dashboard.addView(actionButton("Anime catalogue (AniList)") { animeSearch() })
-                dashboard.addView(actionButton("Open Trakt account library") { openDownloadedTrakt() })
-
-                    }
-                    "recent" -> {
-                section(dashboard,"Recently watched")
-                val recent=groups.filter { !it.active }.take(5)
-                if(recent.isEmpty()) emptyState(dashboard,"Your history starts here","Track a selected player or record a viewing manually.","Log a watch") { manualLog() } else cards(dashboard,recent) { parent,g -> titleCard(parent,g,false) }
-                    }
-                    }
-                }
-                dashboard.addView(actionButton("Customize dashboard") { customizeDashboard() })
-            }
-            1,2 -> {
-                if(tab==1) dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeLibraryToolbar(violet,groups.size.toString()+" identified titles and provisional groups",{ universalSearch() },{ editHistoryFilter(records) },{ manualLog() }) } })
-                else { dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeReviewSummary(violet,pending,{ manualLog() },{ HistorySync.schedule(this@MainActivity); refreshHistory() }) } }) }
-                if(tab==1) { dashboard.addView(actionButton("Synced Trakt account library") { openDownloadedTrakt() }); dashboard.addView(actionButton("Unified movie, TV and anime library") { unifiedLibrary() }); dashboard.addView(actionButton("Advanced search • tags and folders") { organizedLibrary() }) }
-                dashboard.addView(actionButton("Refresh") { refreshHistory() })
-                
-                if(tab==1) {
-                    dashboard.addView(txt("Filters: "+listOfNotNull(historyFilter.query.takeIf { it.isNotBlank() }?.let { "Search: "+it },historyFilter.source.takeIf { it.isNotBlank() }?.let { appLabel(it) },historyFilter.period.takeIf { it>0 }?.let { "Last "+it+" days" },historyFilter.type.takeIf { it.isNotBlank() },historyFilter.status.takeIf { it.isNotBlank() } ).joinToString(" • ").ifBlank { "All viewing" },13,muted))
-                    if(historyFilter!=HistoryFilter()) dashboard.addView(actionButton("Reset filters") { historyFilter=HistoryFilter(); historyLimit=MemoryPolicy.pageSize(lowRam); refreshHistory() })
-                }
-                val items=if(tab==1) ViewingAnalytics.sort(ViewingGroups.build(ViewingAnalytics.filter(records,historyFilter)),historyFilter.sort) else groups.filter { it.queued || it.pending }
-                if(items.isEmpty()) panel(dashboard).addView(txt(if(tab==1) "No viewing records yet." else "You're all caught up.",16,muted))
-                val visible=items.take(historyLimit)
-                if(items.size>visible.size && historyLimit<1000) dashboard.addView(actionButton("Show more ("+visible.size+" of "+items.size+")") { historyLimit=MemoryPolicy.nextPage(historyLimit,MemoryPolicy.pageSize(lowRam)); refreshHistory() })
-                else if(items.size>visible.size) dashboard.addView(txt("Showing first 1000 titles. Use filters to narrow the remaining history.",13,muted))
-                if(tab==1 && tvMode && visible.isNotEmpty()) {
-                    val shelf=visible.map { g -> val r=g.representative; TvLibraryItem(r.id,r.matchLabel.ifBlank { r.title },g.platforms.joinToString(" • ") { appLabel(it) },if(r.matchType=="episode") "show" else "movie",if(r.matchType=="episode") r.showId else r.traktId) { showSessions(g) } }
-                    dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeTvShelf(violet,"Your viewing library",shelf) } })
-                }
-                if(tab==1 && adaptiveLayout.mode==AdaptiveUi.Mode.EXPANDED && visible.isNotEmpty()) {
-                    val entries=visible.map { g -> val r=g.representative; LibraryEntry(r.id,r.matchLabel.ifBlank { r.title },g.platforms.joinToString(" • ") { appLabel(it) },g.sessions.size.toString()+" sessions • "+durationText(g.sampledMs)+" sampled") { showSessions(g) } }
-                    dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeMasterDetail(violet,entries,librarySelection) { librarySelection=it } } })
-                    section(dashboard,"Full library")
-                }
-                if(tab==1) {
-                    val series=SeriesLibrary.build(visible)
-                    if(series.isNotEmpty()) { section(dashboard,"Series and anime"); cards(dashboard,series) { parent,item -> seriesCard(parent,item) } }
-                    val movies=visible.filter { it.representative.matchType=="movie" }
-                    if(movies.isNotEmpty()) { section(dashboard,"Movies"); lazyTitles(dashboard,movies,true) }
-                    val other=visible.filter { it.representative.matchType!="movie" && !(it.representative.matchType=="episode" && it.representative.showId>0 && it.representative.season>=0 && it.representative.episode>0) }
-                    if(other.isNotEmpty()) { section(dashboard,"Unidentified viewing"); lazyTitles(dashboard,other,true) }
-                } else lazyTitles(dashboard,visible,true)
-            }
-            3 -> {
-                section(dashboard,"Viewing activity")
-                dashboard.addView(actionButton(if(analyticsPeriod==0) "Period: All time" else "Period: Last "+analyticsPeriod+" days") {
-                    val periods=listOf(7,30,90,0); choose("Analytics period",listOf("Last 7 days","Last 30 days","Last 90 days","All time")) { analyticsPeriod=periods[it]; refreshHistory() }
-                })
-                val sources=records.map { it.source }.distinct().sortedBy { appLabel(it) }
-                dashboard.addView(actionButton("Platform: "+analyticsSource.takeIf { it.isNotBlank() }?.let { appLabel(it) }.orEmpty().ifBlank { "All" }) {
-                    choose("Filter viewing activity",listOf("All platforms")+sources.map { appLabel(it) }) { i -> analyticsSource=if(i==0) "" else sources[i-1]; refreshHistory() }
-                })
-                val scoped=ViewingAnalytics.filter(records,HistoryFilter(period=analyticsPeriod,source=analyticsSource))
-                val scopedGroups=ViewingGroups.build(scoped)
-                metricGrid(dashboard,listOf("Sampled watch time" to durationText(scoped.sumOf { it.watched }),"Movies synced" to scopedGroups.count { it.confirmed && it.representative.matchType=="movie" }.toString(),"Episodes synced" to scopedGroups.count { it.confirmed && it.representative.matchType=="episode" }.toString(),"Platforms" to scoped.filter { it.watched>0 }.map { it.source }.distinct().size.toString(),"Paused" to durationText(scoped.sumOf { it.pausedMs }),"Buffering" to durationText(scoped.sumOf { it.bufferingMs }),"Seeks" to scoped.sumOf { it.seeks }.toString(),"Uncertain" to durationText(scoped.sumOf { it.uncertainMs })))
-                dashboard.addView(actionButton("Subscription costs") { subscriptions() })
-                dashboard.addView(actionButton("Streaming service dashboard") { serviceDashboard() })
-                section(dashboard,"Watch time by platform")
-                val totals=ViewingAnalytics.platforms(scoped).map { it.source to it.sampledMs }
-                val max=totals.maxOfOrNull { it.second }?.coerceAtLeast(1) ?: 1
-                val chart=panel(dashboard)
-                if(totals.isEmpty()) chart.addView(txt("No sampled activity yet.",15,muted))
-                totals.forEach { (pkg,time) ->
-                    chart.addView(actionButton(appLabel(pkg)+" • "+durationText(time)) { analyticsSource=pkg; refreshHistory() })
-                    chart.addView(ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal).apply { progress=(time.toDouble()/max*100).toInt(); progressTintList=android.content.res.ColorStateList.valueOf(violet) },LinearLayout.LayoutParams(-1,dp(12)).apply { bottomMargin=dp(14) })
-                }
-                chart.addView(txt("App-activity and remote history are excluded from sampled time. Date filters use session end date.",13,muted))
-                dashboard.addView(actionButton("Viewing journal and yearly recap") { viewingJournal() })
-                section(dashboard,"Viewing calendar")
-                calendarView(dashboard,if(analyticsSource.isBlank()) records else records.filter { it.source==analyticsSource })
-
+            0 -> renderModernHome(records,allGroups,pending)
+            1 -> renderPosterLibrary(unified)
+            2 -> renderModernReview(groups)
+            3 -> renderModernActivity(unified)
+        }
+    }
+    private fun modernContent(content:@androidx.compose.runtime.Composable ()->Unit) {
+        dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent(content) })
+    }
+    private fun renderModernHome(records:List<WatchRecord>,groups:List<ViewingTitle>,pending:Int) {
+        val age=System.currentTimeMillis()-prefs.getLong("last_sample",0)
+        val live=TrackingRecovery.status(this)=="Tracking active"
+        modernContent { ModernPageHeader(violet,"Home",TrackingRecovery.status(this),onMenu={ choose("Home options",listOf("Tracking settings","Now Playing • All devices","Viewing planner","Viewing assistant","Customize dashboard","Refresh")) { i -> when(i) {0->showTab(4);1->nowPlaying();2->viewingPlanner();3->localAssistant();4->customizeDashboard();5->refreshHistory()} } }) }
+        val hidden=DashboardPreferences.visible(prefs.getString("dashboard_hidden","").orEmpty())
+        val active=groups.filter { it.active }
+        val continuing=SeriesLibrary.continueWatching(ViewingGroups.build(records))
+        val continuingKeys=continuing.take(7).map { it.key }.toSet()
+        val recent=groups.filter { !it.active && it.key !in continuingKeys }.take(5)
+        if("now" !in hidden && active.isNotEmpty()) {
+            section(dashboard,"Now watching")
+            modernContent { ModernActionRow(violet,active.first().representative.title,"Live playback • all devices"){ nowPlaying() } }
+        }
+        if("continue" !in hidden && continuing.isNotEmpty()) {
+            section(dashboard,"Continue watching")
+            val items=continuing.take(7).map { groupPoster(it) }
+            modernContent { PosterLibraryShelf(violet,items) }
+        }
+        if("metrics" !in hidden) modernContent { ModernMetricTiles(violet,listOf("This week" to durationText(ViewingAnalytics.filter(records,HistoryFilter(period=7)).sumOf { it.watched }),"Titles tracked" to groups.size.toString(),"To review" to pending.toString())) }
+        if("review" !in hidden) modernContent { ModernActionRow(violet,"Review your viewing",pending.toString()+" records awaiting action"){ showTab(2) } }
+        if("recent" !in hidden && recent.isNotEmpty()) {
+            section(dashboard,"Recently watched")
+            recent.forEach { g -> val item=groupPoster(g); modernContent { ModernActionRow(violet,item.title,if(g.confirmed) java.text.DateFormat.getDateTimeInstance().format(java.util.Date(g.latest.ended))+" · "+appLabel(g.latest.source) else item.subtitle){ showSessions(g) } } }
+        }
+        if("discover" !in hidden) {
+            section(dashboard,"Explore")
+            listOf(UiAction("For you"){ recommendFromHistory() },UiAction("Upcoming episodes"){ upcomingEpisodes() },UiAction("Trending titles"){ discover() },UiAction("Anime"){ animeSearch() }).chunked(2).forEach { batch ->
+                modernContent { BridgeTheme(violet) { androidx.compose.foundation.layout.Row(androidx.compose.ui.Modifier.fillMaxWidth(),horizontalArrangement=androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) { batch.forEach { item -> androidx.compose.material3.OutlinedButton(onClick=item.run,modifier=androidx.compose.ui.Modifier.weight(1f)) { androidx.compose.material3.Text(item.label) } } } } }
             }
         }
+        if("goal" !in hidden && prefs.getBoolean("show_monthly_goal",true)) monthlyGoalCard(dashboard,records)
+    }
+    private var reviewCategory="match"
+    private fun reviewBucket(g:ViewingTitle):String {
+        if(g.queued) return "sync"
+        if(g.representative.traktId<=0) return "match"
+        if(g.positionSession?.let { completionAssessment(it).suggested }==true) return "sync"
+        return "progress"
+    }
+    private fun renderModernReview(groups:List<ViewingTitle>) {
+        val items=groups.filter { it.queued || it.pending }
+        modernContent { ModernPageHeader(violet,"Review",items.size.toString()+" awaiting action",onMenu={ choose("Review options",listOf("Refresh","Log a watch manually","Retry approved uploads")) { i -> when(i){0->refreshHistory();1->manualLog();2->{HistorySync.schedule(this);refreshHistory()}} } }) }
+        val categories=listOf("match" to "Needs match","progress" to "In progress","sync" to "Ready / sync")
+        modernContent { ModernCategories(violet,categories.map { (key,label)->key to (label+" ("+items.count { reviewBucket(it)==key }+")") },reviewCategory) { reviewCategory=it; refreshHistory() } }
+        val visible=items.filter { reviewBucket(it)==reviewCategory }
+        if(visible.isEmpty()) dashboard.addView(txt("Nothing in this category.",15,muted))
+        visible.take(historyLimit).forEach { g ->
+            val r=g.representative
+            val state=if(AutoMatchSuggestions.eligible(r)) AutoMatchSuggestions.read(this,r) else null
+            val candidate=state?.matches?.firstOrNull()?.item
+            val original=groupPoster(g)
+            val item=if(candidate!=null) original.copy(title=candidate.title.substringBefore(" — "),subtitle=candidate.label().substringAfter(" — ",candidate.label())+" · "+appLabel(r.source),status="Suggested match",type=if(candidate.type=="movie") "movie" else "show",id=if(candidate.type=="episode") candidate.showId else candidate.id) else original.copy(status=if(g.queued) "Awaiting sync" else if(r.traktId>0) "Match verified" else "Needs match")
+            val actions=if(state!=null) suggestionActions(r,state) else emptyList()
+            val primary=if(candidate!=null) actions.firstOrNull() else if(g.queued) UiAction("View sync status"){showSessions(g)} else if(r.traktId>0 && reviewBucket(g)=="sync") UiAction("Confirm watched"){showSessions(g)} else null
+            val secondary=actions.firstOrNull { it.label=="No, incorrect" }
+            val manual=if(r.traktId<=0) UiAction("Search manually"){identify(r)} else null
+            val evidence=when { candidate!=null->state?.matches?.firstOrNull()?.reason.orEmpty()+" · Original: "+r.title; state?.status in setOf("waiting","searching")->"Searching Trakt automatically…"; state?.status=="error"->"Catalogue unavailable; will retry"; state?.status=="rejected"->"Suggestion rejected"; r.traktId<=0->"No reliable Trakt match found"; else->durationText(g.sampledMs)+" sampled · "+original.subtitle }
+            modernContent { ModernReviewCard(violet,item,evidence,primary,secondary,manual) {
+                val options=titleEntry(g,true).actions.filter { it.label !in setOf("Yes, correct","No, incorrect","Search manually","Open playback app","Open player") || item.play==null }
+                val menu=options+if(r.status in setOf("pending","reviewed")) listOf(UiAction("Delete viewing record"){deleteFromReview(r)}) else emptyList()
+                modernActionDialog("Viewing record",item.title,menu.map { it.label }) { menu[it].run() }
+            } }
+        }
+        if(visible.size>historyLimit && historyLimit<1000) dashboard.addView(actionButton("Show more"){historyLimit=MemoryPolicy.nextPage(historyLimit,MemoryPolicy.pageSize(lowRam));refreshHistory()})
+    }
+    private fun deleteFromReview(r:WatchRecord) {
+        BridgeDialogBuilder(this).setTitle("Delete this local record?").setNegativeButton("Cancel",null).setPositiveButton("Delete"){_,_->
+            if(runCatching { history.trash(r.id) }.getOrDefault(false)) { AutoMatchSuggestions.remove(this,r.id); ViewingNotifications.cancel(this,r.id); refreshHistory() }
+            else Toast.makeText(this,"Record could not be deleted",Toast.LENGTH_LONG).show()
+        }.show()
+    }
+    private fun renderModernActivity(records:List<WatchRecord>) {
+        val scoped=ViewingAnalytics.filter(records,HistoryFilter(period=analyticsPeriod,source=analyticsSource))
+        val groups=ViewingGroups.build(scoped)
+        val historical=scoped.filter { it.status=="synced" }
+        val activeDays=scoped.filter { it.watched>0 || it.status=="synced" }.map { ViewingAnalytics.day(it.ended) }.distinct().size
+        val total=scoped.sumOf { it.watched.coerceAtLeast(0) }
+        val daily=scoped.filter { it.watched>0 }.groupBy { ViewingAnalytics.day(it.ended) }.mapValues { (_,rows)->rows.sumOf { it.watched } }
+        val today=java.time.LocalDate.now()
+        val start=if(analyticsPeriod>0) today.minusDays(analyticsPeriod.toLong()-1) else daily.keys.minOrNull() ?: today
+        val monthly=analyticsPeriod==365 || analyticsPeriod==0
+        val dates=if(monthly) {
+            val first=java.time.YearMonth.from(start)
+            val count=(java.time.temporal.ChronoUnit.MONTHS.between(first,java.time.YearMonth.from(today))+1).coerceIn(1,120).toInt()
+            (0 until count).map { java.time.YearMonth.from(today).minusMonths((count-1-it).toLong()).atDay(1) }
+        } else (0 until analyticsPeriod).map { start.plusDays(it.toLong()) }
+        val values=dates.map { date -> if(monthly) daily.entries.filter { java.time.YearMonth.from(it.key)==java.time.YearMonth.from(date) }.sumOf { it.value } else daily[date] ?: 0L }
+        modernContent { ModernPageHeader(violet,"Activity",analyticsSource.takeIf { it.isNotBlank() }?.let { appLabel(it) } ?: "All platforms",onFilter={
+            val sources=records.map { it.source }.distinct().sortedBy { appLabel(it) }
+            choose("Filter by platform",listOf("All platforms")+sources.map { appLabel(it) }){ i -> analyticsSource=if(i==0) "" else sources[i-1];refreshHistory() }
+        },onMenu={choose("Activity options",listOf("Subscription costs","Streaming service dashboard","Viewing journal and yearly recap","Playback diagnostics","Refresh")){ i->when(i){0->subscriptions();1->serviceDashboard();2->viewingJournal();3->BridgeDialogBuilder(this).setTitle("Playback diagnostics").setMessage("Paused: "+durationText(scoped.sumOf{it.pausedMs})+"\nBuffering: "+durationText(scoped.sumOf{it.bufferingMs})+"\nSeeks: "+scoped.sumOf{it.seeks}+"\nUncertain: "+durationText(scoped.sumOf{it.uncertainMs})).setPositiveButton("Close",null).show();4->refreshHistory()}}}) }
+        modernContent { ModernCategories(violet,listOf("7" to "Week","30" to "Month","365" to "Year","0" to "All time"),analyticsPeriod.toString()){ analyticsPeriod=it.toInt();refreshHistory() } }
+        modernContent { ModernWatchChart(violet,durationText(total),dates.map { if(monthly) it.format(java.time.format.DateTimeFormatter.ofPattern("MMM yy")) else it.format(java.time.format.DateTimeFormatter.ofPattern("d MMM")) },values){} }
+        val days=(java.time.temporal.ChronoUnit.DAYS.between(start,today)+1).coerceAtLeast(1)
+        modernContent { ModernMetricTiles(violet,listOf("Movies synced" to groups.count { it.confirmed && it.representative.matchType=="movie" }.toString(),"Episodes synced" to groups.count { it.confirmed && it.representative.matchType=="episode" }.toString(),"Active days" to activeDays.toString(),"Daily average" to durationText(total/days))) }
+        modernContent { ModernMetricTiles(violet,listOf("Movie watches" to historical.count { it.matchType=="movie" }.toString(),"Episode watches" to historical.count { it.matchType=="episode" }.toString())) }
+        section(dashboard,"Watch time by platform")
+        ViewingAnalytics.platforms(scoped).filter { it.sampledMs>0 }.forEach { platform ->
+            modernContent { ModernActionRow(violet,appLabel(platform.source),durationText(platform.sampledMs)+" · "+(if(total>0) platform.sampledMs*100/total else 0)+"% of sampled time"){analyticsSource=platform.source;refreshHistory()} }
+        }
+        if(daily.isNotEmpty()) {
+            var streak=0;var longest=0;var previous:java.time.LocalDate?=null
+            daily.keys.sorted().forEach { day -> streak=if(previous?.plusDays(1)==day) streak+1 else 1;longest=maxOf(longest,streak);previous=day }
+            val busiest=daily.entries.groupBy { it.key.dayOfWeek }.maxByOrNull { (_,rows)->rows.sumOf { it.value } }?.key?.name.orEmpty()
+            section(dashboard,"Viewing insights")
+            modernContent { ModernMetricTiles(violet,listOf("Longest streak" to "$longest days","Most active day" to busiest.lowercase().replaceFirstChar { it.uppercase() })) }
+        }
+        section(dashboard,"Viewing calendar")
+        calendarView(dashboard,if(analyticsSource.isBlank()) records else records.filter { it.source==analyticsSource })
+        dashboard.addView(txt("Calendar and watch counts include Trakt history. Sampled watch time excludes historical watches without measured duration.",12,muted))
     }
     private fun streamingAvailability(type:String,id:Long,title:String) {
         val initial=prefs.getString("availability_region",java.util.Locale.getDefault().country).orEmpty()
@@ -1433,9 +1572,8 @@ class MainActivity : ComponentActivity() {
     private fun openPlaybackApp(sources:List<String>) {
         val installed=sources.distinct().mapNotNull { pkg -> packageManager.getLaunchIntentForPackage(pkg)?.let { pkg to it } }
         if(installed.isEmpty()) { Toast.makeText(this,"No recorded playback app is installed or launchable",Toast.LENGTH_LONG).show(); return }
-        choose("Open recorded playback app",installed.map { appLabel(it.first) }) { i ->
-            runCatching { startActivity(installed[i].second) }.onFailure { Toast.makeText(this,"Unable to open player",Toast.LENGTH_LONG).show() }
-        }
+        fun launch(index:Int) { runCatching { startActivity(installed[index].second) }.onFailure { Toast.makeText(this,"Unable to open player",Toast.LENGTH_LONG).show() } }
+        if(installed.size==1) launch(0) else choose("Open recorded playback app",installed.map { appLabel(it.first) }) { i -> launch(i) }
     }
     private fun upcomingEpisodes() {
         lookup("Loading upcoming episodes",{ done -> TraktLibrary.upcoming(this,30,done) }) { rows:List<UpcomingEpisode> ->
@@ -1718,7 +1856,7 @@ class MainActivity : ComponentActivity() {
         }.show()
     }
     private fun viewingJournal() {
-        val rows=history.records(0).filter { it.status!="active" }
+        val rows=unifiedRows.ifEmpty { history.records(0) }.filter { it.status!="active" }
         val years=rows.map { ViewingAnalytics.day(it.ended).year }.distinct().sortedDescending()
         choose("Viewing year",years.map { it.toString() }) { index ->
             val year=years[index]
@@ -2049,27 +2187,21 @@ class MainActivity : ComponentActivity() {
                 val d=result.getOrThrow(); if(cache.all.size>=200 && !cache.contains(key)) cache.edit().clear().apply(); cache.edit().putString(key,org.json.JSONObject().put("savedAt",System.currentTimeMillis()).put("title",d.title).put("overview",d.overview).put("year",d.year).put("runtime",d.runtime).put("rating",d.rating).put("genres",d.genres).put("trailer",d.trailer).put("released",d.released).toString()).apply(); done(result)
             } else if(cached!=null) done(Result.success(TitleDetails(cached.optString("title"),cached.optString("overview"),cached.optInt("year"),cached.optInt("runtime"),cached.optDouble("rating",0.0),cached.optString("genres"),cached.optString("trailer"),cached.optString("released")))) else done(result)
         } }) { d:TitleDetails ->
-            val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(12),dp(16),dp(12)) }
-            val image=ImageView(this).apply { scaleType=ImageView.ScaleType.FIT_CENTER; contentDescription="Poster for "+d.title; setImageResource(android.R.drawable.ic_media_play); setBackgroundColor(surface) }
-            body.addView(image,LinearLayout.LayoutParams(-1,dp(if(tvMode) 320 else 240))); Artwork.load(this,type,id,image)
-            val metadata=listOf(d.year.takeIf { it>0 }?.toString().orEmpty(),d.runtime.takeIf { it>0 }?.let { it.toString()+" min" }.orEmpty(),d.genres).filter { it.isNotBlank() }.joinToString(" • ")
-            body.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeTitleSummary(violet,d.title.ifBlank { label },metadata,d.rating,d.released,d.overview,prefs.getBoolean("hide_spoilers",true)) } })
-            val groups=ViewingGroups.build(history.records(0)).filter { g -> val row=g.representative; if(type=="movie") row.matchType=="movie" && row.traktId==id else row.matchType=="episode" && row.showId==id }
-            if(groups.isNotEmpty()) {
-                section(body,"Your viewing history")
-                body.addView(txt(groups.count { it.confirmed }.toString()+" completed titles • "+durationText(groups.sumOf { it.sampledMs })+" sampled",14,muted))
-                body.addView(actionButton("View matching sessions") { if(type=="show") showSeries(id) else showSessions(groups.first()) })
-            }
-            body.addView(actionButton("Related titles") {
-                lookup("Loading related titles",{ done -> TraktCatalogue.related(type,id,done) }) { rows:List<CatalogueItem> ->
-                    choose("Related titles",rows.take(40).map { it.label() }) { index -> val item=rows[index]; titleDetails(item.type,item.id,item.title) }
-                }
+            val groups=ViewingGroups.build(unifiedRows.ifEmpty { history.records(0) }).filter { g -> val row=g.representative; if(type=="movie") row.matchType=="movie" && row.traktId==id else row.matchType=="episode" && row.showId==id }
+            val actions=mutableListOf<UiAction>()
+            if(groups.isNotEmpty()) actions.add(UiAction("View matching sessions"){ if(type=="show") showSeries(id) else showSessions(groups.first()) })
+            actions.add(UiAction("Related titles") {
+                lookup("Loading related titles",{ done -> TraktCatalogue.related(type,id,done) }) { rows:List<CatalogueItem> -> showRelatedTitles(rows) }
             })
-            body.addView(actionButton("Cast and directors") { lookup("Loading credits",{ done -> TraktCatalogue.credits(type,id,done) }) { names:List<String> -> BridgeDialogBuilder(this).setTitle("Cast and crew").setMessage(names.joinToString("\n").ifBlank { "No credits returned" }).setPositiveButton("Close",null).show() } })
-            body.addView(actionButton("Where to watch • regional availability") { streamingAvailability(type,id,d.title.ifBlank { label }) })
-            body.addView(actionButton("Watchlist / rating") { lookup("Checking account",{ done -> TraktLibrary.accountId(this,done) }) { account:String -> remoteActions(RemoteItem(type,id,d.title),account) } })
-            TitleDetailPolicy.trailer(d.trailer)?.let { url -> body.addView(actionButton("Watch trailer on YouTube") { runCatching { startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse(url))) }.onFailure { Toast.makeText(this,"No compatible app",Toast.LENGTH_LONG).show() } }) }
-            BridgeDialogBuilder(this).setTitle("Title details").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
+            actions.add(UiAction("Watchlist / rating"){ lookup("Checking account",{ done -> TraktLibrary.accountId(this,done) }) { account:String -> remoteActions(RemoteItem(type,id,d.title),account) } })
+            actions.add(UiAction("Where to watch"){ streamingAvailability(type,id,d.title.ifBlank { label }) })
+            actions.add(UiAction("Cast and directors"){ lookup("Loading credits",{ done -> TraktCatalogue.credits(type,id,done) }) { names:List<String> -> BridgeDialogBuilder(this).setTitle("Cast and crew").setMessage(names.joinToString("\n").ifBlank { "No credits returned" }).setPositiveButton("Close",null).show() } })
+            TitleDetailPolicy.trailer(d.trailer)?.let { url -> actions.add(UiAction("Watch trailer"){ runCatching { startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse(url))) }.onFailure { Toast.makeText(this,"No compatible app",Toast.LENGTH_LONG).show() } }) }
+            modernDetailWindow { close ->
+                ModernCatalogueDetails(violet,d.copy(title=d.title.ifBlank { label }),type,id,prefs.getBoolean("hide_spoilers",true),
+                    if(groups.isEmpty()) "" else groups.count { it.confirmed }.toString()+" completed · "+durationText(groups.sumOf { it.sampledMs })+" sampled",
+                    actions.map { action -> UiAction(action.label){close();action.run()} },close)
+            }
         }
     }
     private fun heroCard(parent:LinearLayout,g:ViewingTitle) {
@@ -2156,7 +2288,7 @@ class MainActivity : ComponentActivity() {
                     gravity=android.view.Gravity.CENTER; textSize=14f; setTextColor(ink); minHeight=dp(44)
                     if(d!=null) {
                         text=d.date.dayOfMonth.toString()+if(d.sessions>0) "\n•" else ""
-                        background=rounded(if(d.sampledMs>0) 0xff40336a.toInt() else if(d.sessions>0) 0xff292c40.toInt() else surface,8)
+                        background=rounded(if(d.sampledMs>0) android.graphics.Color.argb(255, (android.graphics.Color.red(violet)*(0.25+0.6*d.sampledMs.toDouble()/days.maxOf { it.sampledMs }.coerceAtLeast(1))).toInt().coerceIn(0,255), (android.graphics.Color.green(violet)*(0.25+0.6*d.sampledMs.toDouble()/days.maxOf { it.sampledMs }.coerceAtLeast(1))).toInt().coerceIn(0,255), (android.graphics.Color.blue(violet)*(0.25+0.6*d.sampledMs.toDouble()/days.maxOf { it.sampledMs }.coerceAtLeast(1))).toInt().coerceIn(0,255)) else if(d.sessions>0) 0xff292c40.toInt() else surface,8)
                         contentDescription=d.date.toString()+", "+durationText(d.sampledMs)+" sampled, "+d.sessions+" sessions"
                         setOnClickListener { showCalendarDay(d,records) }
                     }
@@ -2164,13 +2296,84 @@ class MainActivity : ComponentActivity() {
                 row.addView(cell,LinearLayout.LayoutParams(0,dp(48),1f).apply { setMargins(dp(2),dp(2),dp(2),dp(2)) })
             }
         }
-        card.addView(txt("Dots indicate local records; purple indicates sampled playback. Sessions spanning midnight are attributed to their end date.",12,muted))
+        card.addView(txt("Dots indicate local records; brighter cells indicate more sampled playback. Sessions spanning midnight are attributed to their end date.",12,muted))
     }
     private fun showCalendarDay(day:ActivityDay,records:List<WatchRecord>) {
         val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
         body.addView(txt(durationText(day.sampledMs)+" sampled • "+day.sessions+" sessions",16,ink,true))
         ViewingGroups.build(records.filter { ViewingAnalytics.day(it.ended)==day.date }).forEach { titleCard(body,it,true) }
         BridgeDialogBuilder(this).setTitle(day.date.toString()).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
+    }
+    private fun libraryMenu() {
+        choose("Library options",listOf("Synced Trakt account library","Tags and collections","Log a watch","Refresh","Reset filters")) { i ->
+            when(i) {
+                0->openDownloadedTrakt()
+                1->organizedLibrary()
+                2->manualLog()
+                3->refreshHistory()
+                4->{ historyFilter=HistoryFilter(); libraryCategory="All"; historyLimit=MemoryPolicy.pageSize(lowRam); refreshHistory() }
+            }
+        }
+    }
+    private fun seriesMenu(series:SeriesGroup) {
+        modernActionDialog(series.title,"Manage series",listOf("Browse seasons and episodes","Series details",if(isFavorite("show",series.id)) "Remove favorite" else "Add favorite","Personal status: "+libraryStatus("show",series.id).ifBlank { "Not set" },"Notes and tags","Add to collection","Trakt series progress")) { i ->
+            when(i) {
+                0->showSeries(series.id)
+                1->titleDetails("show",series.id,series.title)
+                2->{ toggleFavorite("show",series.id,series.title); refreshHistory() }
+                3->setLibraryStatus("show",series.id,series.title)
+                4->editTitleNotes("show",series.id,series.title)
+                5->addCollection("show",series.id,series.title)
+                6->remoteSeriesProgress(series.id,series.title)
+            }
+        }
+    }
+    private fun playbackAction(g:ViewingTitle): (()->Unit)? {
+        val sources=g.sessions.filterNot { UnifiedTraktHistory.remote(it) }.sortedByDescending { it.ended }.map { it.source }.distinct()
+        val launchable=sources.filter { runCatching { packageManager.getLaunchIntentForPackage(it)!=null }.getOrDefault(false) }
+        return if(launchable.isEmpty()) null else { { openPlaybackApp(launchable) } }
+    }
+    private fun groupPoster(g:ViewingTitle):PosterLibraryItem {
+        val r=g.representative
+        val episode=r.matchType=="episode" && r.showId>0
+        val name=if(episode) r.matchLabel.substringBefore(" — ") else r.matchLabel.ifBlank { r.title.ifBlank { "Unidentified video" } }
+        val detail=(if(episode) "S"+r.season+" E"+r.episode+" · " else "")+(if(g.confirmed) java.text.DateFormat.getDateInstance().format(java.util.Date(g.sessions.filter { it.status=="synced" }.maxOf { it.ended })) else if(g.remainingMs>0) durationText(g.remainingMs)+" left" else g.platforms.joinToString(" • ") { appLabel(it) })
+        val progress=if(g.durationMs>0 && g.positionMs>=0) (g.positionMs.toDouble()/g.durationMs).toFloat().coerceIn(0f,1f) else null
+        val open:()->Unit={ if(episode) showSeries(r.showId) else showSessions(g) }
+        val play=playbackAction(g)
+        return PosterLibraryItem(name,detail,when { g.confirmed->"Watched"; g.queued->"Awaiting sync"; r.traktId<=0->"Needs match"; else->"In progress" },if(episode) "show" else "movie",if(episode) r.showId else r.traktId,open,{ showSessions(g) },progress,play)
+    }
+    private fun renderPosterLibrary(records:List<WatchRecord>) {
+        val accountId=RemoteAccountCache.active(this)
+        val syncStatus=accountId?.let { RemoteAccountCache.status(this,it,TraktData.HISTORY) }
+        val groups=ViewingAnalytics.sort(ViewingGroups.build(ViewingAnalytics.filter(records,historyFilter)),historyFilter.sort)
+        val series=SeriesLibrary.build(groups)
+        val movies=groups.filter { it.representative.matchType=="movie" }
+        val other=groups.filter { it.representative.matchType!="movie" && !(it.representative.matchType=="episode" && it.representative.showId>0 && it.representative.season>=0 && it.representative.episode>0) }
+        val anime=personalStore("anime_progress").all.values.mapNotNull { value -> runCatching { org.json.JSONObject(value.toString()) }.getOrNull() }.filter { it.optInt("id")>0 && it.optString("title").isNotBlank() && (historyFilter.query.isBlank() || it.optString("title").contains(historyFilter.query,true)) }.sortedBy { it.optString("title") }
+        val category=libraryCategory
+        val continuing=SeriesLibrary.continueWatching(ViewingGroups.build(ViewingAnalytics.filter(records.filterNot { UnifiedTraktHistory.remote(it) },historyFilter))).filter { it.representative.traktId>0 && (category=="All" || (category=="Movies" && it.representative.matchType=="movie") || (category=="Series" && it.representative.matchType=="episode")) }.distinctBy { if(it.representative.showId>0) "show:"+it.representative.showId else "movie:"+it.representative.traktId }.take(10)
+        val sections=mutableListOf<PosterGridSection>()
+        if(category in setOf("All","Series") && series.isNotEmpty()) sections.add(PosterGridSection("Your series",series.size) { index ->
+            val item=series[index]
+            val resume=item.resume?.representative
+            val resumePoster=item.resume?.let { groupPoster(it) }
+            PosterLibraryItem(item.title,resumePoster?.subtitle ?: (item.episodes.size.toString()+" tracked episode(s)"),if(resume!=null) "Continue S"+resume.season+" E"+resume.episode else item.completed.toString()+" watched","show",item.id,{ showSeries(item.id) },{ seriesMenu(item) },resumePoster?.progress,resumePoster?.play)
+        })
+        if(category in setOf("All","Movies") && movies.isNotEmpty()) sections.add(PosterGridSection("Your movies",movies.size){groupPoster(movies[it])})
+        if(category in setOf("All","Anime") && anime.isNotEmpty()) sections.add(PosterGridSection("Your anime",anime.size){index ->
+            val item=anime[index]; val id=item.optInt("id"); val title=item.optString("title"); val episodes=item.optInt("episodes")
+            val open={editAnimeProgress(id,title,episodes)}
+            PosterLibraryItem(title,item.optInt("progress").toString()+"/"+(if(episodes>0) episodes.toString() else "?"),"Anime","anime",id.toLong(),open,open)
+        })
+        if(category in setOf("All","Unidentified") && other.isNotEmpty()) sections.add(PosterGridSection("Unidentified viewing",other.size){groupPoster(other[it])})
+        val columns=if(resources.configuration.fontScale>=1.5f) 1 else maxOf(2,adaptiveLayout.columns)
+        libraryContent={
+            ModernLazyLibrary(violet,columns,category,sections,continuing.map { groupPoster(it) },
+                if(syncStatus==null) "Sync Trakt history" else if(syncStatus.complete) "Trakt history synchronized" else "Trakt history partially downloaded",
+                syncStatus?.let { it.count.toString()+" watch events" } ?: "Bring your existing movies and episodes into Library",
+                historyFilter!=HistoryFilter(),{ selected -> libraryCategory=selected;refreshHistory() },{universalSearch()},{editHistoryFilter(records)},{libraryMenu()},{offerTraktSync()},{manualLog()},{animeSearch()})
+        }
     }
     private fun seriesCard(parent:LinearLayout,series:SeriesGroup) {
         val card=panel(parent)
@@ -2190,36 +2393,26 @@ class MainActivity : ComponentActivity() {
         card.addView(actionButton("Browse seasons and episodes") { showSeries(series.id) })
     }
     private fun showSeries(id:Long) {
-        val series=SeriesLibrary.build(ViewingGroups.build(history.records(0))).firstOrNull { it.id==id } ?: return
-        val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
-        body.addView(txt(series.completed.toString()+" episodes synced to Trakt. Local counts include only identified episodes, not the full catalogue.",14,muted))
-        var dialog:android.app.AlertDialog?=null
+        val series=SeriesLibrary.build(ViewingGroups.build(if(RemoteAccountCache.active(this)!=null) unifiedRows.ifEmpty { history.records(0) } else history.records(0))).firstOrNull { it.id==id } ?: return
         val show=CatalogueItem("show",series.id,series.title)
-        body.addView(actionButton("Check account series progress") { dialog?.dismiss(); remoteSeriesProgress(series.id,series.title) })
-        body.addView(actionButton("Load all catalogue seasons") {
-            dialog?.dismiss()
-            lookup("Loading catalogue seasons",{ done -> TraktCatalogue.seasons(show,done) }) { seasons:List<CatalogueSeason> ->
-                choose(series.title,seasons.map { if(it.number==0) "Specials" else "Season "+it.number }) { index -> showCatalogueSeason(series.id,seasons[index].number) }
-            }
-        })
-        for(season in series.seasons) {
-            val label=if(season.number==0) "Specials" else "Season "+season.number
-            section(body,label)
-            body.addView(txt(season.completed.toString()+" synced / "+season.episodes.size+" locally identified",13,muted))
-            body.addView(actionButton("View full "+label.lowercase()) { dialog?.dismiss(); showCatalogueSeason(series.id,season.number) })
-            for(episode in season.episodes) titleCard(body,episode,true)
+        modernDetailWindow { close ->
+            ModernSeriesDetails(violet,series,
+                { close(); remoteSeriesProgress(series.id,series.title) },
+                { close(); lookup("Loading catalogue seasons",{ done -> TraktCatalogue.seasons(show,done) }) { seasons:List<CatalogueSeason> ->
+                    modernActionDialog(series.title,"Choose a catalogue season",seasons.map { if(it.number==0) "Specials" else "Season "+it.number }) { index -> showCatalogueSeason(series.id,seasons[index].number) }
+                } },
+                { season -> close();showCatalogueSeason(series.id,season) },
+                { episode -> close();showSessions(episode) },close)
         }
-        dialog=BridgeDialogBuilder(this).setTitle(series.title).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close") { _,_->refreshHistory() }.create()
-        dialog.show()
     }
     private fun showCatalogueSeason(id:Long,season:Int) {
-        val series=SeriesLibrary.build(ViewingGroups.build(history.records(0))).firstOrNull { it.id==id } ?: return
+        val series=SeriesLibrary.build(ViewingGroups.build(if(RemoteAccountCache.active(this)!=null) unifiedRows.ifEmpty { history.records(0) } else history.records(0))).firstOrNull { it.id==id } ?: return
         val show=CatalogueItem("show",series.id,series.title)
         lookup("Loading episodes",{ done -> TraktCatalogue.episodes(show,season,done) }) { catalogue:List<CatalogueItem> ->
             val rows=SeriesLibrary.seasonRows(series,season,catalogue)
             val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
             val completed=rows.count { it.local?.confirmed==true }
-            val missing=FranchiseTimeline.missing(id,season,catalogue,history.records(0))
+            val missing=FranchiseTimeline.missing(id,season,catalogue,unifiedRows.ifEmpty { history.records(0) })
             body.addView(actionButton("Missing local episode records: "+missing.size) { choose("No local record • may include unaired episodes",missing.map { it.label() }) { j -> titleDetails("show",id,missing[j].title.substringBefore(" — ")) } })
             body.addView(txt(completed.toString()+" of "+rows.size+" catalogue episodes synced to Trakt",17,ink,true))
             if(rows.isNotEmpty()) body.addView(ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal).apply { progress=completed*100/rows.size; progressTintList=android.content.res.ColorStateList.valueOf(violet) })
@@ -2246,12 +2439,42 @@ class MainActivity : ComponentActivity() {
                 }
             }.show()
     }
+    private var traktDownloadRunning=false
     private fun startTraktSync() {
-        lookup("Downloading Trakt account data; large libraries may take several minutes",{ done -> TraktLibrary.syncAccount(this,done) }) { result:TraktAccountSummary ->
-            val message=result.results.joinToString("\n") { row -> row.kind.title+": "+row.count+(if(row.error.isNotBlank()) " • "+row.error else if(row.unchanged) " • unchanged" else "") }
-            BridgeDialogBuilder(this).setTitle(if(result.complete) "Trakt sync complete" else "Trakt sync incomplete")
-                .setMessage(message.ifBlank { "No categories completed. Check connection and retry." }+if(result.complete) "" else "\n\nPreviously downloaded data is retained where possible.")
-                .setNegativeButton("Close",null).setPositiveButton("Open library") { _,_->openDownloadedTrakt() }.show()
+        if(traktDownloadRunning) { Toast.makeText(this,"Trakt sync already running",Toast.LENGTH_SHORT).show(); return }
+        traktDownloadRunning=true
+        val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(20),dp(16),dp(20),dp(16)) }
+        val label=txt("Connecting to Trakt…",15,ink)
+        val bar=ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal).apply { isIndeterminate=true; max=1000; progressTintList=android.content.res.ColorStateList.valueOf(violet); indeterminateTintList=android.content.res.ColorStateList.valueOf(violet) }
+        body.addView(label); body.addView(bar,LinearLayout.LayoutParams(-1,dp(10)))
+        body.addView(txt("You can close this progress window and continue using the app.",13,muted))
+        val dialog=BridgeDialogBuilder(this).setTitle("Synchronizing Trakt").setView(body).setPositiveButton("Hide",null).create()
+        dialog.show()
+        TraktLibrary.syncAccount(this,progress={ stage,done,total ->
+            if(!isDestroyed && !isFinishing) {
+                label.text=stage+if(total>0) " • "+done+" / "+total+" pages" else if(done>0) " • page "+done else "…"
+                bar.isIndeterminate=total<=0
+                if(total>0) bar.progress=(done.toLong()*1000/total).toInt().coerceIn(0,1000)
+            }
+        }) { result ->
+            traktDownloadRunning=false
+            if(!isDestroyed && !isFinishing) {
+                val wasVisible=dialog.isShowing
+                dialog.dismiss()
+                bridgeModel.cancel()
+                if(tab==4 && settingsCategory=="account") refreshSettingsState("account")
+                refreshHistory()
+                result.fold({ summary ->
+                    val message=summary.results.joinToString("\n") { row -> row.kind.title+": "+row.count+(if(row.error.isNotBlank()) " • "+row.error else if(row.unchanged) " • unchanged" else "") }
+                    if(wasVisible) BridgeDialogBuilder(this).setTitle(if(summary.complete) "Trakt sync complete" else "Trakt sync incomplete")
+                        .setMessage(message.ifBlank { "No categories completed. Check connection and retry." })
+                        .setNegativeButton("Close",null).setNeutralButton("Retry"){_,_->startTraktSync()}.setPositiveButton("Open library"){_,_->showTab(1)}.show()
+                    else Toast.makeText(this,if(summary.complete) "Trakt sync complete" else "Trakt sync incomplete; retry in Account & Sync",Toast.LENGTH_LONG).show()
+                }, {
+                    if(wasVisible) BridgeDialogBuilder(this).setTitle("Trakt sync failed").setMessage("Check your connection and try again. Existing history is retained.").setNegativeButton("Close",null).setPositiveButton("Retry"){_,_->startTraktSync()}.show()
+                    else Toast.makeText(this,"Trakt sync failed; retry in Account & Sync",Toast.LENGTH_LONG).show()
+                })
+            }
         }
     }
     private fun openDownloadedTrakt() {
@@ -2367,17 +2590,30 @@ class MainActivity : ComponentActivity() {
         }
     }
     private fun remoteActions(item:RemoteItem,account:String) {
-        choose(item.title,listOf("Add to Trakt watchlist","Remove from Trakt watchlist","Rate on Trakt","Remove Trakt rating")) { index ->
-            fun confirm(action:String,rating:Int=0) {
-                BridgeDialogBuilder(this).setTitle("Confirm Trakt account change").setMessage(item.title+"\n"+action+if(rating>0) " "+rating+"/10" else "").setNegativeButton("Cancel",null).setPositiveButton("Confirm") { _,_->
-                    lookup("Updating Trakt",{ done -> TraktLibrary.mutate(this,account,item,action,rating,done) }) { message:String -> Toast.makeText(this,message,Toast.LENGTH_LONG).show() }
-                }.show()
+        lookup("Checking watchlist and rating",{ done -> TraktLibrary.titleState(this,account,item,done) }) { state:RemoteTitleState ->
+            val view=ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow) }
+            val dialog=BridgeDialogBuilder(this).setView(view).create()
+            fun update(action:String,rating:Int=0,done:(Boolean)->Unit) {
+                TraktLibrary.mutate(this,account,item,action,rating) { result ->
+                    if(!isDestroyed && !isFinishing) {
+                        val confirmed=result.getOrNull()=="Trakt change confirmed"
+                        val message=if(!confirmed) "Change not confirmed. Please retry." else when(action) {
+                            "watchlist-add"->"Added to watchlist"
+                            "watchlist-remove"->"Removed from watchlist"
+                            "rate"->"Rating saved: "+rating+"/10"
+                            else->"Rating removed"
+                        }
+                        Toast.makeText(this,message,Toast.LENGTH_SHORT).show()
+                        done(confirmed)
+                    }
+                }
             }
-            when(index) {
-                0->confirm("watchlist-add")
-                1->confirm("watchlist-remove")
-                2->choose("Choose rating",(1..10).map { it.toString()+"/10" }) { confirm("rate",it+1) }
-                3->confirm("unrate")
+            view.setContent { ModernTraktActions(violet,item.title,state,{ added,done -> update(if(added) "watchlist-add" else "watchlist-remove",done=done) },{ rating,done -> update(if(rating==0) "unrate" else "rate",rating,done) },{dialog.dismiss()}) }
+            dialog.show()
+            dialog.window?.apply {
+                setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
+                setGravity(android.view.Gravity.BOTTOM)
+                setLayout(if(wide) dp(560).coerceAtMost(resources.displayMetrics.widthPixels) else -1,-2)
             }
         }
     }
@@ -2451,7 +2687,7 @@ class MainActivity : ComponentActivity() {
         if(!g.confirmed) actions.add(UiAction("Open playback app") { openPlaybackApp(g.platforms) })
         if(r.traktId>0) actions.add(UiAction("Review possible duplicate titles") { duplicateTitles(r) })
         if(r.traktId>0) actions.add(UiAction("More title actions") {
-            choose("Manage title",listOf("Personal status: "+libraryStatus(r.matchType,r.traktId).ifBlank { "Not set" },if(isFavorite(r.matchType,r.traktId)) "Remove favorite" else "Add favorite","Notes and tags","Add to collection")) { action ->
+            modernActionDialog("Manage title",r.matchLabel,listOf("Personal status: "+libraryStatus(r.matchType,r.traktId).ifBlank { "Not set" },if(isFavorite(r.matchType,r.traktId)) "Remove favorite" else "Add favorite","Notes and tags","Add to collection")) { action ->
                 when(action) { 0->setLibraryStatus(r.matchType,r.traktId,r.matchLabel); 1->{ toggleFavorite(r.matchType,r.traktId,r.matchLabel); refreshHistory() }; 2->editTitleNotes(r.matchType,r.traktId,r.matchLabel); 3->addCollection(r.matchType,r.traktId,r.matchLabel) }
             }
         })
@@ -2477,32 +2713,38 @@ class MainActivity : ComponentActivity() {
         }
     }
     private fun showSessions(g:ViewingTitle) {
-        val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
-        body.addView(txt("Original viewing sessions are retained. Synced viewing events: "+g.sessions.count { it.status=="synced" },14,muted))
-        val dialog=BridgeDialogBuilder(this).setTitle(g.representative.matchLabel.ifBlank { g.representative.title.ifBlank { "Viewing sessions" } }).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close") { _,_->refreshHistory() }.create()
+        val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(8),dp(16),dp(20)) }
+        val r=g.representative
+        val title=if(r.matchType=="episode") r.matchLabel.substringBefore(" — ") else r.matchLabel.ifBlank { r.title.ifBlank { "Viewing details" } }
+        body.addView(txt(g.sessions.size.toString()+" viewing session(s) · "+g.sessions.count { it.status=="synced" }+" synced",13,muted))
+        val dialog=BridgeDialogBuilder(this).setTitle(title).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Done") { _,_->refreshHistory() }.create()
         g.sessions.forEach { session ->
-            if(session.id in g.possibleRewatchIds) body.addView(txt("Possible rewatch — review before approving",14,muted))
-            recordCard(body,session,true,g.confirmed || g.queued,onDeleted={ dialog.dismiss() })
+            if(!UnifiedTraktHistory.remote(session) && session.id in g.possibleRewatchIds) body.addView(txt("Possible rewatch — review before approving",14,muted))
+            recordCard(body,session,true,g.confirmed || g.queued,onDeleted={ dialog.dismiss() },onNavigate={ dialog.dismiss() })
         }
         dialog.show()
     }
-    private fun recordCard(parent:LinearLayout,r:WatchRecord,expanded:Boolean,completionAlreadyRecorded:Boolean=false,onDeleted:()->Unit={}) {
-        val status=when(r.status) { "synced"->"Synced to Trakt"; "active"->"Watching"; "pending"->"Needs review"; "reviewed"->"Ready to confirm"; "restored_audit"->"Restored audit • no upload"; else->r.status.replaceFirstChar { it.uppercase() } }
+    private fun recordCard(parent:LinearLayout,r:WatchRecord,expanded:Boolean,completionAlreadyRecorded:Boolean=false,onDeleted:()->Unit={},onNavigate:()->Unit={}) {
+        if(UnifiedTraktHistory.remote(r)) {
+            val row=TitleUi(r.matchLabel,"Trakt account history",java.text.DateFormat.getDateTimeInstance().format(java.util.Date(r.ended)),"Watched on Trakt","Historical watch duration unavailable",null,"","Read-only downloaded watch event",if(r.matchType=="episode") "show" else "movie",if(r.matchType=="episode") r.showId else r.traktId)
+            parent.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeTitleCard(violet,row,emptyList()) } }); return
+        }
+        val status=when(r.status) { "synced"->"Synced to Trakt"; "active"->"Watching"; "pending"->"Needs review"; "reviewed"->if(completionAssessment(r).suggested) "Ready to confirm" else "Matched · in progress"; "restored_audit"->"Restored audit • no upload"; else->r.status.replaceFirstChar { it.uppercase() } }
         val progress=if(r.duration>0 && r.position>=0) (r.position.toDouble()/r.duration*100).toInt().coerceIn(0,100) else null
         val evidence=buildString {
             if(r.status in setOf("pending","reviewed")) { val a=completionAssessment(r); append("Completion evidence: "+(a.percent?.let { it.toString()+"% • " } ?: "")+a.reason) }
             if(r.seeks>0 || r.bufferingMs>0 || r.pausedMs>0 || r.uncertainMs>0) append("\nPaused: "+durationText(r.pausedMs)+" • Buffering: "+durationText(r.bufferingMs)+" • Seeks: "+r.seeks+" (rewinds "+r.rewinds+") • Uncertain: "+durationText(r.uncertainMs))
-            if(expanded && r.traktId>0) append("\nMatched: "+r.matchLabel+" • Trakt ID "+r.traktId)
+            if(expanded && r.traktId>0) append("\nTrakt ID "+r.traktId)
             if(expanded && r.status in setOf("queued","uncertain","blocked","synced")) append("\nSync: "+r.status+" — "+history.syncMessage(r.id))
         }
-        val row=TitleUi(r.matchLabel.ifBlank { r.title.ifBlank { "Unidentified video" } },r.subtitle.ifBlank { appLabel(r.source) },appLabel(r.source)+" • "+java.text.DateFormat.getDateInstance().format(java.util.Date(r.started)),status,if(r.watched<=0) "Watch time unknown" else durationText(r.watched)+" sampled",progress,if(progress!=null) durationText(r.position)+" / "+durationText(r.duration) else "",evidence,if(r.matchType=="episode") "show" else "movie",if(r.matchType=="episode") r.showId else r.traktId)
+        val row=TitleUi(r.matchLabel.ifBlank { r.title.ifBlank { "Unidentified video" } },r.subtitle.takeUnless { it.equals(appLabel(r.source),true) }.orEmpty(),appLabel(r.source)+" • "+java.text.DateFormat.getDateInstance().format(java.util.Date(r.started)),status,if(r.watched<=0) "Watch time unknown" else durationText(r.watched)+" sampled",progress,if(progress!=null) durationText(r.position)+" / "+durationText(r.duration) else "",evidence,if(r.matchType=="episode") "show" else "movie",if(r.matchType=="episode") r.showId else r.traktId)
         val actions=mutableListOf<UiAction>()
         if(!expanded) actions.add(UiAction("View details") { BridgeDialogBuilder(this).setTitle("Viewing details").setMessage(r.matchLabel.ifBlank { r.title.ifBlank { "Unidentified video" } }+"\n"+r.subtitle).setNegativeButton("Close",null).setPositiveButton("Open history") { _,_->showTab(1) }.show() })
         else {
             if(r.traktId>0) actions.add(UiAction("Trakt watchlist / rating") { lookup("Checking account",{ done -> TraktLibrary.accountId(this,done) }) { account:String -> remoteActions(RemoteItem(r.matchType,r.traktId,r.matchLabel,r.showId,r.season,r.episode),account) } })
             if(r.id.startsWith("import:") && r.status=="pending") actions.add(UiAction("Reconcile with local history") { reconcileImported(r) })
             if(r.status in setOf("pending","reviewed")) actions.add(UiAction(if(r.traktId>0) "Change Trakt match" else "Identify on Trakt") { identify(r) })
-            if(r.traktId>0 && r.status in setOf("pending","reviewed")) actions.add(UiAction("Remove Trakt match") { history.clearMatch(r.id); refreshHistory() })
+            if(r.traktId>0 && r.status in setOf("pending","reviewed")) actions.add(UiAction("Remove Trakt match") { history.clearMatch(r.id); onNavigate(); refreshHistory() })
             if(r.status=="reviewed" && r.traktId>0) actions.add(UiAction(if(completionAlreadyRecorded) "Confirm separate rewatch" else "Mark watched on Trakt") { approveUpload(r,completionAlreadyRecorded) })
             if(r.status=="blocked") actions.add(UiAction("Retry blocked upload") { history.retryBlocked(r.id); HistorySync.schedule(this); refreshHistory() })
             if(r.status in setOf("queued","blocked")) actions.add(UiAction("Cancel queued upload") { history.cancelQueued(r.id); refreshHistory() })
@@ -2529,9 +2771,17 @@ class MainActivity : ComponentActivity() {
                 }.show()
             })
         }
-        parent.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeTitleCard(violet,row,actions) } })
+        if(expanded) {
+            val primary=actions.firstOrNull { it.label in setOf("Mark watched on Trakt","Confirm separate rewatch","Identify on Trakt","Retry blocked upload") }
+            val menu=actions.filter { it!==primary }
+            val item=PosterLibraryItem(r.matchLabel.ifBlank { r.title },r.subtitle.takeUnless { it.equals(appLabel(r.source),true) }.orEmpty(),"",if(r.matchType=="episode") "show" else "movie",if(r.matchType=="episode") r.showId else r.traktId,{},{},progress?.div(100f))
+            parent.addView(ComposeView(this).apply {
+                setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
+                setContent { ModernSessionDetails(violet,item,status,appLabel(r.source)+" · "+java.text.DateFormat.getDateInstance().format(java.util.Date(r.started)),if(r.watched<=0) "Watch time unknown" else durationText(r.watched)+" sampled",if(progress!=null) durationText(r.position)+" / "+durationText(r.duration) else "",evidence,primary?.let { action -> UiAction(action.label) { onNavigate(); action.run() } },menu.map { action -> UiAction(action.label) { onNavigate(); action.run() } }) }
+            })
+        } else parent.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeTitleCard(violet,row,actions) } })
     }
-    private fun appLabel(pkg: String): String = mapOf("server.plex" to "Plex server","server.jellyfin" to "Jellyfin server","server.emby" to "Emby server","server.kodi" to "Kodi server")[pkg] ?: apps.entries.firstOrNull { it.value == pkg }?.key ?: runCatching {
+    private fun appLabel(pkg: String): String = mapOf(UnifiedTraktHistory.SOURCE to "Trakt history","server.plex" to "Plex server","server.jellyfin" to "Jellyfin server","server.emby" to "Emby server","server.kodi" to "Kodi server")[pkg] ?: apps.entries.firstOrNull { it.value == pkg }?.key ?: runCatching {
         packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg,0)).toString()
     }.getOrDefault(pkg)
     private fun chooseInstalledApps() {
@@ -2573,28 +2823,21 @@ class MainActivity : ComponentActivity() {
             }.show()
     }
     private fun identify(r: WatchRecord) {
-        val field = EditText(this).apply { setText(RecognitionEngine.query(r.title)); hint = "Movie, show or anime title"; setSingleLine(true) }
-        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(24,12,24,12); addView(field); addView(TextView(this@MainActivity).apply { text = "Search sends this title to Trakt. Select the exact movie or episode; nothing is uploaded to your history." }) }
-        box.addView(actionButton("Search by IMDb / TMDB ID") { externalIdentity(r) })
-        val learned=history.learned(r)
-        if(learned!=null && r.traktId==0L) box.addView(actionButton("Use learned match: "+learned.label()) { confirmMatch(r,learned) })
-        val dialog = BridgeDialogBuilder(this).setTitle("Identify viewing record").setView(box).setNegativeButton("Cancel",null).setNeutralButton("TV / Anime",null).setPositiveButton("Movie",null).create()
-        dialog.setOnShowListener {
-            fun launch(type: String) {
-                val q = field.text.toString().trim()
-                if (q.isBlank()) { field.error = "Enter a title"; return }
-                dialog.dismiss()
-                lookup("Searching Trakt", { done -> TraktCatalogue.search(q,type,done) }) { results: List<CatalogueItem> ->
-                    val ranked=RecognitionEngine.rank(if(q==RecognitionEngine.query(r.title)) r.title else q,r.subtitle,r.duration,results)
-                    choose("Select title • evidence score",ranked.map { it.item.label()+" • "+it.score+"/100\n"+it.reason }) { index ->
-                        val item = ranked[index].item
-                        if (item.type == "movie") confirmMatch(r,item) else selectSuggestedEpisode(r,item)
-                    }
+        val initial=RecognitionEngine.query(r.title)
+        val learned=history.learned(r)?.takeIf { r.traktId==0L }
+        val view=ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow) }
+        val dialog=BridgeDialogBuilder(this).setView(view).create()
+        fun search(q:String,type:String) {
+            dialog.dismiss()
+            lookup("Searching Trakt", { done -> TraktCatalogue.search(q,type,done) }) { results: List<CatalogueItem> ->
+                val ranked=RecognitionEngine.rank(if(q==initial) r.title else q,r.subtitle,r.duration,results)
+                choose("Select title",ranked.map { it.item.label()+" · "+it.score+"/100\n"+it.reason }) { index ->
+                    val item=ranked[index].item
+                    if(item.type=="movie") confirmMatch(r,item) else selectSuggestedEpisode(r,item)
                 }
             }
-            dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener { launch("movie") }
-            dialog.getButton(android.app.AlertDialog.BUTTON_NEUTRAL).setOnClickListener { launch("show") }
         }
+        view.setContent { ModernIdentifyDialog(violet,initial,{q,type->search(q,type)},{dialog.dismiss();externalIdentity(r)},learned?.let { item -> UiAction("Use learned match: "+item.label()){dialog.dismiss();confirmMatch(r,item)} },{dialog.dismiss()}) }
         dialog.show()
     }
     private fun <T> lookup(label: String, request: ((Result<T>) -> Unit) -> Unit, success: (T) -> Unit) {
@@ -2606,6 +2849,36 @@ class MainActivity : ComponentActivity() {
                 try { result.getOrThrow().let(success) } catch(e:Exception) { DebugTrace.failure("catalogue-ui",e); BridgeDialogBuilder(this).setTitle("Catalogue unavailable").setMessage("Unable to complete this request. Try again later.").setPositiveButton("OK",null).show() }
             }
         } } catch(e:Exception) { progress.dismiss(); DebugTrace.failure("catalogue-request",e); if(!isFinishing && !isDestroyed) Toast.makeText(this,"Unable to start request. Try again.",Toast.LENGTH_LONG).show() }
+    }
+    private fun modernDetailWindow(content:@androidx.compose.runtime.Composable (()->Unit)->Unit) {
+        if(isFinishing || isDestroyed) return
+        val dialog=android.app.Dialog(this)
+        val view=ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow) }
+        val decor=requireNotNull(dialog.window).decorView
+        decor.setViewTreeLifecycleOwner(this)
+        decor.setViewTreeViewModelStoreOwner(this)
+        decor.setViewTreeSavedStateRegistryOwner(this)
+        dialog.setContentView(view)
+        view.setContent { content { dialog.dismiss() } }
+        dialog.show()
+        dialog.window?.apply {
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(bg))
+            setLayout(if(wide) dp(640).coerceAtMost(resources.displayMetrics.widthPixels) else -1,-1)
+        }
+    }
+    private fun showRelatedTitles(rows:List<CatalogueItem>) {
+        modernDetailWindow { close -> ModernRelatedTitles(violet,rows,{ item -> close(); titleDetails(item.type,item.id,item.title) },close) }
+    }
+    private fun modernActionDialog(title:String,detail:String,labels:List<String>,selected:(Int)->Unit) {
+        val view=ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow) }
+        val dialog=BridgeDialogBuilder(this).setView(view).create()
+        view.setContent { ModernActionDialog(violet,title,detail,labels,{ index -> dialog.dismiss(); selected(index) },{dialog.dismiss()}) }
+        dialog.show()
+        dialog.window?.apply {
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
+            setGravity(android.view.Gravity.BOTTOM)
+            setLayout(if(wide) dp(560).coerceAtMost(resources.displayMetrics.widthPixels) else -1,-2)
+        }
     }
     private fun choose(title: String, labels: List<String>, selected: (Int) -> Unit) {
         if (labels.isEmpty()) { BridgeDialogBuilder(this).setTitle(title).setMessage("No results. Try another title or spelling.").setPositiveButton("OK",null).show(); return }
