@@ -21,7 +21,7 @@ object UnifiedTraktHistory {
             if(remaining>0) { localCounts[k]=remaining-1; return@mapNotNull null }
             WatchRecord(id="trakt-event:"+item.eventId,source=SOURCE,title=item.title,subtitle="Trakt account history",
                 started=end,ended=end,watched=0,duration=0,position=-1,status="synced",matchType=item.type,
-                traktId=item.id,matchLabel=item.title,showId=item.showId,season=item.season,episode=item.episode)
+                traktId=item.id,matchLabel=item.title,showId=item.showId,season=item.season,episode=item.episode,catalogueRuntime=item.runtimeMs)
         }
         return (local+projected).distinctBy { it.id }.sortedByDescending { it.ended }
     }
