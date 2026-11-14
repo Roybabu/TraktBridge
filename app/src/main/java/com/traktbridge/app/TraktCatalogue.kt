@@ -65,8 +65,20 @@ object TraktCatalogue {
             val number=RecognitionEngine.episodeOf(record.title+" "+record.subtitle) ?: return@request emptyList()
             val name=hotstarEpisode.groupValues[3].trim()
             if(name.length !in 2..160 || record.duration<120000L) return@request emptyList()
+            val known=confirmedShows.filter { it.type=="show" && it.id>0 }.distinctBy { it.id }.singleOrNull()
+            if(known!=null) {
+                val verified=objects(get("/shows/"+known.id+"/seasons/"+number.season+"?extended=full")).mapNotNull { episode ->
+                    val eid=id(episode); val title=episode.optString("title"); val runtime=episode.optInt("runtime")
+                    val normalized=RecognitionEngine.normalized(name)
+                    val titleAgrees=normalized==RecognitionEngine.normalized(title) || normalized==RecognitionEngine.normalized(known.title+" "+title)
+                    val expected=runtime*60000L
+                    if(eid<=0 || episode.optInt("number",-1)!=number.episode || !titleAgrees || runtime<=0 || kotlin.math.abs(record.duration-expected)>maxOf(180000L,expected/8)) null
+                    else RankedMatch(CatalogueItem("episode",eid,known.title+" — "+title,known.year,known.id,number.season,number.episode,runtime),100,"Verified Hotstar series fingerprint • Episode and runtime agree")
+                }.distinctBy { it.item.id }
+                if(verified.size==1) return@request verified
+            }
             val encoded=URLEncoder.encode(name,"UTF-8")
-            return@request objects(get("/search/episode?query="+encoded+"&fields=title&limit=100&extended=full")).mapNotNull { row ->
+            return@request (objects(get("/search/episode?query="+encoded+"&fields=title&limit=100&extended=full"))+name.substringAfter(" - ","").takeIf { it.isNotBlank() }?.let { objects(get("/search/episode?query="+URLEncoder.encode(it,"UTF-8")+"&fields=title&limit=100&extended=full")) }.orEmpty()).mapNotNull { row ->
                 val episode=row.optJSONObject("episode") ?: return@mapNotNull null
                 val show=row.optJSONObject("show") ?: return@mapNotNull null
                 val episodeId=id(episode); val showId=id(show)
@@ -74,7 +86,7 @@ object TraktCatalogue {
                 val runtime=episode.optInt("runtime")
                 if(episodeId<=0 || showId<=0 || showTitle.isBlank() ||
                     episode.optInt("season",-1)!=number.season || episode.optInt("number",-1)!=number.episode ||
-                    RecognitionEngine.normalized(name)!=RecognitionEngine.normalized(episodeTitle)) return@mapNotNull null
+                    RecognitionEngine.normalized(name) !in setOf(RecognitionEngine.normalized(episodeTitle),RecognitionEngine.normalized(showTitle+" "+episodeTitle))) return@mapNotNull null
                 val expected=runtime*60000L
                 if(runtime>0 && kotlin.math.abs(record.duration-expected)>maxOf(180000L,expected/8)) return@mapNotNull null
                 RankedMatch(CatalogueItem("episode",episodeId,showTitle+" — "+episodeTitle,show.optInt("year"),showId,number.season,number.episode,runtime),

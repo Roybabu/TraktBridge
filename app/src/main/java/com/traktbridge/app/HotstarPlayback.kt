@@ -3,6 +3,17 @@ package com.traktbridge.app
 /** Experimental detector. Do not infer watching from the foreground app or browsing. */
 object HotstarPlayback {
     const val PACKAGE="in.startv.hotstar"
+    data class Identity(val series:String,val episode:String)
+    private fun hash(value:String)=java.security.MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8)).take(12).joinToString("") { "%02x".format(it.toInt() and 255) }
+    fun identity(uri:String,title:String):Identity? {
+        if(RecognitionEngine.episodeOf(title)==null) return null
+        return runCatching {
+            val u=android.net.Uri.parse(uri)
+            val parts=u.pathSegments
+            if(u.scheme!="https" || u.host.isNullOrBlank() || parts.size!=9 || parts.any { it.isBlank() }) null
+            else Identity("hotstar-series:"+hash(parts[3]),"hotstar-episode:"+hash(u.encodedPath.orEmpty()))
+        }.getOrNull()
+    }
     fun clean(value:String):String? {
         val text=value.trim()
         if(!DetectionProfiles.validMetadata(text) || text.contains('\n') || text.contains('\r')) return null

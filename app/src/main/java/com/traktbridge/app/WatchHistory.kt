@@ -6,7 +6,7 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import java.util.UUID
 
-data class WatchSample(val key: String, val source: String, val title: String, val subtitle: String, val duration: Long, val position: Long, val playing: Boolean, val phase: PlaybackPhase = if(playing) PlaybackPhase.PLAYING else PlaybackPhase.PAUSED, val positionSource:String = if(position>=0) "media" else "unknown", val speed:Float=1f,val segment:PlaybackSegment=PlaybackSegment.UNKNOWN)
+data class WatchSample(val key: String, val source: String, val title: String, val subtitle: String, val duration: Long, val position: Long, val playing: Boolean, val phase: PlaybackPhase = if(playing) PlaybackPhase.PLAYING else PlaybackPhase.PAUSED, val positionSource:String = if(position>=0) "media" else "unknown", val speed:Float=1f,val segment:PlaybackSegment=PlaybackSegment.UNKNOWN,val hotstarIdentity:HotstarPlayback.Identity?=null)
 data class WatchRecord(val id: String, val source: String, val title: String, val subtitle: String, val started: Long, val ended: Long, val watched: Long, val duration: Long, val position: Long, val status: String, val matchType: String = "", val traktId: Long = 0, val matchLabel: String = "", val showId: Long = 0, val season: Int = -1, val episode: Int = -1, val catalogueRuntime: Long = 0, val pausedMs:Long=0, val bufferingMs:Long=0, val uncertainMs:Long=0, val seeks:Int=0, val rewinds:Int=0, val positionSource:String="unknown")
 
 class WatchHistory(context: Context): SQLiteOpenHelper(context.applicationContext, "watch_history.db", null, 9, android.database.DatabaseErrorHandler { throw android.database.sqlite.SQLiteDatabaseCorruptException("Viewing database integrity failure; original database preserved") }) {
@@ -104,6 +104,7 @@ class WatchHistory(context: Context): SQLiteOpenHelper(context.applicationContex
             put("paused_ms",a.paused); put("buffering_ms",a.buffering); put("uncertain_ms",a.uncertain); put("seeks",a.seeks); put("rewinds",a.rewinds); put("position_source",a.resumeSource)
         }
         check(writableDatabase.insertWithOnConflict("viewing", null, v, SQLiteDatabase.CONFLICT_REPLACE) != -1L)
+        a.sample.hotstarIdentity?.let { providerRef(a.id,it.series+"|"+it.episode) }
     }
     private fun finish(key: String) {
         val a = active.remove(key) ?: return
@@ -188,8 +189,27 @@ class WatchHistory(context: Context): SQLiteOpenHelper(context.applicationContex
         writableDatabase.insertWithOnConflict("provider_refs",null,ContentValues().apply { put("record_id",id); put("provider_key",key) },SQLiteDatabase.CONFLICT_REPLACE)
     }
     private fun ref(id:String):String?=readableDatabase.rawQuery("SELECT provider_key FROM provider_refs WHERE record_id=?",arrayOf(id)).use { if(it.moveToFirst()) it.getString(0) else null }
+    private fun hotstarRef(r:WatchRecord):List<String> = if(r.source==HotstarPlayback.PACKAGE) ref(r.id)?.split("|")?.takeIf { it.size==2 && it[0].startsWith("hotstar-series:") && it[1].startsWith("hotstar-episode:") }.orEmpty() else emptyList()
+    fun hotstarSeries(r:WatchRecord):CatalogueItem? {
+        val key=hotstarRef(r).firstOrNull() ?: return null
+        return readableDatabase.rawQuery("SELECT show_id,title,year FROM learned WHERE key=?",arrayOf(key)).use { c ->
+            if(!c.moveToFirst() || c.getLong(0)<=0) null else CatalogueItem("show",c.getLong(0),c.getString(1),c.getInt(2))
+        }
+    }
     private fun remember(r:WatchRecord,item:CatalogueItem) {
-        val keys=listOfNotNull(RecognitionEngine.key(r.source,r.title,r.subtitle,item.type),if(item.type=="movie" && !RecognitionEngine.ambiguousEpisode(r.title+" "+r.subtitle) && RecognitionEngine.episodeOf(r.title+" "+r.subtitle)==null) ref(r.id) else null).distinct()
+        val refs=hotstarRef(r)
+        val ep=RecognitionEngine.episodeOf(r.title+" "+r.subtitle)
+        if(refs.size==2 && item.type=="episode" && ep!=null && ep.season==item.season && ep.episode==item.episode) {
+            val showTitle=item.title.substringBefore(" — ").trim()
+            if(showTitle.isNotBlank()) {
+                val prior=hotstarSeries(r)
+                val showId=if(prior!=null && prior.id!=item.showId) 0L else item.showId
+                writableDatabase.insertWithOnConflict("learned",null,ContentValues().apply {
+                    put("key",refs[0]); put("type","show"); put("trakt_id",showId); put("label",showTitle); put("show_id",showId); put("season",-1); put("episode",-1); put("runtime",0); put("title",showTitle); put("year",item.year)
+                },SQLiteDatabase.CONFLICT_REPLACE)
+            }
+        }
+        val keys=listOfNotNull(RecognitionEngine.key(r.source,r.title,r.subtitle,item.type),if(item.type=="movie" && !RecognitionEngine.ambiguousEpisode(r.title+" "+r.subtitle) && RecognitionEngine.episodeOf(r.title+" "+r.subtitle)==null) ref(r.id) else null,hotstarRef(r).getOrNull(1)?.takeIf { item.type=="episode" && ep!=null && ep.season==item.season && ep.episode==item.episode }).distinct()
         for(key in keys) {
             // A correction replaces a previously learned mapping for the exact same evidence.
             writableDatabase.insertWithOnConflict("learned",null,ContentValues().apply {
@@ -198,13 +218,13 @@ class WatchHistory(context: Context): SQLiteOpenHelper(context.applicationContex
         }
     }
     private fun forget(r:WatchRecord) {
-        val keys=listOfNotNull(RecognitionEngine.key(r.source,r.title,r.subtitle,"movie"),RecognitionEngine.key(r.source,r.title,r.subtitle,"episode"),ref(r.id))
+        val keys=listOfNotNull(RecognitionEngine.key(r.source,r.title,r.subtitle,"movie"),RecognitionEngine.key(r.source,r.title,r.subtitle,"episode"),ref(r.id))+hotstarRef(r)
         for(key in keys) writableDatabase.delete("learned","key=?",arrayOf(key))
     }
     fun clearLearning() { writableDatabase.delete("learned",null,null) }
     fun learned(r:WatchRecord):CatalogueItem? {
         if(RecognitionEngine.ambiguousEpisode(r.title+" "+r.subtitle)) return null
-        val keys=listOfNotNull(ref(r.id),RecognitionEngine.key(r.source,r.title,r.subtitle,"episode"),RecognitionEngine.key(r.source,r.title,r.subtitle,"movie"))
+        val keys=listOfNotNull(hotstarRef(r).getOrNull(1),ref(r.id),RecognitionEngine.key(r.source,r.title,r.subtitle,"episode"),RecognitionEngine.key(r.source,r.title,r.subtitle,"movie"))
         val matches=keys.mapNotNull { key -> readableDatabase.rawQuery("SELECT type,trakt_id,title,year,show_id,season,episode,runtime FROM learned WHERE key=?",arrayOf(key)).use { c ->
             if(!c.moveToFirst()) null else CatalogueItem(c.getString(0),c.getLong(1),c.getString(2),c.getInt(3),c.getLong(4),c.getInt(5),c.getInt(6),c.getInt(7))
         } }.filter { item ->
