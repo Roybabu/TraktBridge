@@ -2604,7 +2604,7 @@ class MainActivity : ComponentActivity() {
                 if(item.progress in 0.0..100.0) card.addView(txt("Saved progress: "+item.progress.toInt()+"%",13,violet))
                 if(item.type in setOf("movie","show")) card.addView(actionButton("Title details (online)") { titleDetails(item.type,item.id,item.title) })
                 if(item.showId>0) card.addView(actionButton("Series progress (online)") { remoteSeriesProgress(item.showId,item.title.substringBefore(" — ")) })
-                card.addView(actionButton("Watchlist / rating actions (online)") { remoteActions(item,accountId) })
+                if(item.type=="episode" && item.showId>0) card.addView(actionButton("Title details (online)") { titleDetails("show",item.showId,item.title.substringBefore(" — ")) })
             }
             if(rows.isEmpty()) body.addView(txt("No matching downloaded entries.",14,muted))
             if(current>1) body.addView(actionButton("Previous page") { dialog?.dismiss(); browseDownloadedTrakt(accountId,kind,current-1,query) })
@@ -2652,7 +2652,8 @@ class MainActivity : ComponentActivity() {
             if(item.rating>0) card.addView(txt("Your rating: "+item.rating+"/10",13,violet))
             if(item.progress in 0.0..100.0) card.addView(txt("Trakt saved progress: "+item.progress.toInt()+"%",13,violet))
             local[item.type+":"+item.id]?.let { g -> card.addView(actionButton("View matching local sessions") { showSessions(g) }) }
-            card.addView(actionButton("Watchlist / rating actions") { remoteActions(item,page.account) })
+            if(item.type in setOf("movie","show")) card.addView(actionButton("Title details") { titleDetails(item.type,item.id,item.title) })
+            else if(item.type=="episode" && item.showId>0) card.addView(actionButton("Title details") { titleDetails("show",item.showId,item.title.substringBefore(" — ")) })
             val showId=if(item.type=="show") item.id else item.showId
             if(showId>0) card.addView(actionButton("Series progress") { remoteSeriesProgress(showId,item.title.substringBefore(" — ")) })
         }
@@ -2821,7 +2822,7 @@ class MainActivity : ComponentActivity() {
         val actions=mutableListOf<UiAction>()
         if(!expanded) actions.add(UiAction("View details") { BridgeDialogBuilder(this).setTitle("Viewing details").setMessage(r.matchLabel.ifBlank { r.title.ifBlank { "Unidentified video" } }+"\n"+r.subtitle).setNegativeButton("Close",null).setPositiveButton("Open history") { _,_->showTab(1) }.show() })
         else {
-            if(r.traktId>0) actions.add(UiAction("Trakt watchlist / rating") { lookup("Checking account",{ done -> TraktLibrary.accountId(this,done) }) { account:String -> remoteActions(RemoteItem(r.matchType,r.traktId,r.matchLabel,r.showId,r.season,r.episode),account) } })
+            if(r.traktId>0 && (r.matchType=="movie" || r.matchType=="episode" && r.showId>0)) actions.add(UiAction("Title details") { titleDetails(if(r.matchType=="episode") "show" else "movie",if(r.matchType=="episode") r.showId else r.traktId,r.matchLabel.substringBefore(" — ")) })
             if(r.id.startsWith("import:") && r.status=="pending") actions.add(UiAction("Reconcile with local history") { reconcileImported(r) })
             if(r.status in setOf("pending","reviewed")) actions.add(UiAction(if(r.traktId>0) "Change Trakt match" else "Identify on Trakt") { identify(r) })
             if(r.traktId>0 && r.status in setOf("pending","reviewed")) actions.add(UiAction("Remove Trakt match") { history.clearMatch(r.id); onNavigate(); refreshHistory() })
