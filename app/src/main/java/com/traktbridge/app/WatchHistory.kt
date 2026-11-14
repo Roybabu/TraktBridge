@@ -233,6 +233,16 @@ class WatchHistory(context: Context): SQLiteOpenHelper(context.applicationContex
         }.distinctBy { it.type+":"+it.id }
         return matches.singleOrNull()
     }
+    // Recover previously auto-resolved episodes that have no exact user-confirmed mapping.
+    fun requireReviewForUnconfirmed() {
+        for(r in records(200).filter { it.status=="reviewed" && it.source==HotstarPlayback.PACKAGE && it.matchType=="episode" && it.traktId>0 }) {
+            if(explicitlyConfirmed(r)) continue
+            writableDatabase.update("viewing",ContentValues().apply {
+                put("status","pending"); put("match_type",""); put("trakt_id",0); put("match_label","")
+                put("show_id",0); put("season",-1); put("episode",-1); put("catalogue_runtime",0L); put("notified",0)
+            },"id=? AND status='reviewed' AND trakt_id=?",arrayOf(r.id,r.traktId.toString()))
+        }
+    }
     fun applyLearned(limit:Int=20):Int {
         var count=0
         for(r in records(100).filter { it.status=="pending" && it.traktId==0L }) {
@@ -242,13 +252,19 @@ class WatchHistory(context: Context): SQLiteOpenHelper(context.applicationContex
         }
         return count
     }
-    fun enqueue(id: String, account: String, rewatch:Boolean=false, expectedTitle:Long=0, expectedType:String="", expectedEnd:Long=0): Boolean {
+    fun explicitlyConfirmed(r:WatchRecord):Boolean {
+        val item=learned(r) ?: return false
+        return item.type==r.matchType && item.id==r.traktId &&
+            (item.type!="episode" || (item.showId==r.showId && item.season==r.season && item.episode==r.episode))
+    }
+    fun enqueue(id: String, account: String, rewatch:Boolean=false, expectedTitle:Long=0, expectedType:String="", expectedEnd:Long=0, requireConfirmation:Boolean=false): Boolean {
         require(account.isNotBlank())
         val db=writableDatabase
         db.beginTransaction()
         try {
             val r=record(id) ?: return false
             if(r.status!="reviewed" || r.traktId<=0 || r.matchType !in setOf("movie","episode")) return false
+            if(requireConfirmation && !explicitlyConfirmed(r)) return false
             if(expectedTitle>0 && (r.traktId!=expectedTitle || r.matchType!=expectedType || r.ended!=expectedEnd)) return false
             val sql="SELECT 1 FROM viewing WHERE id<>? AND match_type=? AND trakt_id=? AND sync_account=? AND "+if(rewatch) "(status IN ('queued','uncertain','blocked') OR (status='synced' AND ABS(ended-?)<120000)) LIMIT 1" else "status IN ('queued','uncertain','blocked','synced') LIMIT 1"
             val args=if(rewatch) arrayOf(id,r.matchType,r.traktId.toString(),account,r.ended.toString()) else arrayOf(id,r.matchType,r.traktId.toString(),account)

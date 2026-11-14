@@ -92,12 +92,8 @@ object AutoMatchSuggestions {
                 result.fold({ matches ->
                     val denied=rejected(app,current)
                     val accepted=matches.filter { candidateKey(it.item) !in denied }
-                    val verified=accepted.singleOrNull()?.takeIf { hotstar!=null && it.score==100 && it.item.showId==hotstar.id && it.reason.startsWith("Verified Hotstar series fingerprint") }
-                    val stillKnown=runCatching { WatchHistory(app).use { it.hotstarSeries(current) } }.getOrNull()
-                    if(verified!=null && stillKnown?.id==hotstar?.id) {
-                        WatchHistory(app).use { it.match(current.id,verified.item,false) }
-                        remove(app,current.id)
-                    } else write(app,current,if(accepted.isEmpty()) "none" else "ready",accepted)
+                    // A learned parent series improves suggestions, but never confirms a new episode.
+                    write(app,current,if(accepted.isEmpty()) "none" else "ready",accepted)
                 },{ write(app,current,"error") })
             }
         }
