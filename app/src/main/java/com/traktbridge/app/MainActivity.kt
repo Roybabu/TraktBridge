@@ -941,6 +941,7 @@ class MainActivity : ComponentActivity() {
                 supportRow("Diagnostics","Live recognition, recording, technical status and cleanup") {
                     supportMenu("Diagnostics",listOf(
                         Triple("Live recognition","Inspect current playback detection") { liveInspector() },
+                        Triple("JioHotstar title detection","Start a test, inspect live title candidates and copy results") { hotstarInspector() },
                         Triple("Diagnostic recorder","Open the diagnostic recording tool") { startActivity(Intent(this,DebugActivity::class.java)) },
                         Triple("Last crash report","View, copy or clear the saved crash report") { showCrashReport() },
                         Triple("Technical status","Refresh and view detailed diagnostic information") {
@@ -2025,6 +2026,46 @@ class MainActivity : ComponentActivity() {
         dialog.setOnDismissListener { handler.removeCallbacks(tick) }
         dialog.show()
         dialog.window?.apply { setBackgroundDrawable(android.graphics.drawable.ColorDrawable(bg)); setLayout(if(wide) dp(640).coerceAtMost(resources.displayMetrics.widthPixels) else -1,-1) }
+        handler.post(tick)
+    }
+    private fun hotstarInspector() {
+        val panel=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(12),dp(16),dp(12)) }
+        val body=TextView(this).apply { setTextIsSelectable(true); setTextColor(ink) }
+        val status=TextView(this).apply { setTextColor(ink) }
+        fun action(label:String,run:()->Unit) {
+            panel.addView(android.widget.Button(this).apply { text=label; setOnClickListener { run() } })
+        }
+        fun update() {
+            status.text="Capture active: "+HotstarProbe.enabled(this)+" • Tracking: "+prefs.getBoolean("enabled",false)+" • Accessibility: "+prefs.getBoolean("title_connected",false)
+            body.text=HotstarProbe.report(this)
+        }
+        panel.addView(status)
+        action("Start new 15-minute title test") {
+            if(prefs.getBoolean("privacy_lock",false)) {
+                Toast.makeText(this,"Unlock or disable privacy lock before starting diagnostics",Toast.LENGTH_LONG).show()
+            } else {
+                BridgeDialogBuilder(this).setTitle("Capture JioHotstar title candidates?").setMessage("Records media metadata, transport notifications, visible player labels, usage events and global audio activity locally. The report may contain viewing titles. No screenshots or automatic uploads.").setNegativeButton("Cancel",null).setPositiveButton("Start") { _,_-> HotstarProbe.start(this); PlaybackListener.wake(); update() }.show()
+            }
+        }
+        action("Open JioHotstar") { packageManager.getLaunchIntentForPackage(HotstarPlayback.PACKAGE)?.let { startActivity(it) } ?: Toast.makeText(this,"JioHotstar not installed",Toast.LENGTH_SHORT).show() }
+        action("Stop capture") { HotstarProbe.stop(this); update() }
+        action("Copy title detection report") {
+            getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(android.content.ClipData.newPlainText("JioHotstar diagnostic",HotstarProbe.report(this)))
+            Toast.makeText(this,"JioHotstar report copied",Toast.LENGTH_SHORT).show()
+        }
+        action("Clear report") { HotstarProbe.stop(this); HotstarProbe.clear(this); update() }
+        panel.addView(body)
+        val dialog=BridgeDialogBuilder(this).setTitle("JioHotstar title detection").setView(ScrollView(this).apply { addView(panel) }).setPositiveButton("Close",null).create()
+        val handler=android.os.Handler(android.os.Looper.getMainLooper())
+        val tick=object:Runnable {
+            override fun run() {
+                if(!dialog.isShowing || isDestroyed || isFinishing) return
+                update()
+                handler.postDelayed(this,2000)
+            }
+        }
+        dialog.setOnDismissListener { handler.removeCallbacks(tick) }
+        dialog.show()
         handler.post(tick)
     }
     private fun liveInspector() {
