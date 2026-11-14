@@ -89,10 +89,11 @@ fun PosterLibraryShelf(accent:Int,items:List<PosterLibraryItem>) {
                 Column(Modifier.width(148.dp),verticalArrangement=Arrangement.spacedBy(4.dp)) {
                     PlaybackArtwork(item,Modifier.fillMaxWidth().aspectRatio(2f/3f))
                     Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
-                        Text(item.title,Modifier.weight(1f).clickable(onClick=item.open),color=MaterialTheme.colorScheme.onBackground,fontWeight=FontWeight.SemiBold,maxLines=1,overflow=TextOverflow.Ellipsis)
+                        Text(item.title,Modifier.weight(1f).clickable(onClick=item.open),color=MaterialTheme.colorScheme.onBackground,fontWeight=FontWeight.SemiBold,maxLines=2,overflow=TextOverflow.Ellipsis)
                         IconButton(onClick=item.menu,modifier=Modifier.size(40.dp).semantics { contentDescription="More options for "+item.title }) { Text("⋯",color=MaterialTheme.colorScheme.onBackground,fontSize=24.sp) }
                     }
-                    Text(item.subtitle,color=MaterialTheme.colorScheme.onSurfaceVariant,fontSize=12.sp,maxLines=2,overflow=TextOverflow.Ellipsis)
+                    Text(item.subtitle,color=MaterialTheme.colorScheme.onSurfaceVariant,fontSize=12.sp,maxLines=3,overflow=TextOverflow.Ellipsis)
+                    if(item.status=="Suggested match") Text("Suggested match",color=MaterialTheme.colorScheme.primary,fontSize=11.sp)
                 }
             }
         }

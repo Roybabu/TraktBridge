@@ -12,7 +12,7 @@ data class SeriesGroup(val id:Long,val title:String,val seasons:List<SeriesSeaso
     val approved=episodes.count { it.queued && !it.confirmed }
     val sampledMs=episodes.sumOf { it.sampledMs }
     val platforms=episodes.flatMap { it.platforms }.distinct()
-    val resume=episodes.filter { !it.confirmed && !it.queued && (it.positionMs>0 || it.sampledMs>0) }.maxByOrNull { it.latest.ended }
+    val resume=episodes.filter { (!it.confirmed || it.rewatching) && !it.queued && (it.positionMs>0 || it.sampledMs>0) }.maxByOrNull { it.latest.ended }
 }
 data class SeriesEpisodeRow(val item:CatalogueItem,val local:ViewingTitle?)
 object SeriesLibrary {
@@ -29,7 +29,7 @@ object SeriesLibrary {
         SeriesGroup(id,title,seasons)
     }.sortedByDescending { it.latest }
     fun continueWatching(groups:List<ViewingTitle>):List<ViewingTitle> = groups.filter {
-        !it.active && !it.confirmed && !it.queued && (it.positionMs>0 || it.sampledMs>0)
+        !it.active && (!it.confirmed || it.rewatching) && !it.queued && (it.positionMs>0 || it.sampledMs>0)
     }.sortedByDescending { it.latest.ended }
     fun seasonRows(series:SeriesGroup,season:Int,catalogue:List<CatalogueItem>):List<SeriesEpisodeRow> {
         val local=series.episodes.associateBy { it.representative.traktId }

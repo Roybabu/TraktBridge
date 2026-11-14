@@ -684,6 +684,7 @@ class MainActivity : ComponentActivity() {
                 }
                 val selected=PlaybackDetectors.selected(prefs.getStringSet("allowed",emptySet()).orEmpty())
                 settingRow(group ?: root,"Tracked apps",if(selected.isEmpty()) "No apps selected" else "YouTube • regular videos only") { chooseInstalledApps() }
+                settingToggle(group ?: root,"Automatically sync completed rewatches","Only after sufficient measured playback; original watched dates stay unchanged",prefs.getBoolean("auto_rewatch_sync",false)) { _,checked -> prefs.edit().putBoolean("auto_rewatch_sync",checked).apply(); RewatchAutomation.request(this) }
                 settingRow(group ?: root,"Completion review threshold",CompletionPolicy.threshold(prefs.getInt("completion_threshold",CompletionPolicy.DEFAULT_THRESHOLD)).toString()+"% • confirmation still required") { configureCompletionThreshold() }
                 heading("YouTube player identification")
                 settingRow(group ?: root,"Accessibility access",if(!prefs.getBoolean("title_optin",false)) "Off • needed to distinguish Shorts and ads when metadata is incomplete" else if(prefs.getBoolean("title_connected",false)) "On • reads player control IDs only" else "Enabled in app • connect in Android settings") {
@@ -814,6 +815,7 @@ class MainActivity : ComponentActivity() {
                 libraryRow("Tags & folders","Find and organize titles by tags or collection") { organizedLibrary() }
                 libraryRow("Favorites","Manage saved favorite titles") { favorites() }
                 heading("Discovery")
+                libraryRow("Explore preferences","Recommendations, calendar, spoilers and reminders") { openExploreSettings() }
                 libraryRow("Franchise guides","Explore curated movie viewing orders") { franchises() }
                 libraryRow("Anime","Local progress and public AniList libraries") {
                     libraryMenu("Anime",listOf(
@@ -828,13 +830,7 @@ class MainActivity : ComponentActivity() {
                         Triple("Playback shortcuts","Open a specific title or installed player") { playbackShortcut() }
                     ))
                 }
-                libraryRow("Episode reminders","Manage or cancel scheduled reminders") {
-                    BridgeDialogBuilder(this).setTitle("Episode reminders").setMessage("Cancel all scheduled episode reminders on this device?").setNegativeButton("Keep reminders",null).setPositiveButton("Cancel all reminders") { _,_->
-                        prefs.edit().putBoolean("episode_reminders",false).apply()
-                        EpisodeReminders.cancelAll(this)
-                        Toast.makeText(this,"Reminders cancelled",Toast.LENGTH_SHORT).show()
-                    }.show()
-                }
+
             }
             "privacy" -> {
                 heading("Tracking privacy")
@@ -1384,43 +1380,27 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun customizeDashboard() {
-        val keys=DashboardPreferences.order(prefs.getString("dashboard_order","").orEmpty()).toMutableList()
-        val hidden=DashboardPreferences.visible(prefs.getString("dashboard_hidden","").orEmpty()).toMutableSet()
-        val labels=mapOf("metrics" to "Statistics","goal" to "Monthly goal","now" to "Now playing","continue" to "Continue watching","review" to "Review queue","discover" to "Discovery shortcuts","recent" to "Recent viewing")
-        val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(8),dp(12),dp(8)) }
-        val items=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }; body.addView(items)
-        fun redraw() {
-            items.removeAllViews()
-            keys.forEachIndexed { index,key ->
-                items.addView(CheckBox(this).apply { text=labels[key]; isChecked=key !in hidden; setOnCheckedChangeListener { _,checked -> if(checked) hidden.remove(key) else hidden.add(key) } })
-                if(index>0) items.addView(actionButton("Move "+labels[key]+" up") { keys.removeAt(index); keys.add(index-1,key); redraw() })
-            }
-        }
-        redraw()
-        body.addView(txt("Default opening tab",14,muted))
-        val tabPicker=Spinner(this).apply { adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,listOf("Home","Library","Review","Activity")); setSelection(DashboardPreferences.startTab(prefs.getInt("startup_tab",0))); body.addView(this) }
-        body.addView(txt("Home-screen widget content",14,muted))
-        val modes=listOf("private","continue","review")
-        val widget=Spinner(this).apply { adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,listOf("Private (no titles)","Continue watching","Review count")); setSelection(modes.indexOf(DashboardPreferences.widgetMode(prefs.getString("widget_mode","private").orEmpty()))); body.addView(this) }
-        BridgeDialogBuilder(this).setTitle("Customize dashboard").setView(ScrollView(this).apply { addView(body) }).setNegativeButton("Cancel",null).setPositiveButton("Save") { _,_->
-            prefs.edit().putString("dashboard_order",keys.joinToString(",")).putString("dashboard_hidden",hidden.joinToString(",")).putInt("startup_tab",tabPicker.selectedItemPosition).putString("widget_mode",modes[widget.selectedItemPosition]).apply()
+        val keys=DashboardPreferences.order(prefs.getString("dashboard_order","").orEmpty())
+        val hidden=DashboardPreferences.visible(prefs.getString("dashboard_hidden","").orEmpty())
+        modernDetailWindow { close -> ModernDashboardSettings(violet,keys,hidden,DashboardPreferences.startTab(prefs.getInt("startup_tab",0)),DashboardPreferences.widgetMode(prefs.getString("widget_mode","private").orEmpty()),{ order,disabled,start,widget ->
+            prefs.edit().putString("dashboard_order",order.joinToString(",")).putString("dashboard_hidden",disabled.joinToString(",")).putInt("startup_tab",start).putString("widget_mode",widget).apply()
             val manager=android.appwidget.AppWidgetManager.getInstance(this)
             val ids=manager.getAppWidgetIds(android.content.ComponentName(this,ViewingWidget::class.java))
             if(ids.isNotEmpty()) sendBroadcast(Intent(android.appwidget.AppWidgetManager.ACTION_APPWIDGET_UPDATE).setComponent(android.content.ComponentName(this,ViewingWidget::class.java)).putExtra(android.appwidget.AppWidgetManager.EXTRA_APPWIDGET_IDS,ids))
-            refreshHistory()
-        }.show()
+            close(); refreshHistory()
+        },close) }
     }
     private var unifiedRows:List<WatchRecord> = emptyList()
     private fun renderHistory(records:List<WatchRecord>,groups:List<ViewingTitle>,unified:List<WatchRecord> = records) {
         unifiedRows=unified
         val allGroups=if(tab==0) ViewingGroups.build(unified) else groups
         dashboard.removeAllViews()
-        val pending=groups.count { it.queued || it.pending }
-        if(tab==2) requestReviewSuggestions(records)
+        val pending=allGroups.count { it.queued || (it.pending && !it.rewatching) }
+        if(tab in 0..2) requestReviewSuggestions(records)
         when(tab) {
             0 -> renderModernHome(records,allGroups,pending)
             1 -> renderPosterLibrary(unified)
-            2 -> renderModernReview(groups)
+            2 -> renderModernReview(ViewingGroups.build(unified))
             3 -> renderModernActivity(unified)
         }
     }
@@ -1430,46 +1410,73 @@ class MainActivity : ComponentActivity() {
     private fun renderModernHome(records:List<WatchRecord>,groups:List<ViewingTitle>,pending:Int) {
         val age=System.currentTimeMillis()-prefs.getLong("last_sample",0)
         val live=TrackingRecovery.status(this)=="Tracking active"
-        modernContent { ModernPageHeader(violet,"Home",TrackingRecovery.status(this),onMenu={ choose("Home options",listOf("Tracking settings","Now Playing • All devices","Viewing planner","Viewing assistant","Customize dashboard","Refresh")) { i -> when(i) {0->showTab(4);1->nowPlaying();2->viewingPlanner();3->localAssistant();4->customizeDashboard();5->refreshHistory()} } }) }
+        modernContent { ModernPageHeader(violet,"Home",TrackingRecovery.status(this),onMenu={ modernActionDialog("Home options","Manage your dashboard",listOf("Customize dashboard","Refresh library")) { i -> if(i==0) customizeDashboard() else refreshHistory() } }) }
+        if(!live && prefs.getBoolean("enabled",false)) modernContent { ModernActionRow(violet,"Repair tracking",TrackingRecovery.status(this)){repairTracking()} }
         val hidden=DashboardPreferences.visible(prefs.getString("dashboard_hidden","").orEmpty())
         val active=groups.filter { it.active }
-        val continuing=SeriesLibrary.continueWatching(ViewingGroups.build(records))
-        val continuingKeys=continuing.take(7).map { it.key }.toSet()
+        val continuing=SeriesLibrary.continueWatching(groups)
+        val continuingKeys=continuing.map { it.key }.toSet()
         val recent=groups.filter { !it.active && it.key !in continuingKeys }.take(5)
-        if("now" !in hidden && active.isNotEmpty()) {
-            section(dashboard,"Now watching")
-            modernContent { ModernActionRow(violet,active.first().representative.title,"Live playback • all devices"){ nowPlaying() } }
+        for(key in DashboardPreferences.order(prefs.getString("dashboard_order","").orEmpty())) when(key) {
+            "now" -> {
+        if("now" !in hidden) {
+            modernContent { ModernActionRow(violet,"Now playing",active.firstOrNull()?.representative?.title ?: "View playback on connected devices"){ nowPlaying() } }
         }
+
+            }
+            "continue" -> {
         if("continue" !in hidden && continuing.isNotEmpty()) {
             section(dashboard,"Continue watching")
-            val items=continuing.take(7).map { groupPoster(it) }
+            val items=continueCards(groups,limit=7)
             modernContent { PosterLibraryShelf(violet,items) }
         }
+        if("continue" !in hidden) {
+            val next=SeriesLibrary.build(groups).filter { it.completed>0 }.take(5)
+            if(next.isNotEmpty()) {
+                section(dashboard,"Up next")
+                next.forEach { series -> modernContent { ModernActionRow(violet,series.title,"Check next unwatched episode"){ remoteSeriesProgress(series.id,series.title) } } }
+            }
+        }
+
+            }
+            "metrics" -> {
         if("metrics" !in hidden) modernContent { ModernMetricTiles(violet,listOf("This week" to durationText(ViewingAnalytics.filter(records,HistoryFilter(period=7)).sumOf { it.watched }),"Titles tracked" to groups.size.toString(),"To review" to pending.toString())) }
+
+            }
+            "review" -> {
         if("review" !in hidden) modernContent { ModernActionRow(violet,"Review your viewing",pending.toString()+" records awaiting action"){ showTab(2) } }
+
+            }
+            "recent" -> {
         if("recent" !in hidden && recent.isNotEmpty()) {
             section(dashboard,"Recently watched")
             recent.forEach { g -> val item=groupPoster(g); modernContent { ModernActionRow(violet,item.title,if(g.confirmed) java.text.DateFormat.getDateTimeInstance().format(java.util.Date(g.latest.ended))+" · "+appLabel(g.latest.source) else item.subtitle){ showSessions(g) } } }
         }
-        if("discover" !in hidden) {
-            section(dashboard,"Explore")
-            listOf(UiAction("For you"){ recommendFromHistory() },UiAction("Upcoming episodes"){ upcomingEpisodes() },UiAction("Trending titles"){ discover() },UiAction("Anime"){ animeSearch() }).chunked(2).forEach { batch ->
-                modernContent { BridgeTheme(violet) { androidx.compose.foundation.layout.Row(androidx.compose.ui.Modifier.fillMaxWidth(),horizontalArrangement=androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) { batch.forEach { item -> androidx.compose.material3.OutlinedButton(onClick=item.run,modifier=androidx.compose.ui.Modifier.weight(1f)) { androidx.compose.material3.Text(item.label) } } } } }
+
+            }
+            "discover" -> {
+                if("discover" !in hidden) {
+                    section(dashboard,"Explore")
+                    modernContent { ModernExploreLinks(violet,{recommendFromHistory()},{discover()},{upcomingEpisodes()},{animeSearch()},{openExploreSettings()}) }
+                }
+            }
+            "goal" -> {
+        if("goal" !in hidden && prefs.getBoolean("show_monthly_goal",true)) monthlyGoalCard(dashboard,records)
             }
         }
-        if("goal" !in hidden && prefs.getBoolean("show_monthly_goal",true)) monthlyGoalCard(dashboard,records)
     }
     private var reviewCategory="match"
     private fun reviewBucket(g:ViewingTitle):String {
         if(g.queued) return "sync"
+        if(g.rewatching) return "rewatch"
         if(g.representative.traktId<=0) return "match"
         if(g.positionSession?.let { completionAssessment(it).suggested }==true) return "sync"
         return "progress"
     }
     private fun renderModernReview(groups:List<ViewingTitle>) {
-        val items=groups.filter { it.queued || it.pending }
+        val items=groups.filter { it.queued || it.pending || it.rewatching }
         modernContent { ModernPageHeader(violet,"Review",items.size.toString()+" awaiting action",onMenu={ choose("Review options",listOf("Refresh","Log a watch manually","Retry approved uploads")) { i -> when(i){0->refreshHistory();1->manualLog();2->{HistorySync.schedule(this);refreshHistory()}} } }) }
-        val categories=listOf("match" to "Needs match","progress" to "In progress","sync" to "Ready / sync")
+        val categories=listOf("match" to "Needs match","progress" to "In progress","rewatch" to "Rewatching","sync" to "Ready / sync")
         modernContent { ModernCategories(violet,categories.map { (key,label)->key to (label+" ("+items.count { reviewBucket(it)==key }+")") },reviewCategory) { reviewCategory=it; refreshHistory() } }
         val visible=items.filter { reviewBucket(it)==reviewCategory }
         if(visible.isEmpty()) dashboard.addView(txt("Nothing in this category.",15,muted))
@@ -1478,7 +1485,7 @@ class MainActivity : ComponentActivity() {
             val state=if(AutoMatchSuggestions.eligible(r)) AutoMatchSuggestions.read(this,r) else null
             val candidate=state?.matches?.firstOrNull()?.item
             val original=groupPoster(g)
-            val item=if(candidate!=null) original.copy(title=candidate.title.substringBefore(" — "),subtitle=candidate.label().substringAfter(" — ",candidate.label())+" · "+appLabel(r.source),status="Suggested match",type=if(candidate.type=="movie") "movie" else "show",id=if(candidate.type=="episode") candidate.showId else candidate.id) else original.copy(status=if(g.queued) "Awaiting sync" else if(r.traktId>0) "Match verified" else "Needs match")
+            val item=if(candidate!=null) original.copy(title=candidate.title.substringBefore(" — "),subtitle=candidate.label().substringAfter(" — ",candidate.label())+" · "+appLabel(r.source),status="Suggested match",type=if(candidate.type=="movie") "movie" else "show",id=if(candidate.type=="episode") candidate.showId else candidate.id) else original.copy(status=if(g.queued) "Awaiting sync" else if(g.rewatching) "Rewatching" else if(r.traktId>0) "Match verified" else "Needs match")
             val actions=if(state!=null) suggestionActions(r,state) else emptyList()
             val primary=if(candidate!=null) actions.firstOrNull() else if(g.queued) UiAction("View sync status"){showSessions(g)} else if(r.traktId>0 && reviewBucket(g)=="sync") UiAction("Confirm watched"){showSessions(g)} else null
             val secondary=actions.firstOrNull { it.label=="No, incorrect" }
@@ -1506,7 +1513,7 @@ class MainActivity : ComponentActivity() {
         val total=scoped.sumOf { it.watched.coerceAtLeast(0) }
         val daily=scoped.filter { it.watched>0 }.groupBy { ViewingAnalytics.day(it.ended) }.mapValues { (_,rows)->rows.sumOf { it.watched } }
         val today=java.time.LocalDate.now()
-        val start=if(analyticsPeriod>0) today.minusDays(analyticsPeriod.toLong()-1) else daily.keys.minOrNull() ?: today
+        val start=if(analyticsPeriod>0) today.minusDays(analyticsPeriod.toLong()-1) else scoped.minOfOrNull { ViewingAnalytics.day(it.ended) } ?: today
         val monthly=analyticsPeriod==365 || analyticsPeriod==0
         val dates=if(monthly) {
             val first=java.time.YearMonth.from(start)
@@ -1522,7 +1529,7 @@ class MainActivity : ComponentActivity() {
         modernContent { ModernWatchChart(violet,durationText(total),dates.map { if(monthly) it.format(java.time.format.DateTimeFormatter.ofPattern("MMM yy")) else it.format(java.time.format.DateTimeFormatter.ofPattern("d MMM")) },values){} }
         val days=(java.time.temporal.ChronoUnit.DAYS.between(start,today)+1).coerceAtLeast(1)
         modernContent { ModernMetricTiles(violet,listOf("Movies synced" to groups.count { it.confirmed && it.representative.matchType=="movie" }.toString(),"Episodes synced" to groups.count { it.confirmed && it.representative.matchType=="episode" }.toString(),"Active days" to activeDays.toString(),"Daily average" to durationText(total/days))) }
-        modernContent { ModernMetricTiles(violet,listOf("Movie watches" to historical.count { it.matchType=="movie" }.toString(),"Episode watches" to historical.count { it.matchType=="episode" }.toString())) }
+        modernContent { ModernMetricTiles(violet,listOf("Movie watches" to historical.count { it.matchType=="movie" }.toString(),"Episode watches" to historical.count { it.matchType=="episode" }.toString(),"Repeat watches in period" to groups.sumOf { (it.completedWatches.size-1).coerceAtLeast(0) }.toString())) }
         section(dashboard,"Watch time by platform")
         ViewingAnalytics.platforms(scoped).filter { it.sampledMs>0 }.forEach { platform ->
             modernContent { ModernActionRow(violet,appLabel(platform.source),durationText(platform.sampledMs)+" · "+(if(total>0) platform.sampledMs*100/total else 0)+"% of sampled time"){analyticsSource=platform.source;refreshHistory()} }
@@ -1576,24 +1583,22 @@ class MainActivity : ComponentActivity() {
         if(installed.size==1) launch(0) else choose("Open recorded playback app",installed.map { appLabel(it.first) }) { i -> launch(i) }
     }
     private fun upcomingEpisodes() {
-        lookup("Loading upcoming episodes",{ done -> TraktLibrary.upcoming(this,30,done) }) { rows:List<UpcomingEpisode> ->
-            val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
-            body.addView(txt("Next 30 days • Trakt personal calendar. Air dates are not streaming availability.",14,muted))
-            if(rows.isEmpty()) body.addView(txt("No upcoming episodes returned.",15))
-            for(e in rows) {
-                val card=panel(body)
-                val date=java.time.Instant.parse(e.airs).atZone(java.time.ZoneId.systemDefault()).format(java.time.format.DateTimeFormatter.ofPattern("EEE, dd MMM • HH:mm"))
-                card.addView(txt(date,14,violet,true)); card.addView(txt(e.show,18,ink,true));
-                val at=java.time.Instant.parse(e.airs).toEpochMilli()
-                if(at>System.currentTimeMillis()) {
-                    card.addView(txt("Airs in "+durationText(at-System.currentTimeMillis()),13,muted))
-                    card.addView(actionButton("Remind me near air time") {
-                        if(android.os.Build.VERSION.SDK_INT>=33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)!=android.content.pm.PackageManager.PERMISSION_GRANTED) { requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),42); Toast.makeText(this,"Grant notifications, then schedule again",Toast.LENGTH_LONG).show() }
-                        else { prefs.edit().putBoolean("episode_reminders",true).apply(); EpisodeReminders.schedule(this,e); Toast.makeText(this,"Reminder scheduled; timing may vary",Toast.LENGTH_LONG).show() }
-                    })
-                }; card.addView(txt("S"+e.season+" E"+e.episode+if(prefs.getBoolean("hide_spoilers",true)) "" else " • "+e.title,14,muted))
-            }
-            BridgeDialogBuilder(this).setTitle("Upcoming episodes").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
+        val days=prefs.getInt("explore_calendar_days",30).coerceIn(1,31)
+        if(!auth.hasConnection()) {
+            Toast.makeText(this,"Connect Trakt to view your personal calendar",Toast.LENGTH_LONG).show()
+            return
+        }
+        lookup("Loading upcoming episodes",{ done -> TraktLibrary.upcoming(this,days,done) }) { rows:List<UpcomingEpisode> ->
+            modernDetailWindow { close -> ModernEpisodeCalendar(violet,rows,days,prefs.getBoolean("hide_spoilers",true),prefs.getBoolean("episode_reminders",true),{ e ->
+                if(android.os.Build.VERSION.SDK_INT>=33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)!=android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                    requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),42)
+                    Toast.makeText(this,"Grant notifications, then schedule again",Toast.LENGTH_LONG).show(); false
+                } else if(!prefs.getBoolean("episode_reminders",true)) {
+                    Toast.makeText(this,"Enable episode reminders in Explore settings",Toast.LENGTH_LONG).show(); false
+                } else {
+                    runCatching { EpisodeReminders.schedule(this,e) }.fold({Toast.makeText(this,"Reminder scheduled; timing may vary",Toast.LENGTH_SHORT).show();true},{Toast.makeText(this,"Unable to schedule reminder",Toast.LENGTH_SHORT).show();false})
+                }
+            },{close();openExploreSettings()},close) }
         }
     }
     private fun externalIdentity(record:WatchRecord) {
@@ -1697,23 +1702,15 @@ class MainActivity : ComponentActivity() {
         BridgeDialogBuilder(this).setTitle("Viewing plan").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
     }
     private fun viewingPlanner() {
-        val budgets=listOf(30,60,90,120,180)
-        choose("Available viewing time",budgets.map { it.toString()+" minutes" }) { index ->
-            val budget=budgets[index]*60000L
-            val candidates=SeriesLibrary.continueWatching(ViewingGroups.build(history.records(0))).filter { it.positionMs>=0 && it.durationMs>0 && it.remainingMs in 1..budget }
-            val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
-            body.addView(txt("Fits your time based on last reported position.",14,muted))
-            if(candidates.isEmpty()) body.addView(txt("No unfinished titles with known remaining time fit this budget.",14))
-            candidates.take(20).forEach { titleCard(body,it,false) }
-            body.addView(actionButton("Build a multi-title viewing plan") { multiWatchPlan(budget,candidates) })
-            body.addView(actionButton("Random movie from Trakt watchlist") {
-                lookup("Loading watchlist",{ done -> TraktLibrary.page(this,"watchlist",1,done) }) { page:RemotePage ->
-                    val movie=page.items.filter { it.type=="movie" }.randomOrNull()
-                    if(movie==null) Toast.makeText(this,"No movies on the first watchlist page",Toast.LENGTH_LONG).show()
-                    else titleDetails("movie",movie.id,movie.title)
-                }
-            })
-            BridgeDialogBuilder(this).setTitle("Watch planner").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
+        val candidates=SeriesLibrary.continueWatching(ViewingGroups.build(unifiedRows.ifEmpty { history.records(0) })).filter { it.positionMs>=0 && it.durationMs>0 && it.remainingMs>0 }
+        modernDetailWindow { close ->
+            ModernViewingPlanner(violet,candidates.map { PlannerEntry(groupPoster(it),it.remainingMs) },{ budget ->
+                close(); multiWatchPlan(budget,candidates)
+            },{ close(); lookup("Loading watchlist",{ done -> TraktLibrary.page(this,"watchlist",1,done) }) { page:RemotePage ->
+                val movie=page.items.filter { it.type=="movie" }.randomOrNull()
+                if(movie==null) Toast.makeText(this,"No movies on the first watchlist page",Toast.LENGTH_LONG).show()
+                else titleDetails("movie",movie.id,movie.title)
+            } },close)
         }
     }
     private fun subscriptions() {
@@ -1793,51 +1790,48 @@ class MainActivity : ComponentActivity() {
         }
     }
     private fun localAssistant() {
-        val field=EditText(this).apply { hint="Try: unfinished movies or 90 minutes"; setSingleLine(true) }
-        BridgeDialogBuilder(this).setTitle("Viewing assistant").setMessage("Local command matching, not a remote AI service. Supports watch history, time budgets, unfinished titles and subscription summaries.").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Find") { _,_->
-            val q=LocalAssistant.parse(field.text.toString())
+        modernDetailWindow { close -> ModernAssistant(violet,{ command ->
+            close()
+            val q=LocalAssistant.parse(command)
             when(q.action) {
                 "subscriptions"->subscriptions()
                 "recommend"->recommendFromHistory()
                 "history"->{ historyFilter=HistoryFilter(period=q.days); historyLimit=100; showTab(1) }
                 "unfinished","budget"->{
-                    val rows=SeriesLibrary.continueWatching(ViewingGroups.build(history.records(0))).filter { q.action!="budget" || it.remainingMs in 1..(q.minutes*60000L) }
-                    val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
-                    if(rows.isEmpty()) body.addView(txt("No matching unfinished viewing with available progress.",14,muted))
-                    rows.take(30).forEach { titleCard(body,it,false) }
-                    BridgeDialogBuilder(this).setTitle("Your viewing matches").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
+                    val rows=SeriesLibrary.continueWatching(ViewingGroups.build(unifiedRows.ifEmpty { history.records(0) })).filter { q.action!="budget" || it.remainingMs in 1..(q.minutes*60000L) }
+                    modernDetailWindow { done -> ModernPlannerResults(violet,"Your viewing matches",rows.take(30).map { PlannerEntry(groupPoster(it),it.remainingMs) },done) }
                 }
-                else->universalSearch()
+                else->searchTitles(command)
             }
-        }.show()
+        },close) }
     }
     private fun universalSearch() {
-        val field=EditText(this).apply { hint="Movie, show or anime title"; setSingleLine(true) }
-        BridgeDialogBuilder(this).setTitle("Universal search").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Search") { _,_->
-            val q=field.text.toString().trim().take(200)
-            if(q.isBlank()) return@setPositiveButton
-            val local=ViewingGroups.build(ViewingAnalytics.filter(history.records(0),HistoryFilter(query=q)))
-            val favorites=personalStore("favorites").all.values.map { it.toString() }.filter { it.contains(q,true) }
-            val collections=personalStore("collections").all.filter { (name,value) -> name.contains(q,true) || value.toString().contains(q,true) }.keys.sorted()
-            val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
-            section(body,"Local library • "+local.size)
-            local.take(20).forEach { titleCard(body,it,true) }
-            if(local.isEmpty()) body.addView(txt("No matching viewing history.",14,muted))
-            if(favorites.isNotEmpty()) { section(body,"Favorites"); favorites.take(20).forEach { body.addView(txt(it,14)) } }
-            if(collections.isNotEmpty()) { section(body,"Matching collections"); collections.forEach { body.addView(txt(it,14)) }; body.addView(actionButton("Open collections") { this@MainActivity.collections() }) }
-            for(type in listOf("movie","show")) body.addView(actionButton("Search Trakt "+type+"s") {
-                lookup("Searching Trakt",{ done -> TraktCatalogue.search(q,type,done) }) { rows:List<CatalogueItem> ->
-                    choose("Trakt "+type+"s",rows.map { it.label() }) { index -> titleDetails(type,rows[index].id,rows[index].title) }
-                }
-            })
-            body.addView(actionButton("Search actors and directors") { peopleSearch(q) })
-            body.addView(actionButton("Search AniList anime") {
-                lookup("Searching AniList",{ done -> AnimeCatalogue.search(q,done) }) { rows:List<AnimeResult> ->
-                    choose("Anime matches",rows.map { it.english.ifBlank { it.romaji } }) { index -> startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://anilist.co/anime/"+rows[index].id))) }
-                }
-            })
-            BridgeDialogBuilder(this).setTitle("Search: "+q).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
-        }.show()
+        modernDetailWindow { close -> ModernSearchEntry(violet,{ query -> close(); searchTitles(query) },{ close(); localAssistant() },close) }
+    }
+    private fun searchTitles(query:String) {
+        val q=query.trim().take(200)
+        if(q.isBlank()) return
+        val local=ViewingGroups.build(ViewingAnalytics.filter(unifiedRows.ifEmpty { history.records(0) },HistoryFilter(query=q)))
+        val favorites=personalStore("favorites").all.values.map { it.toString() }.filter { it.contains(q,true) }
+        val collections=personalStore("collections").all.filter { (name,value) -> name.contains(q,true) || value.toString().contains(q,true) }.keys.sorted()
+        val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
+        section(body,"Local library • "+local.size)
+        local.take(20).forEach { titleCard(body,it,true) }
+        if(local.isEmpty()) body.addView(txt("No matching viewing history.",14,muted))
+        if(favorites.isNotEmpty()) { section(body,"Favorites"); favorites.take(20).forEach { body.addView(txt(it,14)) } }
+        if(collections.isNotEmpty()) { section(body,"Matching collections"); collections.forEach { body.addView(txt(it,14)) }; body.addView(actionButton("Open collections") { this@MainActivity.collections() }) }
+        for(type in listOf("movie","show")) body.addView(actionButton("Search Trakt "+type+"s") {
+            lookup("Searching Trakt",{ done -> TraktCatalogue.search(q,type,done) }) { rows:List<CatalogueItem> ->
+                choose("Trakt "+type+"s",rows.map { it.label() }) { index -> titleDetails(type,rows[index].id,rows[index].title) }
+            }
+        })
+        body.addView(actionButton("Search actors and directors") { peopleSearch(q) })
+        body.addView(actionButton("Search AniList anime") {
+            lookup("Searching AniList",{ done -> AnimeCatalogue.search(q,done) }) { rows:List<AnimeResult> ->
+                choose("Anime matches",rows.map { it.english.ifBlank { it.romaji } }) { index -> startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://anilist.co/anime/"+rows[index].id))) }
+            }
+        })
+        BridgeDialogBuilder(this).setTitle("Search: "+q).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
     }
     private fun manualLog() {
         val field=EditText(this).apply { hint="Movie or episode title"; setSingleLine(true) }
@@ -2001,13 +1995,14 @@ class MainActivity : ComponentActivity() {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
             setContent { BridgeLiveDashboard(violet,rows,status,{ remotePlaybackControls() },{ continueOnThisDevice() },{ showTab(4) }) }
         }
-        val dialog=BridgeDialogBuilder(this).setTitle("Now Playing • All devices").setView(body).setPositiveButton("Close",null).create()
+        val dialog=BridgeDialogBuilder(this).setView(body).create()
+        body.setContent { ModernToolPage(violet,"Now playing",{dialog.dismiss()}) { BridgeLiveDashboard(violet,rows,status,{ dialog.dismiss(); remotePlaybackControls() },{ dialog.dismiss(); continueOnThisDevice() },{ dialog.dismiss(); showTab(4); showSettingsCategory("tracking") }) } }
         val handler=android.os.Handler(android.os.Looper.getMainLooper())
         val tick=object:Runnable {
             override fun run() {
                 if(!dialog.isShowing || isDestroyed || isFinishing) return
                 val age=System.currentTimeMillis()-prefs.getLong("last_sample",0)
-                val live=prefs.getBoolean("enabled",false) && prefs.getBoolean("listener_connected",false) && age in 0..20000
+                val live=prefs.getBoolean("enabled",false) && PlaybackListener.liveConnected() && age in 0..20000
                 val next=mutableListOf<LiveUiSession>()
                 fun append(device:String,id:String,data:JSONArray,local:Boolean) {
                     for(i in 0 until data.length()) {
@@ -2029,7 +2024,7 @@ class MainActivity : ComponentActivity() {
         }
         dialog.setOnDismissListener { handler.removeCallbacks(tick) }
         dialog.show()
-        if(wide) dialog.window?.setLayout((resources.displayMetrics.widthPixels*0.82).toInt(),-2)
+        dialog.window?.apply { setBackgroundDrawable(android.graphics.drawable.ColorDrawable(bg)); setLayout(if(wide) dp(640).coerceAtMost(resources.displayMetrics.widthPixels) else -1,-1) }
         handler.post(tick)
     }
     private fun liveInspector() {
@@ -2099,84 +2094,71 @@ class MainActivity : ComponentActivity() {
         }.show()
     }
     private fun animeSearch() {
-        val field=EditText(this).apply { hint="English, Japanese or romaji title"; setSingleLine(true) }
-        BridgeDialogBuilder(this).setTitle("Search AniList").setMessage("Your search text is sent to AniList. No account access or history upload.").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Search") { _,_->
-            val q=field.text.toString().trim()
-            if(q.isBlank()) return@setPositiveButton
-            lookup("Searching anime",{ done -> AnimeCatalogue.search(q,done) }) { rows:List<AnimeResult> ->
-                choose("Anime matches",rows.map { it.english.ifBlank { it.romaji }+" • "+it.romaji }) { i ->
-                    val a=rows[i]
-                    BridgeDialogBuilder(this).setTitle(a.english.ifBlank { a.romaji }).setMessage(a.romaji+"\n"+a.native+"\nEpisodes: "+if(a.episodes>0) a.episodes.toString()+"\n\n"+a.description else "Unknown\n\n"+a.description).setNegativeButton("Close",null).setNeutralButton("Track locally") { _,_->editAnimeProgress(a.id,a.english.ifBlank { a.romaji },a.episodes) }.setPositiveButton("AniList details") { _,_->startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://anilist.co/anime/"+a.id))) }.show()
-                }
+        modernDetailWindow { close -> ModernAnimeSearch(violet,{ query ->
+            close()
+            lookup("Searching anime",{ done -> AnimeCatalogue.search(query,done) }) { rows:List<AnimeResult> ->
+                modernDetailWindow { back -> ModernAnimeResults(violet,rows,prefs.getBoolean("hide_spoilers",true),{ item ->
+                    back();editAnimeProgress(item.id,item.english.ifBlank { item.romaji },item.episodes)
+                },{ item -> startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://anilist.co/anime/"+item.id))) },back) }
             }
-        }.show()
+        },{close();animeLocalProgress()},{close();publicAnimeList()},close) }
     }
     private fun recommendFromHistory() {
-        val records=history.records(0)
+        val records=unifiedRows.ifEmpty { history.records(0) }
         val seeds=RecommendationEngine.seeds(records,System.currentTimeMillis())
-        if(seeds.isEmpty()) {
-            BridgeDialogBuilder(this).setTitle("Recommendations").setMessage("Confirm some viewing history first, or browse trending titles.").setNegativeButton("Close",null).setPositiveButton("Discover") { _,_->discover() }.show()
-            return
-        }
         val hiddenStore=personalStore("recommendation_hidden")
-        BridgeDialogBuilder(this).setTitle("Personalized recommendations").setMessage("Trakt receives up to five catalogue title IDs to find related content. Viewing times and local feedback stay on this device.").setNegativeButton("Cancel",null).setNeutralButton("Reset hidden titles") { _,_->hiddenStore.edit().clear().apply(); recommendFromHistory() }.setPositiveButton("Find titles") { _,_->
-            lookup("Finding personal recommendations",{ done -> TraktCatalogue.personalized(seeds,done) }) { batches:List<RelatedBatch> ->
-                val rows=RecommendationEngine.rank(batches,RecommendationEngine.seen(records),hiddenStore.all.keys)
-                val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
-                if(batches.size<seeds.size) body.addView(txt("Some recommendation sources were unavailable.",14,muted))
-                if(rows.isEmpty()) body.addView(txt("No new recommendations. Try Discover or reset hidden titles.",15,muted))
-                cards(body,rows) { parent,row ->
-                    val item=row.item
-                    val card=panel(parent)
-                    card.addView(txt(item.label(),17,ink,true))
-                    card.addView(txt("Because you watched "+row.reasons.take(3).joinToString(", "),14,muted))
-                    card.addView(actionButton("Details") { titleDetails(item.type,item.id,item.title) })
-                    card.addView(actionButton("Not interested") {
-                        if(hiddenStore.all.size>=500) { Toast.makeText(this,"Hidden list full. Reset it to add more.",Toast.LENGTH_LONG).show() }
-                        else { hiddenStore.edit().putBoolean(item.type+":"+item.id,true).apply(); card.visibility=android.view.View.GONE }
-                    })
+        modernDetailWindow { close ->
+            ModernForYou(violet,seeds.isNotEmpty(),prefs.getBoolean("explore_personalized",false),{ 
+                prefs.edit().putBoolean("explore_personalized",true).apply()
+                close()
+                lookup("Finding recommendations",{ done -> TraktCatalogue.personalized(seeds,done) }) { batches:List<RelatedBatch> ->
+                    val seen=if(prefs.getBoolean("explore_exclude_watched",true)) RecommendationEngine.seen(records) else emptySet()
+                    val rows=RecommendationEngine.rank(batches,seen,hiddenStore.all.keys)
+                    modernDetailWindow { back -> ModernExploreResults(violet,"For you",rows.map { ExploreEntry(it.item,"Because you watched "+it.reasons.take(3).joinToString(", ")) },
+                        if(batches.size<seeds.size) "Some sources were unavailable." else "Recommendations from your viewing history",
+                        { item -> back(); titleDetails(item.type,item.id,item.title) },
+                        { item -> if(hiddenStore.all.size>=500) false else { hiddenStore.edit().putBoolean(item.type+":"+item.id,true).apply(); true } },back) }
                 }
-                BridgeDialogBuilder(this).setTitle("For you").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
-            }
-        }.show()
+            },{close();discover()},{close();openExploreSettings()},close)
+        }
     }
     private fun discover() {
-        choose("Discover",listOf("Trending movies","Trending shows","Popular movies","Popular shows","Mood-based discovery")) { index ->
-            if(index==4) { moodDiscovery(); return@choose }
-            val type=if(index%2==0) "movie" else "show"; val mode=if(index<2) "trending" else "popular"
-            lookup("Loading "+mode,{ done -> TraktCatalogue.discover(type,mode,done) }) { rows:List<CatalogueItem> ->
-                val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(12),dp(12),dp(12),dp(12)) }
-                if(tvMode) {
-                    val shelf=rows.distinctBy { it.id }.map { item -> TvLibraryItem(item.id.toString(),item.title,item.label(),type,item.id) { titleDetails(type,item.id,item.title) } }
-                    body.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeTvShelf(violet,mode.replaceFirstChar { it.uppercase() },shelf) } })
-                } else cards(body,rows) { parent,item ->
-                    val card=panel(parent); val image=ImageView(this).apply { scaleType=ImageView.ScaleType.FIT_CENTER; contentDescription="Poster" }
-                    card.addView(image,LinearLayout.LayoutParams(-1,dp(180))); Artwork.load(this,type,item.id,image)
-                    card.addView(txt(item.label(),16,ink,true)); card.addView(actionButton("Details") { titleDetails(type,item.id,item.title) })
+        modernDetailWindow { close ->
+            ModernDiscover(violet,prefs.getString("explore_type","movie").orEmpty(),prefs.getString("explore_mode","trending").orEmpty(),{ type,mode ->
+                prefs.edit().putString("explore_type",type).putString("explore_mode",mode).apply()
+                close()
+                lookup("Loading "+mode,{ done -> TraktCatalogue.discover(type,mode,done) }) { rows:List<CatalogueItem> ->
+                    val seen=if(prefs.getBoolean("explore_exclude_watched",true)) RecommendationEngine.seen(unifiedRows.ifEmpty { history.records(0) }) else emptySet()
+                    val excluded=seen+personalStore("recommendation_hidden").all.keys
+                    modernDetailWindow { back -> ModernExploreResults(violet,mode.replaceFirstChar { it.uppercase() }+" "+if(type=="movie") "movies" else "shows",
+                        rows.filter { it.type+":"+it.id !in excluded }.map { ExploreEntry(it,"") },"Browse titles from Trakt",
+                        { item -> back();titleDetails(item.type,item.id,item.title) },null,back) }
                 }
-                BridgeDialogBuilder(this).setTitle(mode.replaceFirstChar { it.uppercase() }).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
-            }
+            },{close();moodDiscovery()},close)
         }
     }
+    private fun openExploreSettings() {
+        val hidden=personalStore("recommendation_hidden")
+        modernDetailWindow { close -> ModernExploreSettings(violet,prefs.getBoolean("explore_personalized",false),prefs.getBoolean("explore_exclude_watched",true),prefs.getBoolean("hide_spoilers",true),prefs.getInt("explore_calendar_days",30).coerceIn(1,31),prefs.getBoolean("episode_reminders",true),hidden.all.size,
+            { personalized,exclude,spoilers,days,reminders ->
+                prefs.edit().putBoolean("explore_personalized",personalized).putBoolean("explore_exclude_watched",exclude).putBoolean("hide_spoilers",spoilers).putInt("explore_calendar_days",days).putBoolean("episode_reminders",reminders).apply()
+                if(!reminders) EpisodeReminders.cancelAll(this)
+                close(); if(tab==4) { refreshSettingsState("library"); refreshSettingsState("appearance") } else refreshHistory()
+                Toast.makeText(this,"Explore preferences saved",Toast.LENGTH_SHORT).show()
+            },{ hidden.edit().clear().apply(); Toast.makeText(this,"Hidden recommendations reset",Toast.LENGTH_SHORT).show() },
+            { EpisodeReminders.cancelAll(this); Toast.makeText(this,"Episode reminders cancelled",Toast.LENGTH_SHORT).show() },close) }
+    }
     private fun moodDiscovery() {
-        choose("Choose your mood",DiscoveryEngine.moods.map { it.label }) { moodIndex ->
+        modernDetailWindow { close -> ModernMoodDiscovery(violet,{ moodIndex,type,runtime,rating ->
             val mood=DiscoveryEngine.moods[moodIndex]
-            choose("Content type",listOf("Movies","TV shows")) { typeIndex ->
-                val type=if(typeIndex==0) "movie" else "show"
-                val times=listOf(0,30,60,90,120)
-                choose("Maximum runtime (per episode for shows)",listOf("Any runtime","30 minutes","60 minutes","90 minutes","120 minutes")) { timeIndex ->
-                    choose("Minimum Trakt rating",listOf("Any rating","7 / 10","8 / 10")) { ratingIndex ->
-                        val excluded=RecommendationEngine.seen(history.records(0))+personalStore("recommendation_hidden").all.keys
-                        lookup("Finding "+mood.label.lowercase()+" titles",{ done -> TraktCatalogue.moodDiscovery(type,mood,done) }) { candidates:List<DiscoveryItem> ->
-                            val rows=DiscoveryEngine.filter(candidates,mood,times[timeIndex],listOf(0.0,7.0,8.0)[ratingIndex],excluded)
-                            choose(mood.label+" • new to you",rows.map { row -> row.item.label()+" • "+(if(row.item.runtimeMinutes>0) row.item.runtimeMinutes.toString()+" min" else "Runtime unknown") }) { i ->
-                                val item=rows[i].item; titleDetails(item.type,item.id,item.title)
-                            }
-                        }
-                    }
-                }
+            val seen=if(prefs.getBoolean("explore_exclude_watched",true)) RecommendationEngine.seen(unifiedRows.ifEmpty { history.records(0) }) else emptySet()
+            val excluded=seen+personalStore("recommendation_hidden").all.keys
+            close()
+            lookup("Finding "+mood.label.lowercase()+" titles",{ done -> TraktCatalogue.moodDiscovery(type,mood,done) }) { candidates:List<DiscoveryItem> ->
+                val rows=DiscoveryEngine.filter(candidates,mood,runtime,rating,excluded)
+                modernDetailWindow { back -> ModernExploreResults(violet,mood.label,rows.map { ExploreEntry(it.item,if(it.item.runtimeMinutes>0) it.item.runtimeMinutes.toString()+" min" else "Runtime unknown") },"Matches your selected filters",{ item -> back();titleDetails(item.type,item.id,item.title) },null,back) }
             }
-        }
+        },close) }
     }
     private fun titleDetails(type:String,id:Long,label:String) {
         val cache=getSharedPreferences("offline_catalogue",MODE_PRIVATE)
@@ -2305,13 +2287,14 @@ class MainActivity : ComponentActivity() {
         BridgeDialogBuilder(this).setTitle(day.date.toString()).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
     }
     private fun libraryMenu() {
-        choose("Library options",listOf("Synced Trakt account library","Tags and collections","Log a watch","Refresh","Reset filters")) { i ->
+        modernActionDialog("Library options","Manage your library",listOf("Synced Trakt account library","Tags and collections","Log a watch","Refresh","Reset filters","Viewing planner")) { i ->
             when(i) {
                 0->openDownloadedTrakt()
                 1->organizedLibrary()
                 2->manualLog()
                 3->refreshHistory()
                 4->{ historyFilter=HistoryFilter(); libraryCategory="All"; historyLimit=MemoryPolicy.pageSize(lowRam); refreshHistory() }
+                5->viewingPlanner()
             }
         }
     }
@@ -2333,15 +2316,56 @@ class MainActivity : ComponentActivity() {
         val launchable=sources.filter { runCatching { packageManager.getLaunchIntentForPackage(it)!=null }.getOrDefault(false) }
         return if(launchable.isEmpty()) null else { { openPlaybackApp(launchable) } }
     }
+    // Presentation identity only: a suggestion never changes the record or authorizes an upload.
+    private fun posterCandidate(g:ViewingTitle):CatalogueItem? =
+        g.representative.takeIf { AutoMatchSuggestions.eligible(it) }?.let { r ->
+            AutoMatchSuggestions.read(this,r).takeIf { it.status=="ready" }?.matches?.firstOrNull()?.item
+        }
+    private fun continueIdentity(g:ViewingTitle):String {
+        val r=g.representative
+        if(r.matchType=="episode" && r.showId>0) return "show:"+r.showId
+        if(r.matchType=="movie" && r.traktId>0) return "movie:"+r.traktId
+        val candidate=posterCandidate(g)
+        return when {
+            candidate?.type=="episode" && candidate.showId>0 -> "show:"+candidate.showId
+            candidate?.type=="show" -> "show:"+candidate.id
+            candidate?.type=="movie" -> "movie:"+candidate.id
+            else -> g.key
+        }
+    }
+    private fun continueCards(groups:List<ViewingTitle>,category:String="All",limit:Int=10):List<PosterLibraryItem> {
+        val continuing=SeriesLibrary.continueWatching(groups)
+        val buckets=continuing.groupBy { continueIdentity(it) }
+        return buckets.entries.filter { (key,_) ->
+            category=="All" || category=="Movies" && key.startsWith("movie:") || category=="Series" && key.startsWith("show:") || category=="Unidentified" && key.startsWith("session:")
+        }.take(limit).map { (key,episodes) ->
+            // Prefer most recently played unfinished episode, not historical completion.
+            val current=episodes.first()
+            val poster=groupPoster(current)
+            if(key.startsWith("show:") && episodes.size>1) poster.copy(
+                subtitle=poster.subtitle+" · "+episodes.size+" in progress",
+                open={ showContinueEpisodes(poster.title,episodes) },
+                menu={ showContinueEpisodes(poster.title,episodes) }
+            ) else poster
+        }
+    }
+    private fun showContinueEpisodes(title:String,episodes:List<ViewingTitle>) {
+        modernDetailWindow { close -> ModernContinueEpisodes(violet,title,episodes.map { groupPoster(it) },{ index -> close(); showSessions(episodes[index]) },close) }
+    }
     private fun groupPoster(g:ViewingTitle):PosterLibraryItem {
         val r=g.representative
-        val episode=r.matchType=="episode" && r.showId>0
-        val name=if(episode) r.matchLabel.substringBefore(" — ") else r.matchLabel.ifBlank { r.title.ifBlank { "Unidentified video" } }
-        val detail=(if(episode) "S"+r.season+" E"+r.episode+" · " else "")+(if(g.confirmed) java.text.DateFormat.getDateInstance().format(java.util.Date(g.sessions.filter { it.status=="synced" }.maxOf { it.ended })) else if(g.remainingMs>0) durationText(g.remainingMs)+" left" else g.platforms.joinToString(" • ") { appLabel(it) })
+        val candidate=posterCandidate(g)
+        val episode=r.matchType=="episode" && r.showId>0 || candidate?.type=="episode" && candidate.showId>0
+        val showId=if(r.showId>0 && r.matchType=="episode") r.showId else candidate?.let { if(it.type=="episode") it.showId else if(it.type=="show") it.id else 0L } ?: 0L
+        val name=if(episode || showId>0) (candidate?.title ?: r.matchLabel).substringBefore(" — ").substringBefore(" • S").ifBlank { r.title } else candidate?.title ?: r.matchLabel.ifBlank { r.title.ifBlank { "Unidentified video" } }
+        val season=if(r.season>=0) r.season else candidate?.season ?: -1
+        val number=if(r.episode>0) r.episode else candidate?.episode ?: -1
+        val prefix=if(episode && season>=0 && number>0) "S"+season+" E"+number+" · " else ""
+        val detail=prefix+(if(g.rewatching) "Rewatch · "+(if(g.remainingMs>0) durationText(g.remainingMs)+" left" else "In progress") else if(g.confirmed) java.text.DateFormat.getDateInstance().format(java.util.Date(g.sessions.filter { it.status=="synced" }.maxOf { it.ended })) else if(g.remainingMs>0) durationText(g.remainingMs)+" left" else g.platforms.joinToString(" • ") { appLabel(it) })
         val progress=if(g.durationMs>0 && g.positionMs>=0) (g.positionMs.toDouble()/g.durationMs).toFloat().coerceIn(0f,1f) else null
-        val open:()->Unit={ if(episode) showSeries(r.showId) else showSessions(g) }
+        val open:()->Unit={ if(r.matchType=="episode" && r.showId>0) showSeries(r.showId) else showSessions(g) }
         val play=playbackAction(g)
-        return PosterLibraryItem(name,detail,when { g.confirmed->"Watched"; g.queued->"Awaiting sync"; r.traktId<=0->"Needs match"; else->"In progress" },if(episode) "show" else "movie",if(episode) r.showId else r.traktId,open,{ showSessions(g) },progress,play)
+        return PosterLibraryItem(name,detail,when { g.rewatching->"Rewatching"; g.confirmed->"Watched"; g.queued->"Awaiting sync"; candidate!=null->"Suggested match"; r.traktId<=0->"Needs match"; else->"In progress" },if(showId>0) "show" else "movie",if(showId>0) showId else if(r.traktId>0) r.traktId else candidate?.id ?: 0L,open,{ showSessions(g) },progress,play)
     }
     private fun renderPosterLibrary(records:List<WatchRecord>) {
         val accountId=RemoteAccountCache.active(this)
@@ -2352,7 +2376,7 @@ class MainActivity : ComponentActivity() {
         val other=groups.filter { it.representative.matchType!="movie" && !(it.representative.matchType=="episode" && it.representative.showId>0 && it.representative.season>=0 && it.representative.episode>0) }
         val anime=personalStore("anime_progress").all.values.mapNotNull { value -> runCatching { org.json.JSONObject(value.toString()) }.getOrNull() }.filter { it.optInt("id")>0 && it.optString("title").isNotBlank() && (historyFilter.query.isBlank() || it.optString("title").contains(historyFilter.query,true)) }.sortedBy { it.optString("title") }
         val category=libraryCategory
-        val continuing=SeriesLibrary.continueWatching(ViewingGroups.build(ViewingAnalytics.filter(records.filterNot { UnifiedTraktHistory.remote(it) },historyFilter))).filter { it.representative.traktId>0 && (category=="All" || (category=="Movies" && it.representative.matchType=="movie") || (category=="Series" && it.representative.matchType=="episode")) }.distinctBy { if(it.representative.showId>0) "show:"+it.representative.showId else "movie:"+it.representative.traktId }.take(10)
+        val continuing=continueCards(groups,category,10)
         val sections=mutableListOf<PosterGridSection>()
         if(category in setOf("All","Series") && series.isNotEmpty()) sections.add(PosterGridSection("Your series",series.size) { index ->
             val item=series[index]
@@ -2369,7 +2393,7 @@ class MainActivity : ComponentActivity() {
         if(category in setOf("All","Unidentified") && other.isNotEmpty()) sections.add(PosterGridSection("Unidentified viewing",other.size){groupPoster(other[it])})
         val columns=if(resources.configuration.fontScale>=1.5f) 1 else maxOf(2,adaptiveLayout.columns)
         libraryContent={
-            ModernLazyLibrary(violet,columns,category,sections,continuing.map { groupPoster(it) },
+            ModernLazyLibrary(violet,columns,category,sections,continuing,
                 if(syncStatus==null) "Sync Trakt history" else if(syncStatus.complete) "Trakt history synchronized" else "Trakt history partially downloaded",
                 syncStatus?.let { it.count.toString()+" watch events" } ?: "Bring your existing movies and episodes into Library",
                 historyFilter!=HistoryFilter(),{ selected -> libraryCategory=selected;refreshHistory() },{universalSearch()},{editHistoryFilter(records)},{libraryMenu()},{offerTraktSync()},{manualLog()},{animeSearch()})
@@ -2623,13 +2647,14 @@ class MainActivity : ComponentActivity() {
         return if(min>=60) (min/60).toString()+"h "+(min%60)+"m" else if(min==0L && ms>0) (ms/1000).toString()+"s" else min.toString()+" min"
     }
     private val suggestionListener=android.content.SharedPreferences.OnSharedPreferenceChangeListener { _,_ ->
-        if(!isDestroyed && !isFinishing && tab==2 && ::contentPage.isInitialized && (!prefs.getBoolean("privacy_lock",false) || unlocked)) {
+        if(!isDestroyed && !isFinishing && tab in 0..2 && ::contentPage.isInitialized && (!prefs.getBoolean("privacy_lock",false) || unlocked)) {
             restoreScrollY=contentPage.scrollY
             refreshHistory()
         }
     }
     private fun requestReviewSuggestions(records:List<WatchRecord>) {
-        if(tab!=2 || (prefs.getBoolean("privacy_lock",false) && !unlocked)) return
+        if(tab !in 0..2 || (prefs.getBoolean("privacy_lock",false) && !unlocked)) return
+        RewatchAutomation.request(this)
         AutoMatchSuggestions.enqueue(this,records)
     }
     private fun acceptSuggestion(r:WatchRecord,item:CatalogueItem) {
@@ -2672,7 +2697,7 @@ class MainActivity : ComponentActivity() {
         val suggestion=if(tab==2 && AutoMatchSuggestions.eligible(r)) AutoMatchSuggestions.read(this,r) else null
         val candidate=suggestion?.matches?.firstOrNull()?.item
         val assessment=g.positionSession?.let { completionAssessment(it) }
-        val completion=when { g.sessions.all { it.status=="restored_audit" } -> "Restored history • prior upload not repeated"; g.confirmed -> "Finished • synced to Trakt"; g.queued -> "Completion approved • sync pending"; g.active -> "Currently watching"; assessment?.suggested==true -> "Completion suggested • confirm manually"; g.positionMs>=0 -> "In progress"; else -> "Completion unknown" }
+        val completion=when { g.sessions.all { it.status=="restored_audit" } -> "Restored history • prior upload not repeated"; g.rewatching -> "Rewatching • original watch preserved"; g.confirmed -> "Finished • synced to Trakt"; g.queued -> "Completion approved • sync pending"; g.active -> "Currently watching"; assessment?.suggested==true -> "Completion suggested • confirm manually"; g.positionMs>=0 -> "In progress"; else -> "Completion unknown" }
         val progress=if(g.durationMs>0 && g.positionMs>=0) (g.positionMs.toDouble()/g.durationMs*100).toInt().coerceIn(0,100) else null
         val position=if(progress!=null) durationText(g.positionMs)+" / "+durationText(g.durationMs)+" • "+durationText(g.remainingMs)+" left • "+g.positionSource else (if(g.catalogueRuntimeMs>0) "Catalogue runtime: "+durationText(g.catalogueRuntimeMs)+" • " else "")+"Remaining time unavailable"
         val diagnostics=buildString {
@@ -2720,7 +2745,7 @@ class MainActivity : ComponentActivity() {
         val dialog=BridgeDialogBuilder(this).setTitle(title).setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Done") { _,_->refreshHistory() }.create()
         g.sessions.forEach { session ->
             if(!UnifiedTraktHistory.remote(session) && session.id in g.possibleRewatchIds) body.addView(txt("Possible rewatch — review before approving",14,muted))
-            recordCard(body,session,true,g.confirmed || g.queued,onDeleted={ dialog.dismiss() },onNavigate={ dialog.dismiss() })
+            recordCard(body,session,true,g.completedWatches.any { it.ended<session.started } || g.queued,onDeleted={ dialog.dismiss() },onNavigate={ dialog.dismiss() })
         }
         dialog.show()
     }
@@ -2729,7 +2754,7 @@ class MainActivity : ComponentActivity() {
             val row=TitleUi(r.matchLabel,"Trakt account history",java.text.DateFormat.getDateTimeInstance().format(java.util.Date(r.ended)),"Watched on Trakt","Historical watch duration unavailable",null,"","Read-only downloaded watch event",if(r.matchType=="episode") "show" else "movie",if(r.matchType=="episode") r.showId else r.traktId)
             parent.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent { BridgeTitleCard(violet,row,emptyList()) } }); return
         }
-        val status=when(r.status) { "synced"->"Synced to Trakt"; "active"->"Watching"; "pending"->"Needs review"; "reviewed"->if(completionAssessment(r).suggested) "Ready to confirm" else "Matched · in progress"; "restored_audit"->"Restored audit • no upload"; else->r.status.replaceFirstChar { it.uppercase() } }
+        val status=if(completionAlreadyRecorded && r.status in setOf("pending","reviewed")) "Rewatching · already watched on Trakt" else when(r.status) { "synced"->"Synced to Trakt"; "active"->"Watching"; "pending"->"Needs review"; "reviewed"->if(completionAssessment(r).suggested) "Ready to confirm" else "Matched · in progress"; "restored_audit"->"Restored audit • no upload"; else->r.status.replaceFirstChar { it.uppercase() } }
         val progress=if(r.duration>0 && r.position>=0) (r.position.toDouble()/r.duration*100).toInt().coerceIn(0,100) else null
         val evidence=buildString {
             if(r.status in setOf("pending","reviewed")) { val a=completionAssessment(r); append("Completion evidence: "+(a.percent?.let { it.toString()+"% • " } ?: "")+a.reason) }
@@ -2745,7 +2770,7 @@ class MainActivity : ComponentActivity() {
             if(r.id.startsWith("import:") && r.status=="pending") actions.add(UiAction("Reconcile with local history") { reconcileImported(r) })
             if(r.status in setOf("pending","reviewed")) actions.add(UiAction(if(r.traktId>0) "Change Trakt match" else "Identify on Trakt") { identify(r) })
             if(r.traktId>0 && r.status in setOf("pending","reviewed")) actions.add(UiAction("Remove Trakt match") { history.clearMatch(r.id); onNavigate(); refreshHistory() })
-            if(r.status=="reviewed" && r.traktId>0) actions.add(UiAction(if(completionAlreadyRecorded) "Confirm separate rewatch" else "Mark watched on Trakt") { approveUpload(r,completionAlreadyRecorded) })
+            if(r.status=="reviewed" && r.traktId>0 && !completionAlreadyRecorded) actions.add(UiAction("Mark watched on Trakt") { approveUpload(r,false) })
             if(r.status=="blocked") actions.add(UiAction("Retry blocked upload") { history.retryBlocked(r.id); HistorySync.schedule(this); refreshHistory() })
             if(r.status in setOf("queued","blocked")) actions.add(UiAction("Cancel queued upload") { history.cancelQueued(r.id); refreshHistory() })
             if(r.status=="uncertain") actions.add(UiAction("Reconcile with Trakt (no resend)") { HistorySync.schedule(this); refreshHistory() })
@@ -2803,24 +2828,76 @@ class MainActivity : ComponentActivity() {
         }.setPositiveButton("Close",null).show()
     }
     private fun completionAssessment(r:WatchRecord)=CompletionPolicy.assess(r,prefs.getInt("completion_threshold",CompletionPolicy.DEFAULT_THRESHOLD))
+    private val uploadApprovalsInFlight=mutableSetOf<String>()
     private fun approveUpload(r: WatchRecord,rewatch:Boolean=false) {
-        BridgeDialogBuilder(this).setTitle(if(rewatch) "Confirm a separate completed rewatch?" else "Mark as fully watched?")
-            .setMessage(r.matchLabel + "\nThis adds a completed watch to Trakt at the recorded end time. Only confirm if you finished the movie or episode. Partial viewing stays local. For app-activity records the end time is only the app exit time.")
-            .setNegativeButton("Cancel",null).setPositiveButton("Verify account") { _,_ ->
-                Thread {
-                    val result=runCatching { HistorySync.accountForApproval(applicationContext) }
-                    runOnUiThread {
-                        if(!isFinishing && !isDestroyed) result.fold({ accountId ->
-                            BridgeDialogBuilder(this).setTitle("Approve upload to connected Trakt account?")
-                                .setMessage(r.matchLabel + "\nAccount ID: " + accountId + "\nApproved records will retry when online.")
-                                .setNegativeButton("Cancel",null).setPositiveButton("Approve and sync") { _,_ ->
-                                    if(history.enqueue(r.id,accountId,rewatch,r.traktId,r.matchType,r.ended)) HistorySync.schedule(this) else Toast.makeText(this,"This title already has a completion or pending upload for this account.",Toast.LENGTH_LONG).show()
-                                    refreshHistory()
-                                }.show()
-                        },{ BridgeDialogBuilder(this).setTitle("Account verification required").setMessage("Connect to Trakt and verify the account online before approving uploads.").setPositiveButton("OK",null).show() })
-                    }
-                }.start()
-            }.show()
+        if(r.id in uploadApprovalsInFlight) return
+        if(!auth.hasConnection()) {
+            Toast.makeText(this,"Connect Trakt in Settings first",Toast.LENGTH_LONG).show()
+            return
+        }
+        val account=RemoteAccountCache.active(this)
+        val generation=RemoteAccountCache.generation(this)
+        val view=ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow) }
+        val dialog=BridgeDialogBuilder(this).setView(view).create()
+        val artwork=PosterLibraryItem(r.matchLabel.ifBlank { r.title },"","",if(r.matchType=="episode") "show" else "movie",if(r.matchType=="episode") r.showId else r.traktId,{},{})
+        view.setContent {
+            ModernWatchApproval(violet,artwork,rewatch,r.id.startsWith("usage:"),account!=null,{
+                dialog.dismiss()
+                if(uploadApprovalsInFlight.add(r.id)) queueWatchApproval(r,rewatch,account,generation)
+            },{dialog.dismiss()})
+        }
+        dialog.show()
+        dialog.window?.apply {
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
+            setGravity(android.view.Gravity.BOTTOM)
+            setLayout(if(wide) dp(560).coerceAtMost(resources.displayMetrics.widthPixels) else -1,-2)
+        }
+    }
+    private fun queueWatchApproval(r:WatchRecord,rewatch:Boolean,account:String?,generation:Long) {
+        val app=applicationContext
+        Thread {
+            val result=runCatching {
+                // Cached identity is bound to the current authorization and survives offline use.
+                // The worker independently verifies the same account before any network write.
+                val verified=account ?: HistorySync.accountForApproval(app)
+                check(RemoteAccountCache.generation(app)==generation && TraktAuth(app).hasConnection()) { "Account changed" }
+                if(account!=null) check(RemoteAccountCache.current(app,verified,generation)) { "Account changed" }
+                WatchHistory(app).use { db ->
+                    if(!rewatch && TraktLibrary.cachedHistory(app,verified).any { it.type==r.matchType && it.id==r.traktId }) {
+                        "Already watched on Trakt"
+                    } else if(db.enqueue(r.id,verified,rewatch,r.traktId,r.matchType,r.ended)) {
+                        ViewingNotifications.cancel(app,r.id)
+                        HistorySync.schedule(app)
+                        "Queued for Trakt sync"
+                    } else "Already approved or viewing record changed"
+                }
+            }
+            runOnUiThread {
+                uploadApprovalsInFlight.remove(r.id)
+                if(!isFinishing && !isDestroyed) {
+                    val message=result.getOrElse { "Unable to approve. Check your Trakt connection and try again." }
+                    Toast.makeText(this,message,Toast.LENGTH_SHORT).show()
+                    refreshHistory()
+                    if(message=="Queued for Trakt sync") observeWatchUpload(r.id)
+                }
+            }
+        }.start()
+    }
+    private fun observeWatchUpload(id:String) {
+        val handler=android.os.Handler(android.os.Looper.getMainLooper())
+        var checks=0
+        val task=object:Runnable {
+            override fun run() {
+                if(isFinishing || isDestroyed) return
+                val state=runCatching { history.record(id)?.status }.getOrNull() ?: return
+                when(state) {
+                    "synced"->{ Toast.makeText(this@MainActivity,"Marked watched on Trakt",Toast.LENGTH_SHORT).show(); refreshHistory() }
+                    "blocked"->{ Toast.makeText(this@MainActivity,"Sync needs attention in Review",Toast.LENGTH_SHORT).show(); refreshHistory() }
+                    "queued","uncertain"->if(++checks<30) handler.postDelayed(this,2000)
+                }
+            }
+        }
+        handler.postDelayed(task,1000)
     }
     private fun identify(r: WatchRecord) {
         val initial=RecognitionEngine.query(r.title)
