@@ -108,7 +108,7 @@ class WatchHistory(context: Context): SQLiteOpenHelper(context.applicationContex
     private fun finish(key: String) {
         val a = active.remove(key) ?: return
         DebugTrace.event("history","session ended watchedMs="+a.watched+" retained="+(a.watched>=MIN_WATCH))
-        if (a.watched >= MIN_WATCH) save(a, "pending")
+        if (a.watched >= MIN_WATCH) { save(a, "pending"); record(a.id)?.let { r -> learned(r)?.let { match(r.id,it,false) } } }
         else writableDatabase.delete("viewing", "id=?", arrayOf(a.id))
     }
     @Synchronized fun ingest(samples: List<WatchSample>, elapsed: Long, wall: Long) {
