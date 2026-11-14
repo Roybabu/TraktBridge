@@ -41,15 +41,23 @@ object RewatchAutomation {
                 }
                 WatchHistory(app).use { db ->
                     db.applyLearned()
-                    if(!prefs.getBoolean("auto_rewatch_sync",false)) return@use
+                    if(!prefs.getBoolean("auto_rewatch_sync",false) && !prefs.getBoolean("auto_watch_sync",false)) return@use
                     var queued=false
+                    val attempts=app.getSharedPreferences("automatic_completion_attempts",Context.MODE_PRIVATE)
                     for(r in db.records(200)) {
-                        if(!prefs.getBoolean("auto_rewatch_sync",false) || !RemoteAccountCache.current(app,account,generation)) break
-                        val prior=current.completed[key(r)] ?: continue
-                        if(!RewatchPolicy.eligible(r,prior,prefs.getInt("completion_threshold",90))) continue
-                        if(db.enqueue(r.id,account,true,r.traktId,r.matchType,r.ended)) {
+                        if(!RemoteAccountCache.current(app,account,generation) || !TraktAuth(app).hasConnection() || prefs.getBoolean("privacy_lock",false) || !prefs.getBoolean("enabled",false)) break
+                        val prior=current.completed[key(r)]
+                        val threshold=prefs.getInt("completion_threshold",90)
+                        val rewatch=prior!=null
+                        val eligible=if(rewatch) prefs.getBoolean("auto_rewatch_sync",false) && RewatchPolicy.eligible(r,prior ?: 0L,threshold) else
+                            prefs.getBoolean("auto_watch_sync",false) && status.complete && AutomaticCompletionPolicy.eligible(r,prefs.getLong("auto_watch_since",0),threshold)
+                        if(!eligible) continue
+                        // An attempted automatic approval is never repeated after manual cancellation.
+                        if(attempts.contains(r.id)) continue
+                        if(!attempts.edit().putBoolean(r.id,true).commit()) continue
+                        if(db.enqueue(r.id,account,rewatch,r.traktId,r.matchType,r.ended)) {
                             ViewingNotifications.cancel(app,r.id); queued=true
-                            DebugTrace.event("rewatch","completed rewatch queued")
+                            DebugTrace.event("completion",if(rewatch) "completed rewatch queued" else "completed watch queued automatically")
                         }
                     }
                     if(queued) HistorySync.schedule(app)
@@ -63,4 +71,14 @@ object RewatchPolicy {
         prior>0 && prior<r.started && r.status=="reviewed" && r.source==YouTubePlayback.PACKAGE &&
         r.positionSource=="media" && CompletionPolicy.assess(r,threshold).suggested &&
         r.duration>0 && r.watched.toDouble()/r.duration>=0.90 && r.uncertainMs<=r.duration/10
+}
+
+/** First watches require an exact verified identity and strong measured playback,
+ * not merely a catalogue suggestion or a seek to the end. */
+object AutomaticCompletionPolicy {
+    fun eligible(r:WatchRecord,since:Long,threshold:Int):Boolean =
+        since>0 && r.started>=since && r.ended>=r.started && r.status=="reviewed" &&
+        r.source in PlaybackDetectors.supported && r.positionSource=="media" &&
+        r.duration>0 && r.watched.toDouble()/r.duration>=0.90 &&
+        r.uncertainMs<=r.duration/10 && CompletionPolicy.assess(r,maxOf(90,threshold)).suggested
 }
