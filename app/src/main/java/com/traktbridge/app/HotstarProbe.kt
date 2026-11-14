@@ -15,7 +15,37 @@ object HotstarProbe {
     private data class Count(var attempts:Int=0,var evidence:Int=0)
     private val counts=linkedMapOf<String,Count>()
     private fun observe(source:String,available:Boolean) { val count=counts.getOrPut(source) { Count() };count.attempts++;if(available) count.evidence++ }
-    private fun benchmark():String = "Source evidence coverage (not identification accuracy)\n"+counts.entries.joinToString("\n") { (name,count) -> "$name: ${count.evidence}/${count.attempts} (${100*count.evidence/maxOf(1,count.attempts)}%)" }+"\nShare/deep links, provider catalogue, Trakt catalogue, learned mappings and OCR: not measured by this probe.\n"
+    private data class Prediction(val source:String,val item:CatalogueItem?,val latency:Long)
+    private val predictions=linkedMapOf<String,MutableMap<String,Prediction>>()
+    private data class Accuracy(var tested:Int=0,var series:Int=0,var exact:Int=0,var wrong:Int=0,var missing:Int=0,var latency:Long=0)
+    private val accuracy=linkedMapOf<String,Accuracy>()
+    @Synchronized fun prediction(c:Context,r:WatchRecord,source:String,item:CatalogueItem?,latency:Long=0) {
+        if(!enabled(c) || r.source!=HotstarPlayback.PACKAGE) return
+        if(predictions.size>=200 && r.id !in predictions) predictions.remove(predictions.keys.first())
+        predictions.getOrPut(r.id) { linkedMapOf() }[source]=Prediction(source,item,latency)
+        append(c,"resolution source="+source+" record="+fingerprint(r.id)+" candidate="+(item?.let { safe(it.title)+" id="+it.id+" showId="+it.showId+" season="+it.season+" episode="+it.episode } ?: "none")+" latencyMs="+latency)
+    }
+    @Synchronized fun confirmed(c:Context,r:WatchRecord,item:CatalogueItem) {
+        if(!enabled(c) || r.source!=HotstarPlayback.PACKAGE) return
+        val saved=runCatching { WatchHistory(c).use { it.record(r.id) } }.getOrNull() ?: return
+        if(saved.traktId!=item.id || saved.matchType!=item.type) return
+        val entries=predictions.remove(r.id) ?: return
+        for((source,p) in entries) {
+            val a=accuracy.getOrPut(source) { Accuracy() }
+            a.tested++;a.latency+=p.latency
+            val i=p.item
+            if(i==null) a.missing++ else {
+                val parent=if(i.type=="show") i.id else i.showId
+                val seriesCorrect=item.type=="episode" && parent>0 && parent==item.showId
+                val exact=i.type==item.type && i.id==item.id
+                if(seriesCorrect) a.series++
+                if(exact) a.exact++ else if(!seriesCorrect || i.type!="show") a.wrong++
+            }
+        }
+        append(c,"ground truth record="+fingerprint(r.id)+" title="+safe(item.title)+" id="+item.id+" showId="+item.showId)
+    }
+    private fun accuracyReport():String = "\nReview-confirmed resolution benchmark (one result per record and method)\n"+accuracy.entries.joinToString("\n") { (source,a) -> "$source: tested=${a.tested} correctSeries=${a.series} exact=${a.exact} wrong=${a.wrong} noResult=${a.missing} meanLatencyMs=${a.latency/maxOf(1,a.tested)}" }+"\nPending benchmark records: "+predictions.size+"\n"
+    private fun benchmark():String = "Source evidence coverage (not identification accuracy)\n"+counts.entries.joinToString("\n") { (name,count) -> "$name: ${count.evidence}/${count.attempts} (${100*count.evidence/maxOf(1,count.attempts)}%)" }+"\nShare/deep links, provider catalogue and OCR: not measured by this probe. Accessibility measures evidence only.\n"+accuracyReport()
     private data class Sample(val title:String,val duration:Long,val position:Long,val time:Long,val state:Int,val speed:Float)
     private val previous=mutableMapOf<Int,Sample>()
     private fun prefs(c:Context)=c.getSharedPreferences("tracker",Context.MODE_PRIVATE)
@@ -23,7 +53,7 @@ object HotstarProbe {
     fun enabled(c:Context)=!prefs(c).getBoolean("privacy_lock",false) && System.currentTimeMillis()<prefs(c).getLong(KEY,0)
     @Synchronized fun start(c:Context) { clear(c);prefs(c).edit().putLong(KEY,System.currentTimeMillis()+900000).apply();last=0;lastScreen=0;lastSignals=0;previous.clear() }
     fun stop(c:Context) { prefs(c).edit().remove(KEY).apply() }
-    @Synchronized fun clear(c:Context) { file(c).delete();counts.clear() }
+    @Synchronized fun clear(c:Context) { file(c).delete();counts.clear();predictions.clear();accuracy.clear() }
     @Synchronized fun report(c:Context):String=if(prefs(c).getBoolean("privacy_lock",false)) "Unlock or disable app privacy lock before accessing this diagnostic." else "JioHotstar title detection diagnostic\nCapture active: "+enabled(c)+"\n"+benchmark()+runCatching { file(c).takeIf { it.exists() }?.readText().orEmpty() }.getOrDefault("")
     private fun safe(value:String):String=HotstarPlayback.clean(value)?.takeIf { !it.contains(Regex("(?i)(https?://|www\\.|@|[0-9]{7,})")) }?.take(160).orEmpty()
     // Fingerprints are diagnostic candidates only, never verified content identities.
@@ -83,7 +113,7 @@ object HotstarProbe {
     }
     private fun append(c:Context,value:String) {
         if(!enabled(c)) return
-        runCatching { val f=file(c); if(f.length()>96000) f.writeText(f.readText().takeLast(48000).substringAfter('\n',""));f.appendText(Instant.now().toString()+" "+value.replace('\n',' ').replace('\r',' ')+"\n") }
+        runCatching { val f=file(c); if(f.length()>384000) f.writeText(f.readText().takeLast(192000).substringAfter('\n',""));f.appendText(Instant.now().toString()+" "+value.replace('\n',' ').replace('\r',' ')+"\n") }
     }
     private fun statePlaying(state:Int?)=state==android.media.session.PlaybackState.STATE_PLAYING
     @Synchronized fun media(c:Context,controllers:List<MediaController>,notifications:Int) {

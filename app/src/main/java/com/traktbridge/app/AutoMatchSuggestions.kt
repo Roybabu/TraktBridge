@@ -57,6 +57,7 @@ object AutoMatchSuggestions {
         write(context,r,if(remaining.isEmpty()) "rejected" else "ready",remaining)
     }
     fun confirmed(context:Context,r:WatchRecord,item:CatalogueItem) {
+        HotstarProbe.confirmed(context,r,item)
         val p=feedback(context); val k="reject:"+identity(r)
         p.edit().putStringSet(k,rejected(context,r)-candidateKey(item)).apply()
     }
@@ -78,13 +79,16 @@ object AutoMatchSuggestions {
         val app=context.applicationContext
         val record=records.firstOrNull { eligible(it) && read(app,it).status=="waiting" } ?: return
         val learned=runCatching { WatchHistory(app).use { it.learned(record) } }.getOrNull()
+        HotstarProbe.prediction(app,record,"Exact learned mapping",learned)
         if(learned!=null && candidateKey(learned) !in rejected(app,record)) {
             runCatching { WatchHistory(app).use { it.match(record.id,learned,false) } }; return
         }
         val k=key(record)
         running.add(k)
         val hotstar=runCatching { WatchHistory(app).use { it.hotstarSeries(record) } }.getOrNull()
+        HotstarProbe.prediction(app,record,"Learned URI parent",hotstar)
         val confirmed=if(hotstar!=null) listOf(hotstar) else confirmedSeries(record,records)
+        val started=android.os.SystemClock.elapsedRealtime()
         TraktCatalogue.suggest(record,confirmed) { result ->
             running.remove(k)
             val current=runCatching { WatchHistory(app).use { it.record(k) } }.getOrNull()
@@ -92,9 +96,10 @@ object AutoMatchSuggestions {
                 result.fold({ matches ->
                     val denied=rejected(app,current)
                     val accepted=matches.filter { candidateKey(it.item) !in denied }
+                    HotstarProbe.prediction(app,current,if(hotstar!=null) "Trakt with learned URI parent" else "Trakt catalogue",accepted.firstOrNull()?.item,android.os.SystemClock.elapsedRealtime()-started)
                     // A learned parent series improves suggestions, but never confirms a new episode.
                     write(app,current,if(accepted.isEmpty()) "none" else "ready",accepted)
-                },{ write(app,current,"error") })
+                },{ HotstarProbe.prediction(app,current,if(hotstar!=null) "Trakt with learned URI parent" else "Trakt catalogue",null,android.os.SystemClock.elapsedRealtime()-started); write(app,current,"error") })
             }
         }
     }
