@@ -18,7 +18,7 @@ object AutoMatchSuggestions {
         if(k in running) return State("searching")
         val o=runCatching { JSONObject(store(context).getString(k,"").orEmpty()) }.getOrNull() ?: return State("waiting")
         if(o.optString("fingerprint")!=fingerprint(r)) return State("waiting")
-        if(o.optString("status")!="rejected" && o.optInt("policyVersion")!=3) return State("waiting")
+        if(o.optString("status")!="rejected" && o.optInt("policyVersion")!=4) return State("waiting")
         val state=o.optString("status")
         if(state=="ready" && (o.optJSONArray("matches")?.length() ?: 0)==0) return State("waiting")
         if(state=="error" && System.currentTimeMillis()-o.optLong("at")>=120000) return State("waiting")
@@ -40,7 +40,7 @@ object AutoMatchSuggestions {
         }) }
         val edit=prefs.edit()
         if(prefs.all.size>=500) prefs.all.entries.sortedBy { runCatching { JSONObject(it.value.toString()).optLong("at") }.getOrDefault(0L) }.take(50).forEach { edit.remove(it.key) }
-        edit.putString(key(r),JSONObject().put("policyVersion",3).put("fingerprint",fingerprint(r)).put("at",System.currentTimeMillis()).put("status",status).put("matches",array).toString()).apply()
+        edit.putString(key(r),JSONObject().put("policyVersion",4).put("fingerprint",fingerprint(r)).put("at",System.currentTimeMillis()).put("status",status).put("matches",array).toString()).apply()
     }
     private fun feedback(context:Context)=context.getSharedPreferences("catalogue_feedback",Context.MODE_PRIVATE)
     private fun identity(r:WatchRecord):String = android.util.Base64.encodeToString(java.security.MessageDigest.getInstance("SHA-256").digest((r.source+"|"+RecognitionEngine.normalized(r.title)+"|"+RecognitionEngine.normalized(r.subtitle)).toByteArray(Charsets.UTF_8)),android.util.Base64.NO_WRAP)
