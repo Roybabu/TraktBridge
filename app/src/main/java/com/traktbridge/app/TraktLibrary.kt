@@ -10,7 +10,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.Executors
 
-data class RemoteItem(val type:String,val id:Long,val title:String,val showId:Long=0,val season:Int=-1,val episode:Int=-1,val watchedAt:String="",val eventId:Long=0,val rating:Int=0,val progress:Double=-1.0)
+data class RemoteItem(val type:String,val id:Long,val title:String,val showId:Long=0,val season:Int=-1,val episode:Int=-1,val watchedAt:String="",val eventId:Long=0,val rating:Int=0,val progress:Double=-1.0,val runtimeMs:Long=0)
 data class RemotePage(val items:List<RemoteItem>,val page:Int,val pages:Int?,val account:String)
 data class RemoteTitleState(val watchlisted:Boolean,val rating:Int)
 data class RemoteProgress(val aired:Int,val completed:Int,val next:String)
@@ -67,12 +67,12 @@ object TraktLibrary {
         val show=o.optJSONObject("show")
         val name=if(type=="episode") show?.optString("title").orEmpty()+" — "+item.optString("title")+" • S"+item.optInt("season")+" E"+item.optInt("number") else if(type=="season") show?.optString("title").orEmpty()+" • Season "+item.optInt("number") else item.optString("title")
         if(name.isBlank()) return null
-        return RemoteItem(type,itemId,name,id(show),if(type=="season") item.optInt("number",-1) else item.optInt("season",-1),if(type=="episode") item.optInt("number",-1) else -1,o.optString("watched_at"),o.optLong("id",0),o.optInt("rating",0),o.optDouble("progress",-1.0))
+        return RemoteItem(type,itemId,name,id(show),if(type=="season") item.optInt("number",-1) else item.optInt("season",-1),if(type=="episode") item.optInt("number",-1) else -1,o.optString("watched_at"),o.optLong("id",0),o.optInt("rating",0),o.optDouble("progress",-1.0),item.optLong("runtime",0).coerceIn(0,1440)*60000L)
     }
     fun page(context:Context,kind:String,page:Int,done:(Result<RemotePage>)->Unit)=task(context,done) { token,account ->
         require(page in 1..10000)
         val endpoint=when(kind) { "history"->"/sync/history"; "watchlist"->"/sync/watchlist"; "ratings"->"/sync/ratings"; "playback"->"/sync/playback"; else->error("Unknown library") }
-        val response=request(token,endpoint+"?page="+page+"&limit=100")
+        val response=request(token,endpoint+"?page="+page+"&limit=100&extended=full")
         val a=JSONArray(response.text)
         RemotePage((0 until a.length()).mapNotNull { parse(a.getJSONObject(it)) },page,response.pages,account)
     }
@@ -169,7 +169,7 @@ object TraktLibrary {
                 for(page in 1..TraktDownloadRules.MAX_PAGES) {
                     val response=auth.authorized { token ->
                         check(valid()) { "Account changed or refresh cancelled" }
-                        request(token,kind.endpoint+"?page="+page+"&limit="+TraktDownloadRules.PAGE_SIZE)
+                        request(token,kind.endpoint+"?page="+page+"&limit="+TraktDownloadRules.PAGE_SIZE+(if(kind.endpoint=="/sync/history") "&extended=full" else ""))
                     }
                     val a=JSONArray(response.text)
                     progress("Downloading "+kind.title,page,response.pages ?: 0)
@@ -205,7 +205,7 @@ object TraktLibrary {
         require(maxPages in 1..20)
         var saved=0
         for(page in 1..maxPages) {
-            val response=request(token,"/sync/history?page="+page+"&limit=100")
+            val response=request(token,"/sync/history?page="+page+"&limit=100&extended=full")
             val a=JSONArray(response.text)
             val rows=(0 until a.length()).mapNotNull { parse(a.getJSONObject(it)) }
             saved+=cacheHistory(context,RemotePage(rows,page,response.pages,account))
@@ -216,7 +216,7 @@ object TraktLibrary {
     fun refreshRecentForAccount(context:Context,expectedAccount:String):Int=TraktAuth(context).authorized { token ->
         val current=account(token)
         require(current==expectedAccount) { "Account changed" }
-        val response=request(token,"/sync/history?page=1&limit=100")
+        val response=request(token,"/sync/history?page=1&limit=100&extended=full")
         val a=JSONArray(response.text)
         val rows=(0 until a.length()).mapNotNull { parse(a.getJSONObject(it)) }
         if(context.getSharedPreferences("tracker",Context.MODE_PRIVATE).getString("auto_refresh_account","")!=current) 0
@@ -232,7 +232,7 @@ object TraktLibrary {
         for(item in page.items) {
             if(item.eventId<=0 || item.watchedAt.isBlank() || runCatching { Instant.parse(item.watchedAt) }.isFailure) continue
             val key=AccountScope.cacheKey(page.account,item.eventId)
-            edit.putString(key,PrivateHistoryCache.seal(JSONObject().put("type",item.type).put("id",item.id).put("title",item.title).put("show",item.showId).put("season",item.season).put("episode",item.episode).put("watched",item.watchedAt).put("event",item.eventId).toString(),key)); count++
+            edit.putString(key,PrivateHistoryCache.seal(JSONObject().put("type",item.type).put("id",item.id).put("title",item.title).put("show",item.showId).put("season",item.season).put("episode",item.episode).put("watched",item.watchedAt).put("event",item.eventId).put("runtimeMs",item.runtimeMs).toString(),key)); count++
         }
         check(edit.commit())
         return count
@@ -256,7 +256,7 @@ object TraktLibrary {
             entries.mapIndexed { index,(key,value) ->
                 if(Thread.currentThread().isInterrupted) throw InterruptedException()
                 val o=JSONObject(PrivateHistoryCache.open(value as String,key))
-                val row=RemoteItem(o.getString("type"),o.getLong("id"),o.getString("title"),o.getLong("show"),o.getInt("season"),o.getInt("episode"),o.getString("watched"),o.getLong("event"))
+                val row=RemoteItem(o.getString("type"),o.getLong("id"),o.getString("title"),o.getLong("show"),o.getInt("season"),o.getInt("episode"),o.getString("watched"),o.getLong("event"),runtimeMs=o.optLong("runtimeMs",0))
                 if((index+1)%50==0 || index+1==entries.size) progress(snapshot.size+index+1,total)
                 row
             }
