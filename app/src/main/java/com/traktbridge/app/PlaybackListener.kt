@@ -48,7 +48,7 @@ class PlaybackListener : NotificationListenerService() {
     override fun onNotificationPosted(sbn: android.service.notification.StatusBarNotification?) {
         val n=sbn ?: return
         val pkg=n.packageName
-        if(!prefs.getBoolean("enabled",false) || pkg !in PlaybackDetectors.selected(prefs.getStringSet("allowed",emptySet()).orEmpty())) return
+        if(!prefs.getBoolean("enabled",false) || (pkg !in PlaybackDetectors.selected(prefs.getStringSet("allowed",emptySet()).orEmpty()) && !(pkg==HotstarPlayback.PACKAGE && HotstarProbe.enabled(this)))) return
         val extras=n.notification.extras
         if(!extras.containsKey(android.app.Notification.EXTRA_MEDIA_SESSION)) return
         wake()
@@ -106,7 +106,7 @@ class PlaybackListener : NotificationListenerService() {
             getSystemService(MediaSessionManager::class.java).getActiveSessions(ComponentName(this, PlaybackListener::class.java))
         } catch (e: SecurityException) { DebugTrace.failure("media access",e); prefs.edit().putString("sample_error","Media session access denied").apply(); history.finishAll(); return }
         val notificationControllers=runCatching { activeNotifications.orEmpty().mapNotNull { n ->
-            if(n.packageName !in allowed) return@mapNotNull null
+            if(n.packageName !in allowed && !(n.packageName==HotstarPlayback.PACKAGE && HotstarProbe.enabled(this))) return@mapNotNull null
             @Suppress("DEPRECATION") val token=n.notification.extras.getParcelable<android.media.session.MediaSession.Token>(android.app.Notification.EXTRA_MEDIA_SESSION) ?: return@mapNotNull null
             runCatching { android.media.session.MediaController(this,token) }.getOrNull()?.takeIf { it.packageName==n.packageName }
         } }.getOrDefault(emptyList())
@@ -115,6 +115,8 @@ class PlaybackListener : NotificationListenerService() {
         DebugTrace.event("sampling","all="+sessions.size+" selected="+sessions.count { it.packageName in allowed }+" allowed="+allowed.size)
         val rows = JSONArray()
         val samples = mutableListOf<WatchSample>()
+        if(HotstarProbe.enabled(this)) HotstarProbe.signals(this,active.count { it.packageName==HotstarPlayback.PACKAGE },notificationControllers.count { it.packageName==HotstarPlayback.PACKAGE },runCatching { activeNotifications.orEmpty().filter { it.packageName==HotstarPlayback.PACKAGE } }.getOrDefault(emptyList()))
+        HotstarProbe.media(this,sessions.filter { it.packageName==HotstarPlayback.PACKAGE },runCatching { activeNotifications.orEmpty().count { it.packageName==HotstarPlayback.PACKAGE } }.getOrDefault(0))
         val selected=sessions.filter { it.packageName in allowed }
         sessionIds.keys.retainAll(selected.map { it.sessionToken }.toSet())
         val keys=selected.map { sessionKey(it) }.toSet()
@@ -125,6 +127,21 @@ class PlaybackListener : NotificationListenerService() {
             val m = c.metadata
             val p = c.playbackState
             DebugTrace.event("media","selected package="+c.packageName+" metadata="+(m!=null)+" titlePresent="+(!m?.getString(MediaMetadata.METADATA_KEY_TITLE).isNullOrBlank() || !m?.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE).isNullOrBlank())+" state="+(p?.state ?: -1)+" positionMs="+(p?.position ?: -1)+" durationMs="+(m?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0))
+            if(c.packageName==HotstarPlayback.PACKAGE) {
+                val title=m?.getString(MediaMetadata.METADATA_KEY_TITLE).orEmpty()
+                val display=m?.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE).orEmpty()
+                val detail=m?.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE).orEmpty()
+                val duration=m?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L
+                val position=PlaybackPosition.sanitize(p?.position ?: -1L,duration)
+                val recognized=HotstarPlayback.recognize(title,display,detail,duration,position)
+                if(recognized==null || p==null) return@forEach
+                val phase=when(p.state) { PlaybackState.STATE_PLAYING->PlaybackPhase.PLAYING; PlaybackState.STATE_PAUSED->PlaybackPhase.PAUSED; PlaybackState.STATE_BUFFERING,PlaybackState.STATE_CONNECTING->PlaybackPhase.BUFFERING; else->PlaybackPhase.STOPPED }
+                if(phase==PlaybackPhase.STOPPED) return@forEach
+                val key=sessionKey(c)
+                samples.add(WatchSample(key,c.packageName,recognized.title,recognized.detail,duration,position,phase==PlaybackPhase.PLAYING,phase,"media",p.playbackSpeed.takeIf { it>0 } ?: 1f,PlaybackSegment.UNKNOWN))
+                rows.put(JSONObject().put("package",c.packageName).put("sessionId",key.substringAfterLast(":")).put("title",recognized.title).put("subtitle",recognized.detail).put("durationMs",duration).put("positionMs",position).put("state",p.state).put("recognitionScore",recognized.score).put("recognitionConflict",false).put("positionSource","media").put("sampledAt",System.currentTimeMillis()))
+                return@forEach
+            }
             val direct=m?.getString(MediaMetadata.METADATA_KEY_TITLE)?.takeIf { YouTubePlayback.clean(it)!=null } ?: m?.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE)?.takeIf { YouTubePlayback.clean(it)!=null }.orEmpty()
             val now=System.currentTimeMillis()
             val explicitSegment=SegmentDetection.metadata(m?.getString(MediaMetadata.METADATA_KEY_TITLE).orEmpty())
