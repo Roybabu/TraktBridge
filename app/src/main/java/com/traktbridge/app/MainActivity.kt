@@ -1445,7 +1445,7 @@ class MainActivity : ComponentActivity() {
                 if(finished) completed=true
                 result.fold({ snapshot ->
                     val y=if(restoreScrollY>0) restoreScrollY else if(renderedHistoryTab==selectedTab) contentPage.scrollY else 0
-                    val drawn=runCatching { renderHistory(snapshot.records,snapshot.groups,snapshot.unified) }
+                    val drawn=runCatching { renderHistory(snapshot.records,snapshot.groups,snapshot.unified,snapshot) }
                     if(drawn.isSuccess) {
                         renderedHistoryTab=selectedTab
                         clearHistoryProgress()
@@ -1481,7 +1481,7 @@ class MainActivity : ComponentActivity() {
         },close) }
     }
     private var unifiedRows:List<WatchRecord> = emptyList()
-    private fun renderHistory(records:List<WatchRecord>,groups:List<ViewingTitle>,unified:List<WatchRecord> = records) {
+    private fun renderHistory(records:List<WatchRecord>,groups:List<ViewingTitle>,unified:List<WatchRecord> = records,snapshot:HistorySnapshot?=null) {
         unifiedRows=unified
         val allGroups=if(tab==0) ViewingGroups.build(unified) else groups
         dashboard.removeAllViews()
@@ -1490,7 +1490,7 @@ class MainActivity : ComponentActivity() {
         when(tab) {
             0 -> renderModernHome(records,allGroups,pending)
             1 -> renderPosterLibrary(unified)
-            2 -> renderModernReview(ViewingGroups.build(unified))
+            2 -> renderModernReview(ViewingGroups.build(unified),snapshot)
             3 -> renderModernActivity(unified)
         }
     }
@@ -1563,7 +1563,12 @@ class MainActivity : ComponentActivity() {
         if(g.positionSession?.let { completionAssessment(it).suggested }==true) return "sync"
         return "progress"
     }
-    private fun renderModernReview(groups:List<ViewingTitle>) {
+    private fun renderModernReview(groups:List<ViewingTitle>,snapshot:HistorySnapshot?) {
+        val connected=auth.hasConnection()
+        val account=RemoteAccountCache.active(this)
+        val valid=connected && account!=null && snapshot?.historyAccount==account && snapshot.historyGeneration==RemoteAccountCache.generation(this)
+        val watchedKeys=if(valid) snapshot?.watchedKeys.orEmpty() else emptySet()
+        val complete=valid && snapshot?.historyComplete==true
         val items=groups.filter { it.queued || it.pending || it.rewatching }
         modernContent { ModernPageHeader(violet,"Review",items.size.toString()+" awaiting action",onMenu={ choose("Review options",listOf("Refresh","Log a watch manually","Retry approved uploads")) { i -> when(i){0->refreshHistory();1->manualLog();2->{HistorySync.schedule(this);refreshHistory()}} } }) }
         val categories=listOf("match" to "Needs match","progress" to "In progress","rewatch" to "Rewatching","sync" to "Ready / sync")
@@ -1576,12 +1581,21 @@ class MainActivity : ComponentActivity() {
             val candidate=state?.matches?.firstOrNull()?.item
             val original=groupPoster(g)
             val item=if(candidate!=null) original.copy(title=candidate.title.substringBefore(" — "),subtitle=candidate.label().substringAfter(" — ",candidate.label())+" · "+appLabel(r.source),status="Suggested match",type=if(candidate.type=="movie") "movie" else "show",id=if(candidate.type=="episode") candidate.showId else candidate.id) else original.copy(status=if(g.queued) "Awaiting sync" else if(g.rewatching) "Rewatching" else if(r.traktId>0) "Match verified" else "Needs match")
+            val matchType=candidate?.type ?: r.matchType
+            val matchId=candidate?.id ?: r.traktId
+            val watchedStatus=when {
+                matchId<=0 || matchType !in setOf("movie","episode") -> "Trakt history: identify title first"
+                !connected -> "Trakt history: not connected"
+                (matchType to matchId) in watchedKeys -> if(candidate!=null) "Suggested match: watched on Trakt" else "Watched on Trakt"
+                complete -> if(candidate!=null) "Suggested match: not watched on Trakt" else "Not watched on Trakt"
+                else -> "Trakt history: not fully synced"
+            }
             val actions=if(state!=null) suggestionActions(r,state) else emptyList()
             val primary=if(candidate!=null) actions.firstOrNull() else if(g.queued) UiAction("View sync status"){showSessions(g)} else if(r.traktId>0 && reviewBucket(g)=="sync") UiAction("Confirm watched"){showSessions(g)} else null
             val secondary=actions.firstOrNull { it.label=="No, incorrect" }
             val manual=if(r.traktId<=0) UiAction("Search manually"){identify(r)} else null
             val evidence=when { candidate!=null->state?.matches?.firstOrNull()?.reason.orEmpty()+" · Original: "+r.title; state?.status in setOf("waiting","searching")->"Searching Trakt automatically…"; state?.status=="error"->"Catalogue unavailable; will retry"; state?.status=="rejected"->"Suggestion rejected"; r.traktId<=0->"No reliable Trakt match found"; else->durationText(g.sampledMs)+" sampled · "+original.subtitle }
-            modernContent { ModernReviewCard(violet,item,evidence,primary,secondary,manual) {
+            modernContent { ModernReviewCard(violet,item,evidence,primary,secondary,manual,watchedStatus=watchedStatus) {
                 val options=titleEntry(g,true).actions.filter { it.label !in setOf("Yes, correct","No, incorrect","Search manually","Open playback app","Open player") || item.play==null }
                 val menu=options+if(r.status in setOf("pending","reviewed")) listOf(UiAction("Delete viewing record"){deleteFromReview(r)}) else emptyList()
                 modernActionDialog("Viewing record",item.title,menu.map { it.label }) { menu[it].run() }
