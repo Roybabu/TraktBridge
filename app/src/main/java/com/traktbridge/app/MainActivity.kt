@@ -496,7 +496,7 @@ class MainActivity : ComponentActivity() {
         val enabled=prefs.getBoolean("enabled",false)
         val selected=PlaybackDetectors.selected(prefs.getStringSet("allowed",emptySet()).orEmpty()).isNotEmpty()
         val connected=PlaybackListener.liveConnected()
-        settingsStatus.text=if(enabled && !selected) "Choose YouTube to start tracking" else TrackingRecovery.status(this)
+        settingsStatus.text=if(enabled && !selected) "Choose playback apps to start tracking" else TrackingRecovery.status(this)
         settingsStatus.setTextColor(if(enabled && selected && connected) violet else muted)
     }
     private fun buildSettingsCategories() {
@@ -690,12 +690,12 @@ class MainActivity : ComponentActivity() {
                 }
                 settingToggle(group ?: root,"Automatically sync completed rewatches","Only for previously confirmed movies or exact episodes after sufficient measured playback; original watched dates stay unchanged",prefs.getBoolean("auto_rewatch_sync",false)) { _,checked -> prefs.edit().putBoolean("auto_rewatch_sync",checked).apply(); RewatchAutomation.request(this) }
                 settingRow(group ?: root,"Completion review threshold",CompletionPolicy.threshold(prefs.getInt("completion_threshold",CompletionPolicy.DEFAULT_THRESHOLD)).toString()+"% • confirmation still required") { configureCompletionThreshold() }
-                heading("YouTube player identification")
+                heading("Player identification")
                 settingRow(group ?: root,"Accessibility access",if(!prefs.getBoolean("title_optin",false)) "Off • needed to distinguish Shorts and ads when metadata is incomplete" else if(prefs.getBoolean("title_connected",false)) "On • reads player control IDs only" else "Enabled in app • connect in Android settings") {
                     if(prefs.getBoolean("title_optin",false)) {
-                        choose("YouTube player identification",listOf("Open Android Accessibility settings","Turn off player identification")) { i -> if(i==0) startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) else disableTitleDetection() }
+                        choose("Player identification",listOf("Open Android Accessibility settings","Turn off player identification")) { i -> if(i==0) startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) else disableTitleDetection() }
                     } else {
-                        BridgeDialogBuilder(this).setTitle("YouTube player identification").setMessage("Allow TraktBridge to read visible YouTube player control IDs to distinguish regular videos from Shorts and ads. It does not read screen titles or capture screenshots.").setNegativeButton("Cancel",null).setPositiveButton("Agree and open settings") { _,_ -> prefs.edit().putBoolean("title_optin",true).apply(); startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }.show()
+                        BridgeDialogBuilder(this).setTitle("Player identification").setMessage("Allow TraktBridge to read visible YouTube player control IDs to distinguish regular videos from Shorts and ads. It does not read screen titles or capture screenshots.").setNegativeButton("Cancel",null).setPositiveButton("Agree and open settings") { _,_ -> prefs.edit().putBoolean("title_optin",true).apply(); startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }.show()
                     }
                 }
                 heading("Android permissions")
@@ -945,7 +945,6 @@ class MainActivity : ComponentActivity() {
                 supportRow("Diagnostics","Live recognition, recording, technical status and cleanup") {
                     supportMenu("Diagnostics",listOf(
                         Triple("Live recognition","Inspect current playback detection") { liveInspector() },
-                        Triple("JioHotstar title detection","Start a test, inspect live title candidates and copy results") { hotstarInspector() },
                         Triple("Diagnostic recorder","Open the diagnostic recording tool") { startActivity(Intent(this,DebugActivity::class.java)) },
                         Triple("Last crash report","View, copy or clear the saved crash report") { showCrashReport() },
                         Triple("Technical status","Refresh and view detailed diagnostic information") {
@@ -1048,7 +1047,7 @@ class MainActivity : ComponentActivity() {
         val body=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(12),dp(16),dp(12)) }
         fun status(label:String,enabled:Boolean) { body.addView(txt(label+": "+if(enabled) "On" else "Off",15,ink)) }
         status("Playback tracking",prefs.getBoolean("enabled",false))
-        status("YouTube player identification",prefs.getBoolean("title_optin",false))
+        status("Player identification",prefs.getBoolean("title_optin",false))
         status("Device credential lock",prefs.getBoolean("privacy_lock",false))
         status("Screenshot protection",prefs.getBoolean("secure_screen",false))
         status("Daily encrypted backup",prefs.getBoolean("daily_backup",false))
@@ -1061,7 +1060,7 @@ class MainActivity : ComponentActivity() {
         BridgeDialogBuilder(this).setTitle("Privacy dashboard").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).show()
     }
     private fun privacyMode() {
-        BridgeDialogBuilder(this).setTitle("Pause all playback tracking?").setMessage("YouTube playback sampling, player identification and device sharing stop. Existing history and already approved uploads are retained. Restart tracking manually in Settings.").setNegativeButton("Cancel",null).setPositiveButton("Pause tracking") { _,_->
+        BridgeDialogBuilder(this).setTitle("Pause all playback tracking?").setMessage("Playback sampling, player identification and device sharing stop. Existing history and already approved uploads are retained. Restart tracking manually in Settings.").setNegativeButton("Cancel",null).setPositiveButton("Pause tracking") { _,_->
             val edit=prefs.edit().putBoolean("enabled",false).putBoolean("device_sharing",false).putBoolean("device_controls",false).putBoolean("device_history",false).putBoolean("title_optin",false).remove("sessions").remove("last_nonempty_sessions")
             edit.remove("segment:"+YouTubePlayback.PACKAGE).remove("segment_time:"+YouTubePlayback.PACKAGE).apply(); YouTubePlayback.clear(); PlaybackListener.wake(); stopService(Intent(this,TrackingService::class.java)); recreate()
         }.show()
@@ -1267,7 +1266,7 @@ class MainActivity : ComponentActivity() {
             }
             body.addView(txt("Required steps",18,ink,true))
             step(0,"Notification access","Allows Android media-session detection.","Grant access") { runCatching { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }.onFailure { Toast.makeText(this,"Notification access settings unavailable.",Toast.LENGTH_LONG).show() } }
-            step(1,"Playback apps","Choose YouTube or experimental JioHotstar tracking.","Choose apps") { dialog.dismiss();chooseInstalledApps() }
+            step(1,"Playback apps","Choose the apps you want to track.","Choose apps") { dialog.dismiss();chooseInstalledApps() }
             step(2,"Start tracking","Enable background playback sampling.","Start tracking") {
                 if(TrackingRecovery.listenerGranted(this) && PlaybackDetectors.selected(prefs.getStringSet("allowed",emptySet()).orEmpty()).isNotEmpty()) {
                     prefs.edit().putBoolean("enabled",true).apply();startTracking()
@@ -1279,7 +1278,7 @@ class MainActivity : ComponentActivity() {
             step(3,"Foreground service","Keep the tracking service running.","Repair tracking") { dialog.dismiss();repairTracking() }
             step(4,"Review notifications","Receive review alerts. Local history works without them.","Notification settings") { runCatching { startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE,packageName)) } }
             step(5,"Battery settings",BatteryCompatibility.guidance(android.os.Build.MANUFACTURER),"Battery settings") { runCatching { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) } }
-            body.addView(txt("YouTube player identification may require separate Accessibility consent. Trakt sign-in is optional for local tracking.",13,muted))
+            body.addView(txt("Player identification may require separate Accessibility consent. Trakt sign-in is optional for local tracking.",13,muted))
         }
         render()
         dialog.setContentView(root)
@@ -2122,46 +2121,6 @@ class MainActivity : ComponentActivity() {
         dialog.window?.apply { setBackgroundDrawable(android.graphics.drawable.ColorDrawable(bg)); setLayout(if(wide) dp(640).coerceAtMost(resources.displayMetrics.widthPixels) else -1,-1) }
         handler.post(tick)
     }
-    private fun hotstarInspector() {
-        val panel=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(16),dp(12),dp(16),dp(12)) }
-        val body=TextView(this).apply { setTextIsSelectable(true); setTextColor(ink) }
-        val status=TextView(this).apply { setTextColor(ink) }
-        fun action(label:String,run:()->Unit) {
-            panel.addView(android.widget.Button(this).apply { text=label; setOnClickListener { run() } })
-        }
-        fun update() {
-            status.text="Capture active: "+HotstarProbe.enabled(this)+" • Tracking: "+prefs.getBoolean("enabled",false)+" • Accessibility: "+prefs.getBoolean("title_connected",false)
-            body.text=HotstarProbe.report(this)
-        }
-        panel.addView(status)
-        action("Start new 15-minute title test") {
-            if(prefs.getBoolean("privacy_lock",false)) {
-                Toast.makeText(this,"Unlock or disable privacy lock before starting diagnostics",Toast.LENGTH_LONG).show()
-            } else {
-                BridgeDialogBuilder(this).setTitle("Capture JioHotstar title candidates?").setMessage("Records media metadata, transport notifications, visible player labels, usage events and global audio activity locally. The report may contain viewing titles. No screenshots or automatic uploads.").setNegativeButton("Cancel",null).setPositiveButton("Start") { _,_-> HotstarProbe.start(this); PlaybackListener.wake(); update() }.show()
-            }
-        }
-        action("Open JioHotstar") { packageManager.getLaunchIntentForPackage(HotstarPlayback.PACKAGE)?.let { startActivity(it) } ?: Toast.makeText(this,"JioHotstar not installed",Toast.LENGTH_SHORT).show() }
-        action("Stop capture") { HotstarProbe.stop(this); update() }
-        action("Copy title detection report") {
-            getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(android.content.ClipData.newPlainText("JioHotstar diagnostic",HotstarProbe.report(this)))
-            Toast.makeText(this,"JioHotstar report copied",Toast.LENGTH_SHORT).show()
-        }
-        action("Clear report") { HotstarProbe.stop(this); HotstarProbe.clear(this); update() }
-        panel.addView(body)
-        val dialog=BridgeDialogBuilder(this).setTitle("JioHotstar title detection").setView(ScrollView(this).apply { addView(panel) }).setPositiveButton("Close",null).create()
-        val handler=android.os.Handler(android.os.Looper.getMainLooper())
-        val tick=object:Runnable {
-            override fun run() {
-                if(!dialog.isShowing || isDestroyed || isFinishing) return
-                update()
-                handler.postDelayed(this,2000)
-            }
-        }
-        dialog.setOnDismissListener { handler.removeCallbacks(tick) }
-        dialog.show()
-        handler.post(tick)
-    }
     private fun liveInspector() {
         val body=TextView(this).apply { setPadding(dp(16),dp(12),dp(16),dp(12)); setTextIsSelectable(true) }
         val dialog=BridgeDialogBuilder(this).setTitle("Live recognition inspector").setView(ScrollView(this).apply { addView(body) }).setPositiveButton("Close",null).create()
@@ -2961,7 +2920,7 @@ class MainActivity : ComponentActivity() {
         val selected=PlaybackDetectors.selected(prefs.getStringSet("allowed",emptySet()).orEmpty()).toMutableSet()
         val checked=packages.map { it in selected }.toBooleanArray()
         BridgeDialogBuilder(this).setTitle("Supported playback apps")
-            .setMultiChoiceItems(packages.map { appLabel(it)+if(it==HotstarPlayback.PACKAGE) " — experimental media tracking" else " — regular videos only" }.toTypedArray(),checked) { _,index,enabled ->
+            .setMultiChoiceItems(packages.map { appLabel(it)+if(it==HotstarPlayback.PACKAGE) " — catalogue-based tracking" else " — regular videos only" }.toTypedArray(),checked) { _,index,enabled ->
                 if(enabled) selected.add(packages[index]) else selected.remove(packages[index])
             }.setNegativeButton("Cancel",null).setPositiveButton("Save") { _,_ ->
                 prefs.edit().putStringSet("allowed",selected).apply(); PlaybackListener.wake(); recreate()
