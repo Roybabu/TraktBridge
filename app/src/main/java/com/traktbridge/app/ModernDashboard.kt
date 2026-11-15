@@ -110,16 +110,18 @@ fun ModernWatchChart(accent:Int,total:String,labels:List<String>,values:List<Lon
 }
 
 @Composable
-fun ModernReviewCard(accent:Int,item:PosterLibraryItem,evidence:String,primary:UiAction?,secondary:UiAction?,manual:UiAction?,watchedStatus:String="",onMenu:()->Unit) {
+fun ModernReviewCard(accent:Int,item:PosterLibraryItem,evidence:String,primary:UiAction?,secondary:UiAction?,manual:UiAction?,watchedStatus:String="",details:UiAction?=null,watch:UiAction?=null,onMenu:()->Unit) {
     BridgeTheme(accent) {
+        var expanded by remember(item.id,item.title,item.subtitle) { mutableStateOf(false) }
         Card(Modifier.fillMaxWidth().padding(vertical=6.dp)) {
             Column(Modifier.padding(14.dp),verticalArrangement=Arrangement.spacedBy(10.dp)) {
-                Row(verticalAlignment=Alignment.Top,horizontalArrangement=Arrangement.spacedBy(12.dp)) {
-                    PlaybackArtwork(item,Modifier.width(88.dp).aspectRatio(2f/3f))
+                Row(Modifier.fillMaxWidth().clickable { expanded=!expanded },verticalAlignment=Alignment.Top,horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+                    PlaybackArtwork(item.copy(open={expanded=!expanded},play=null),Modifier.width(88.dp).aspectRatio(2f/3f))
                     Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(4.dp)) {
                         Text(item.status,color=MaterialTheme.colorScheme.primary,style=MaterialTheme.typography.labelMedium)
                         Text(item.title,style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.SemiBold,maxLines=3,overflow=TextOverflow.Ellipsis)
                         Text(item.subtitle,style=MaterialTheme.typography.bodySmall)
+                        Text(if(expanded) "Hide quick actions  ▴" else "Show quick actions  ▾",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.primary)
                         if(watchedStatus.isNotBlank()) Text(watchedStatus,style=MaterialTheme.typography.labelMedium,color=if(watchedStatus=="Watched on Trakt") androidx.compose.ui.graphics.Color(0xFF4CAF80) else MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     IconButton(onClick=onMenu,modifier=Modifier.size(40.dp).semantics { contentDescription="Viewing record options" }) { Text("⋯",fontSize=24.sp) }
@@ -131,6 +133,15 @@ fun ModernReviewCard(accent:Int,item:PosterLibraryItem,evidence:String,primary:U
                     if(secondary!=null) OutlinedButton(onClick=secondary.run,modifier=Modifier.weight(1f)) { Text(secondary.label) }
                 }
                 if(manual!=null) TextButton(onClick=manual.run) { Text(manual.label) }
+                if(expanded) {
+                    Surface(shape=RoundedCornerShape(10.dp),color=MaterialTheme.colorScheme.surfaceVariant,modifier=Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(8.dp),verticalArrangement=Arrangement.spacedBy(4.dp)) {
+                            if(details!=null) OutlinedButton(onClick=details.run,modifier=Modifier.fillMaxWidth()) { Text(details.label) }
+                            if(watch!=null) Button(onClick=watch.run,modifier=Modifier.fillMaxWidth()) { Text(watch.label) }
+                            if(details==null && watch==null) Text("Confirm the exact match to unlock title actions.",style=MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
             }
         }
     }
