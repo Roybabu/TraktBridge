@@ -110,7 +110,7 @@ fun ModernWatchChart(accent:Int,total:String,labels:List<String>,values:List<Lon
 }
 
 @Composable
-fun ModernReviewCard(accent:Int,item:PosterLibraryItem,evidence:String,primary:UiAction?,secondary:UiAction?,manual:UiAction?,onMenu:()->Unit) {
+fun ModernReviewCard(accent:Int,item:PosterLibraryItem,evidence:String,primary:UiAction?,secondary:UiAction?,manual:UiAction?,watchedStatus:String="",onMenu:()->Unit) {
     BridgeTheme(accent) {
         Card(Modifier.fillMaxWidth().padding(vertical=6.dp)) {
             Column(Modifier.padding(14.dp),verticalArrangement=Arrangement.spacedBy(10.dp)) {
@@ -120,6 +120,7 @@ fun ModernReviewCard(accent:Int,item:PosterLibraryItem,evidence:String,primary:U
                         Text(item.status,color=MaterialTheme.colorScheme.primary,style=MaterialTheme.typography.labelMedium)
                         Text(item.title,style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.SemiBold,maxLines=3,overflow=TextOverflow.Ellipsis)
                         Text(item.subtitle,style=MaterialTheme.typography.bodySmall)
+                        if(watchedStatus.isNotBlank()) Text(watchedStatus,style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     IconButton(onClick=onMenu,modifier=Modifier.size(40.dp).semantics { contentDescription="Viewing record options" }) { Text("⋯",fontSize=24.sp) }
                 }
