@@ -1574,15 +1574,11 @@ class MainActivity : ComponentActivity() {
             androidx.compose.foundation.layout.Column {
                 ModernCategories(violet,listOf("trending" to "Trending","popular" to "Popular","airing" to "Airing now"),mode){mode=it;homeAnimeMode=it}
                 val selected=mode
-                val key="anime:"+selected
+                val key="trakt-anime:"+selected
                 val state=homeState(key)
                 androidx.compose.runtime.LaunchedEffect(key) {
                     loadHomeFeed(key) { done ->
-                        AnimeCatalogue.homeFeed(selected){result -> done(result.map { rows -> rows.map { item ->
-                            val name=item.english.ifBlank { item.romaji }
-                            val next=if(item.nextAiring>0) "E"+item.nextEpisode+" · "+java.time.Instant.ofEpochSecond(item.nextAiring).atZone(java.time.ZoneId.systemDefault()).format(java.time.format.DateTimeFormatter.ofPattern("EEE, d MMM")) else if(item.episodes>0) item.episodes.toString()+" episodes" else ""
-                            PosterLibraryItem(name,next,"","anime",item.id.toLong(),{openAnimeTitle(item)},{},showMenu=false,cover=item.cover)
-                        } }) }
+                        TraktCatalogue.animeDiscovery(selected) { result -> done(result.map { rows -> rows.map { homePoster(it) } }) }
                     }
                 }
                 androidx.compose.runtime.key(key) { HomeFeedContent(state.value) }

@@ -50,6 +50,32 @@ object TraktCatalogue {
     }
     private fun objects(array: JSONArray): List<JSONObject> = (0 until array.length()).mapNotNull { array.optJSONObject(it) }
     private fun id(o: JSONObject): Long = o.optJSONObject("ids")?.optLong("trakt", 0) ?: 0
+    /** Native Trakt anime feeds: every card already has a canonical movie/show ID. */
+    fun animeDiscovery(mode:String,done:(Result<List<CatalogueItem>>)->Unit)=discoveryRequest(done) {
+        require(mode in setOf("trending","popular","airing"))
+        val endpoint=mode
+        val types=if(mode=="airing") emptyList() else listOf("show","movie")
+        val feeds=types.map { type ->
+            val path="/"+RemoteRules.plural(type)+"/"+endpoint+"?limit=30&extended=full&genres=anime"
+            objects(get(path)).mapNotNull { row ->
+                val o=if(mode=="popular") row else row.optJSONObject(type) ?: return@mapNotNull null
+                val genres=o.optJSONArray("genres")
+                if((0 until (genres?.length() ?: 0)).none { genres?.optString(it)=="anime" }) return@mapNotNull null
+                val key=id(o);val title=o.optString("title")
+                if(key<=0 || title.isBlank()) null else CatalogueItem(type,key,title,o.optInt("year"),runtimeMinutes=o.optInt("runtime"))
+            }
+        }
+        if(mode=="airing") {
+            val start=java.time.LocalDate.now().toString()
+            objects(get("/calendars/all/shows/"+start+"/7?extended=full")).mapNotNull { row ->
+                val o=row.optJSONObject("show") ?: return@mapNotNull null
+                val genres=o.optJSONArray("genres")
+                if((0 until (genres?.length() ?: 0)).none { genres?.optString(it)=="anime" }) return@mapNotNull null
+                val key=id(o);val title=o.optString("title")
+                if(key<=0 || title.isBlank()) null else CatalogueItem("show",key,title,o.optInt("year"))
+            }.distinctBy { it.id }
+        } else (0 until (feeds.maxOfOrNull { it.size } ?: 0)).flatMap { index -> feeds.mapNotNull { it.getOrNull(index) } }.distinctBy { it.type+":"+it.id }
+    }
     fun animeMatches(item:AnimeResult,done:(Result<List<CatalogueItem>>)->Unit)=discoveryRequest(done) {
         val aliases=listOf(item.english,item.romaji,item.native).filter { it.isNotBlank() && it!="null" }.distinctBy { RecognitionEngine.normalized(it) }.take(3)
         val types=when(item.format) { "MOVIE"->listOf("movie"); "TV","TV_SHORT","ONA","OVA"->listOf("show"); else->listOf("show","movie") }
