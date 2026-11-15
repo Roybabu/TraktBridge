@@ -1,6 +1,8 @@
 package com.traktbridge.app
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
@@ -84,8 +86,8 @@ fun PlaybackArtwork(item:PosterLibraryItem,modifier:Modifier) {
 @Composable
 fun PosterLibraryShelf(accent:Int,items:List<PosterLibraryItem>) {
     BridgeTheme(accent) {
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(12.dp)) {
-            items.forEach { item ->
+        LazyRow(Modifier.fillMaxWidth().height(320.dp),horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+            items(items) { item ->
                 Column(Modifier.width(148.dp),verticalArrangement=Arrangement.spacedBy(4.dp)) {
                     PlaybackArtwork(item,Modifier.fillMaxWidth().aspectRatio(2f/3f))
                     Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {

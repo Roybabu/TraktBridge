@@ -17,6 +17,7 @@ data class CatalogueSeason(val number: Int, val title: String)
 
 object TraktCatalogue {
     private val worker = Executors.newSingleThreadExecutor()
+    private val discoveryWorker = Executors.newFixedThreadPool(2)
     private val main = Handler(Looper.getMainLooper())
     private class ReadFailure(val status:Int,val retryAfter:Long?):Exception("Trakt catalogue HTTP "+status)
     private fun get(path:String):JSONArray {
@@ -43,6 +44,9 @@ object TraktCatalogue {
     }
     private fun <T> request(done: (Result<T>) -> Unit, work: () -> T) {
         worker.execute { val result = runCatching(work); main.post { done(result) } }
+    }
+    private fun <T> discoveryRequest(done:(Result<T>)->Unit,work:()->T) {
+        discoveryWorker.execute { val result=runCatching(work); main.post { done(result) } }
     }
     private fun objects(array: JSONArray): List<JSONObject> = (0 until array.length()).mapNotNull { array.optJSONObject(it) }
     private fun id(o: JSONObject): Long = o.optJSONObject("ids")?.optLong("trakt", 0) ?: 0
@@ -179,7 +183,7 @@ object TraktCatalogue {
             if(key<=0 || title.isBlank()) null else CatalogueItem(type,key,title,o.optInt("year"))
         }.distinctBy { it.id }
     }
-    fun discover(type:String,mode:String,done:(Result<List<CatalogueItem>>)->Unit)=request(done) {
+    fun discover(type:String,mode:String,done:(Result<List<CatalogueItem>>)->Unit)=discoveryRequest(done) {
         require(type in setOf("movie","show") && mode in setOf("trending","popular"))
         objects(get("/"+RemoteRules.plural(type)+"/"+mode+"?limit=30&extended=full")).mapNotNull { row ->
             val o=if(mode=="trending") row.optJSONObject(type) ?: return@mapNotNull null else row
@@ -187,7 +191,7 @@ object TraktCatalogue {
             if(id<=0 || title.isBlank()) null else CatalogueItem(type,id,title,o.optInt("year"),runtimeMinutes=o.optInt("runtime"))
         }.distinctBy { it.id }
     }
-    fun moodDiscovery(type:String,mood:DiscoveryMood,done:(Result<List<DiscoveryItem>>)->Unit)=request(done) {
+    fun moodDiscovery(type:String,mood:DiscoveryMood,done:(Result<List<DiscoveryItem>>)->Unit)=discoveryRequest(done) {
         require(type in setOf("movie","show") && mood in DiscoveryEngine.moods)
         val suffix=if(mood.genres.isEmpty()) "" else "&genres="+URLEncoder.encode(mood.genres.sorted().joinToString(","),"UTF-8")
         val rows=objects(get("/"+RemoteRules.plural(type)+"/popular?limit=50&extended=full"+suffix))
