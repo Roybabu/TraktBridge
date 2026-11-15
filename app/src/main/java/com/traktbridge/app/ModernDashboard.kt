@@ -120,7 +120,7 @@ fun ModernReviewCard(accent:Int,item:PosterLibraryItem,evidence:String,primary:U
                         Text(item.status,color=MaterialTheme.colorScheme.primary,style=MaterialTheme.typography.labelMedium)
                         Text(item.title,style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.SemiBold,maxLines=3,overflow=TextOverflow.Ellipsis)
                         Text(item.subtitle,style=MaterialTheme.typography.bodySmall)
-                        if(watchedStatus.isNotBlank()) Text(watchedStatus,style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                        if(watchedStatus.isNotBlank()) Text(watchedStatus,style=MaterialTheme.typography.labelMedium,color=if(watchedStatus=="Watched on Trakt") androidx.compose.ui.graphics.Color(0xFF4CAF80) else MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     IconButton(onClick=onMenu,modifier=Modifier.size(40.dp).semantics { contentDescription="Viewing record options" }) { Text("⋯",fontSize=24.sp) }
                 }
