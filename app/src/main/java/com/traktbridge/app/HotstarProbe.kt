@@ -45,7 +45,7 @@ object HotstarProbe {
         append(c,"ground truth record="+fingerprint(r.id)+" title="+safe(item.title)+" id="+item.id+" showId="+item.showId)
     }
     private fun accuracyReport():String = "\nReview-confirmed resolution benchmark (one result per record and method)\n"+accuracy.entries.joinToString("\n") { (source,a) -> "$source: tested=${a.tested} correctSeries=${a.series} exact=${a.exact} wrong=${a.wrong} noResult=${a.missing} meanLatencyMs=${a.latency/maxOf(1,a.tested)}" }+"\nPending benchmark records: "+predictions.size+"\n"
-    private fun benchmark():String = "Source evidence coverage (not identification accuracy)\n"+counts.entries.joinToString("\n") { (name,count) -> "$name: ${count.evidence}/${count.attempts} (${100*count.evidence/maxOf(1,count.attempts)}%)" }+"\nShare/deep links, provider catalogue and OCR: not measured by this probe. Accessibility measures evidence only.\n"+accuracyReport()
+    private fun benchmark():String = "Source evidence coverage (not identification accuracy)\n"+counts.entries.joinToString("\n") { (name,count) -> "$name: ${count.evidence}/${count.attempts} (${100*count.evidence/maxOf(1,count.attempts)}%)" }+"\nShare/deep links, provider catalogue and OCR: not measured by this probe. Accessibility captures visible headings, labels and screen context; evidence is not verified identity.\n"+accuracyReport()
     private data class Sample(val title:String,val duration:Long,val position:Long,val time:Long,val state:Int,val speed:Float)
     private val previous=mutableMapOf<Int,Sample>()
     private fun prefs(c:Context)=c.getSharedPreferences("tracker",Context.MODE_PRIVATE)
@@ -121,7 +121,7 @@ object HotstarProbe {
         val now=android.os.SystemClock.elapsedRealtime()
         if(last!=0L && now-last<2000) return
         last=now
-        append(c,"media sessions="+controllers.size+" notifications="+notifications)
+        append(c,"media sessions="+controllers.size+" notifications="+notifications+" accessibilityConnected="+prefs(c).getBoolean("title_connected",false))
         val activeTokens=controllers.map { it.sessionToken.hashCode() }.toSet()
         previous.keys.retainAll(activeTokens)
         controllers.take(4).forEach { controller ->
@@ -165,16 +165,24 @@ object HotstarProbe {
             append(c,"identity session="+token+" mediaIdHash="+fingerprint(m?.getString(MediaMetadata.METADATA_KEY_MEDIA_ID).orEmpty())+" uri="+uriSummary(m?.getString(MediaMetadata.METADATA_KEY_MEDIA_URI).orEmpty()))
             append(c,"extras controller="+extraSummary(controller.extras)+" playback="+extraSummary(p?.extras))
             append(c,"playback speed="+speed+" movement="+movement+" description="+safe(m?.getString(MediaMetadata.METADATA_KEY_DISPLAY_DESCRIPTION).orEmpty()))
+            val additional=m?.keySet().orEmpty().filter { key -> key.substringAfterLast('.').uppercase(java.util.Locale.ROOT) in setOf("ALBUM","ARTIST","AUTHOR","WRITER","COMPOSER","GENRE","TITLE","DISPLAY_TITLE","DISPLAY_SUBTITLE","DISPLAY_DESCRIPTION") }.mapNotNull { key -> runCatching { safe(m?.getString(key).orEmpty()) }.getOrNull()?.takeIf { it.isNotBlank() }?.let { key.substringAfterLast('.')+"="+it } }
+            observe("MediaSession additional text",additional.any { !it.startsWith("TITLE=") })
+            append(c,"additional metadata="+additional.joinToString(" | "))
             append(c,"metadata keys="+m?.keySet()?.filter { it.startsWith("android.media.metadata.") }?.sorted()?.joinToString(",")+" mediaIdPresent="+(!m?.getString(MediaMetadata.METADATA_KEY_MEDIA_ID).isNullOrBlank())+" mediaUriPresent="+(!m?.getString(MediaMetadata.METADATA_KEY_MEDIA_URI).isNullOrBlank())+" extrasPresent="+(controller.extras!=null))
             append(c,"state="+(p?.state ?: -1)+" positionMs="+position+" durationMs="+duration+" title="+safe(title)+" displayTitle="+safe(display)+" subtitle="+safe(detail)+" decision="+(if(result!=null) "accepted: "+safe(result.title) else "rejected: missing, conflicting or invalid playback evidence"))
         }
     }
-    @Synchronized fun screen(c:Context,ids:Set<String>,labels:Set<String> = emptySet(),eventType:Int = -1) {
+    @Synchronized fun screen(c:Context,ids:Set<String>,labels:Set<String> = emptySet(),eventType:Int = -1,visible:Set<String> = emptySet(),status:String = "ok") {
         if(!enabled(c)) return
         val now=android.os.SystemClock.elapsedRealtime()
         if(lastScreen!=0L && now-lastScreen<2000) return
         lastScreen=now
         observe("Accessibility callback labels",labels.any { safe(it).isNotBlank() })
+        val entries=visible.mapNotNull { raw -> val parts=raw.split("|",limit=3); if(parts.size!=3) null else safe(parts[2]).takeIf { it.isNotBlank() }?.let { parts[0]+"|"+parts[1].take(80)+"|"+it } }
+        observe("Accessibility visible text",entries.isNotEmpty())
+        observe("Accessibility headings",entries.any { it.startsWith("heading|") })
+        observe("Accessibility selected labels",entries.any { it.startsWith("selected|") })
+        append(c,"accessibility scan status="+status+" visible="+entries.size+" labels="+entries.take(60).joinToString(" ; "))
         append(c,"accessibility eventType="+eventType+" visible control IDs="+ids.take(80).joinToString(",")+" candidate player labels="+labels.map(::safe).filter { it.isNotBlank() }.take(12).joinToString(" | "))
     }
 }
