@@ -169,6 +169,16 @@ object TraktCatalogue {
         check(batches.isNotEmpty()) { "Recommendations unavailable. Try again later." }
         batches
     }
+    fun weeklyReleases(type:String,start:String,done:(Result<List<CatalogueItem>>)->Unit)=request(done) {
+        require(type in setOf("movie","show"))
+        java.time.LocalDate.parse(start)
+        val endpoint=if(type=="movie") "movies" else "shows/new"
+        objects(get("/calendars/all/"+endpoint+"/"+start+"/7")).mapNotNull { row ->
+            val o=row.optJSONObject(type) ?: return@mapNotNull null
+            val key=id(o); val title=o.optString("title")
+            if(key<=0 || title.isBlank()) null else CatalogueItem(type,key,title,o.optInt("year"))
+        }.distinctBy { it.id }
+    }
     fun discover(type:String,mode:String,done:(Result<List<CatalogueItem>>)->Unit)=request(done) {
         require(type in setOf("movie","show") && mode in setOf("trending","popular"))
         objects(get("/"+RemoteRules.plural(type)+"/"+mode+"?limit=30&extended=full")).mapNotNull { row ->
