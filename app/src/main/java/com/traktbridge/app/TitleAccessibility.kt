@@ -20,17 +20,22 @@ class TitleAccessibility: AccessibilityService() {
         if(!hotstar && (!prefs.getBoolean("enabled",false) || !prefs.getBoolean("title_optin",false) || pkg!=YouTubePlayback.PACKAGE || pkg !in PlaybackDetectors.selected(prefs.getStringSet("allowed",emptySet()).orEmpty()))) return
         val now=System.currentTimeMillis()
         if(now-lastScan in 0..249) return
-        val root=rootInActiveWindow ?: return
+        val root=rootInActiveWindow ?: run { if(hotstar) HotstarProbe.screen(this,emptySet(),emptySet(),event.eventType,emptySet(),"no-root"); return }
         if(root.packageName?.toString()!=pkg) return
         lastScan=now
         val ids=linkedSetOf<String>()
         val labels=linkedSetOf<String>()
+        val visible=linkedSetOf<String>()
         var count=0
         fun walk(node:AccessibilityNodeInfo,depth:Int) {
             if(depth>20 || ++count>350 || node.packageName?.toString()!=pkg || node.isPassword || node.isEditable) return
             if(node.isVisibleToUser) {
                 val id=PlayerRules.id(node.viewIdResourceName.orEmpty())
                 if(id.matches(Regex("[a-z0-9_]{1,80}"))) ids.add(id)
+                if(hotstar) {
+                    val role=if(node.isHeading) "heading" else if(node.isSelected) "selected" else if(node.isClickable) "clickable" else "text"
+                    listOf(node.text,node.contentDescription).forEach { value -> value?.toString()?.take(160)?.let { if(visible.size<80) visible.add(role+"|"+id+"|"+it) } }
+                }
                 if(hotstar && (node.isHeading || id.matches(Regex(".*(player|playback|video|episode|season|content|series|show|detail|header)_(title|subtitle|name|description).*")))) {
                     node.text?.toString()?.take(160)?.let { labels.add(it) }
                     node.contentDescription?.toString()?.take(160)?.let { labels.add(it) }
@@ -39,7 +44,7 @@ class TitleAccessibility: AccessibilityService() {
             for(i in 0 until node.childCount) node.getChild(i)?.let { walk(it,depth+1) }
         }
         walk(root,0)
-        if(hotstar) { HotstarProbe.screen(this,ids,labels,event.eventType); return }
+        if(hotstar) { HotstarProbe.screen(this,ids,labels,event.eventType,visible,"nodes="+count); return }
         val mode=YouTubePlayback.mode(ids,PlaybackSegment.UNKNOWN)
         val segment=if(mode==YouTubePlayback.Mode.ADVERTISEMENT) PlaybackSegment.ADVERTISEMENT else PlaybackSegment.UNKNOWN
         prefs.edit().putString("segment:"+pkg,segment.name).putLong("segment_time:"+pkg,now).apply()
