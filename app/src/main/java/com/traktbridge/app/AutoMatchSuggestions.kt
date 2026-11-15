@@ -18,7 +18,7 @@ object AutoMatchSuggestions {
         if(k in running) return State("searching")
         val o=runCatching { JSONObject(store(context).getString(k,"").orEmpty()) }.getOrNull() ?: return State("waiting")
         if(o.optString("fingerprint")!=fingerprint(r)) return State("waiting")
-        if(o.optString("status")!="rejected" && o.optInt("policyVersion")!=5) return State("waiting")
+        if(o.optString("status")!="rejected" && o.optInt("policyVersion")!=6) return State("waiting")
         val state=o.optString("status")
         if(state=="ready" && (o.optJSONArray("matches")?.length() ?: 0)==0) return State("waiting")
         if(state=="error" && System.currentTimeMillis()-o.optLong("at")>=120000) return State("waiting")
@@ -40,7 +40,7 @@ object AutoMatchSuggestions {
         }) }
         val edit=prefs.edit()
         if(prefs.all.size>=500) prefs.all.entries.sortedBy { runCatching { JSONObject(it.value.toString()).optLong("at") }.getOrDefault(0L) }.take(50).forEach { edit.remove(it.key) }
-        edit.putString(key(r),JSONObject().put("policyVersion",5).put("fingerprint",fingerprint(r)).put("at",System.currentTimeMillis()).put("status",status).put("matches",array).toString()).apply()
+        edit.putString(key(r),JSONObject().put("policyVersion",6).put("fingerprint",fingerprint(r)).put("at",System.currentTimeMillis()).put("status",status).put("matches",array).toString()).apply()
     }
     private fun feedback(context:Context)=context.getSharedPreferences("catalogue_feedback",Context.MODE_PRIVATE)
     private fun identity(r:WatchRecord):String = android.util.Base64.encodeToString(java.security.MessageDigest.getInstance("SHA-256").digest((r.source+"|"+RecognitionEngine.normalized(r.title)+"|"+RecognitionEngine.normalized(r.subtitle)).toByteArray(Charsets.UTF_8)),android.util.Base64.NO_WRAP)
@@ -57,7 +57,6 @@ object AutoMatchSuggestions {
         write(context,r,if(remaining.isEmpty()) "rejected" else "ready",remaining)
     }
     fun confirmed(context:Context,r:WatchRecord,item:CatalogueItem) {
-        HotstarProbe.confirmed(context,r,item)
         val p=feedback(context); val k="reject:"+identity(r)
         p.edit().putStringSet(k,rejected(context,r)-candidateKey(item)).apply()
     }
@@ -79,16 +78,12 @@ object AutoMatchSuggestions {
         val app=context.applicationContext
         val record=records.firstOrNull { eligible(it) && read(app,it).status=="waiting" } ?: return
         val learned=runCatching { WatchHistory(app).use { it.learned(record) } }.getOrNull()
-        HotstarProbe.prediction(app,record,"Exact learned mapping",learned)
         if(learned!=null && candidateKey(learned) !in rejected(app,record)) {
             runCatching { WatchHistory(app).use { it.match(record.id,learned,false) } }; return
         }
         val k=key(record)
         running.add(k)
-        val hotstar=runCatching { WatchHistory(app).use { it.hotstarSeries(record) } }.getOrNull()
-        HotstarProbe.prediction(app,record,"Learned URI parent",hotstar)
-        val confirmed=if(hotstar!=null) listOf(hotstar) else confirmedSeries(record,records)
-        val started=android.os.SystemClock.elapsedRealtime()
+        val confirmed=if(record.source==HotstarPlayback.PACKAGE) emptyList() else confirmedSeries(record,records)
         TraktCatalogue.suggest(record,confirmed) { result ->
             running.remove(k)
             val current=runCatching { WatchHistory(app).use { it.record(k) } }.getOrNull()
@@ -96,10 +91,9 @@ object AutoMatchSuggestions {
                 result.fold({ matches ->
                     val denied=rejected(app,current)
                     val accepted=matches.filter { candidateKey(it.item) !in denied }
-                    HotstarProbe.prediction(app,current,if(hotstar!=null) "Trakt with learned URI parent" else "Trakt catalogue",accepted.firstOrNull()?.item,android.os.SystemClock.elapsedRealtime()-started)
                     // A learned parent series improves suggestions, but never confirms a new episode.
                     write(app,current,if(accepted.isEmpty()) "none" else "ready",accepted)
-                },{ HotstarProbe.prediction(app,current,if(hotstar!=null) "Trakt with learned URI parent" else "Trakt catalogue",null,android.os.SystemClock.elapsedRealtime()-started); write(app,current,"error") })
+                },{ write(app,current,"error") })
             }
         }
     }
