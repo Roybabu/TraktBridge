@@ -135,3 +135,44 @@ fun ModernReviewCard(accent:Int,item:PosterLibraryItem,evidence:String,primary:U
         }
     }
 }
+
+@Composable
+fun ModernHomeMessage(accent:Int,message:String) {
+    BridgeTheme(accent) { Text(message,Modifier.fillMaxWidth().padding(vertical=12.dp),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant) }
+}
+@Composable
+fun ModernHomeWeek(accent:Int,range:String,previous:()->Unit,next:()->Unit) {
+    BridgeTheme(accent) {
+        Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
+            TextButton(onClick=previous) { Text("‹") }
+            Column(Modifier.weight(1f),horizontalAlignment=Alignment.CenterHorizontally) {
+                Text("Weekly releases",style=MaterialTheme.typography.titleMedium,fontWeight=FontWeight.SemiBold)
+                Text(range,style=MaterialTheme.typography.bodySmall)
+            }
+            TextButton(onClick=next) { Text("›") }
+        }
+    }
+}
+@Composable
+fun ModernHomeEpisodes(accent:Int,rows:List<UpcomingEpisode>?) {
+    BridgeTheme(accent) {
+        Column(Modifier.fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(6.dp)) {
+            if(rows==null) Text("Loading upcoming episodes…",style=MaterialTheme.typography.bodySmall)
+            else if(rows.isEmpty()) Text("No upcoming episodes available.",style=MaterialTheme.typography.bodySmall)
+            else rows.take(12).forEach { e ->
+                val date=runCatching { java.time.Instant.parse(e.airs).atZone(java.time.ZoneId.systemDefault()).toLocalDate() }.getOrNull()
+                val today=java.time.LocalDate.now()
+                val label=when(date) { today->"Today"; today.plusDays(1)->"Tomorrow"; else->date?.format(java.time.format.DateTimeFormatter.ofPattern("EEE, d MMM")).orEmpty() }
+                Card(Modifier.fillMaxWidth()) {
+                    Row(Modifier.padding(12.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+                        Column(Modifier.weight(1f)) {
+                            Text(e.show,style=MaterialTheme.typography.titleSmall,maxLines=2)
+                            Text("S"+e.season+" E"+e.episode,style=MaterialTheme.typography.bodySmall)
+                        }
+                        Text(label,color=MaterialTheme.colorScheme.primary,style=MaterialTheme.typography.labelMedium)
+                    }
+                }
+            }
+        }
+    }
+}
