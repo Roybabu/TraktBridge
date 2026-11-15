@@ -1566,7 +1566,7 @@ class MainActivity : ComponentActivity() {
     private fun renderModernReview(groups:List<ViewingTitle>,snapshot:HistorySnapshot?) {
         val connected=auth.hasConnection()
         val account=RemoteAccountCache.active(this)
-        val valid=connected && account!=null && snapshot?.historyAccount==account && snapshot.historyGeneration==RemoteAccountCache.generation(this)
+        val valid=connected && account!=null && snapshot!=null && snapshot.historyAccount==account && snapshot.historyGeneration==RemoteAccountCache.generation(this)
         val watchedKeys=if(valid) snapshot?.watchedKeys.orEmpty() else emptySet()
         val complete=valid && snapshot?.historyComplete==true
         val items=groups.filter { it.queued || it.pending || it.rewatching }
