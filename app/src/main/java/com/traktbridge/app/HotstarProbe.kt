@@ -45,7 +45,7 @@ object HotstarProbe {
         append(c,"ground truth record="+fingerprint(r.id)+" title="+safe(item.title)+" id="+item.id+" showId="+item.showId)
     }
     private fun accuracyReport():String = "\nReview-confirmed resolution benchmark (one result per record and method)\n"+accuracy.entries.joinToString("\n") { (source,a) -> "$source: tested=${a.tested} correctSeries=${a.series} exact=${a.exact} wrong=${a.wrong} noResult=${a.missing} meanLatencyMs=${a.latency/maxOf(1,a.tested)}" }+"\nPending benchmark records: "+predictions.size+"\n"
-    private fun benchmark():String = "Source evidence coverage (not identification accuracy)\n"+counts.entries.joinToString("\n") { (name,count) -> "$name: ${count.evidence}/${count.attempts} (${100*count.evidence/maxOf(1,count.attempts)}%)" }+"\nShare/deep links, provider catalogue and OCR: not measured by this probe. Accessibility captures visible headings, labels and screen context; evidence is not verified identity.\n"+accuracyReport()
+    private fun benchmark():String = "Source evidence coverage (not identification accuracy)\n"+counts.entries.joinToString("\n") { (name,count) -> "$name: ${count.evidence}/${count.attempts} (${100*count.evidence/maxOf(1,count.attempts)}%)" }+"\nPublic catalogue ID lookup is diagnostic-only; share/deep links and OCR are not measured. Accessibility captures visible headings, labels and screen context; evidence is not verified identity.\n"+accuracyReport()
     private data class Sample(val title:String,val duration:Long,val position:Long,val time:Long,val state:Int,val speed:Float)
     private val previous=mutableMapOf<Int,Sample>()
     private fun prefs(c:Context)=c.getSharedPreferences("tracker",Context.MODE_PRIVATE)
@@ -134,6 +134,13 @@ object HotstarProbe {
             val result=HotstarPlayback.recognize(title,display,detail,duration,position)
             val uri=m?.getString(MediaMetadata.METADATA_KEY_MEDIA_URI).orEmpty()
             val episode=RecognitionEngine.episodeOf(title)
+            if(statePlaying(p?.state) && result!=null) {
+                val started=android.os.SystemClock.elapsedRealtime()
+                val lookup=runCatching { HotstarPublicCatalogue.lookup(c,uri,episode!=null) }
+                val matches=lookup.getOrDefault(emptyList())
+                observe("Public catalogue URI ID match",matches.size==1)
+                append(c,"public catalogue lookup status="+(if(lookup.isFailure) "error" else if(matches.isEmpty()) "no-match" else if(matches.size==1) "candidate" else "ambiguous")+" matches="+matches.size+" titles="+matches.take(5).joinToString(" | ") { safe(it.title)+" kind="+it.kind+" idHash="+fingerprint(it.id) }+" latencyMs="+(android.os.SystemClock.elapsedRealtime()-started))
+            }
             val contentId=m?.getString("androidx.media.MediaMetadatCompat.METADATA_KEY_CONTENT_ID").orEmpty()
             val seriesId=m?.getString("androidx.media.MediaMetadatCompat.METADATA_KEY_SERIES_CONTENT_ID").orEmpty()
             val publicId=runCatching { val u=android.net.Uri.parse(uri); if(u.scheme=="https" && u.host in setOf("www.hotstar.com","hotstar.com","www.jiohotstar.com","jiohotstar.com")) u.pathSegments.lastOrNull()?.takeIf { it.matches(Regex("[0-9]{10}")) }.orEmpty() else "" }.getOrDefault("")
