@@ -50,6 +50,21 @@ object TraktCatalogue {
     }
     private fun objects(array: JSONArray): List<JSONObject> = (0 until array.length()).mapNotNull { array.optJSONObject(it) }
     private fun id(o: JSONObject): Long = o.optJSONObject("ids")?.optLong("trakt", 0) ?: 0
+    fun animeMatches(item:AnimeResult,done:(Result<List<CatalogueItem>>)->Unit)=discoveryRequest(done) {
+        val aliases=listOf(item.english,item.romaji,item.native).filter { it.isNotBlank() && it!="null" }.distinctBy { RecognitionEngine.normalized(it) }.take(3)
+        val types=when(item.format) { "MOVIE"->listOf("movie"); "TV","TV_SHORT","ONA","OVA"->listOf("show"); else->listOf("show","movie") }
+        val rows=mutableListOf<CatalogueItem>()
+        for(type in types) for(alias in aliases) {
+            val q=URLEncoder.encode(alias,"UTF-8")
+            rows.addAll(objects(get("/search/"+type+"?query="+q+"&limit=15&extended=full")).mapNotNull { row ->
+                val o=row.optJSONObject(type) ?: return@mapNotNull null
+                val key=id(o);val title=o.optString("title")
+                if(key<=0 || title.isBlank()) null else CatalogueItem(type,key,title,o.optInt("year"),runtimeMinutes=o.optInt("runtime"))
+            })
+        }
+        val normalized=aliases.map { RecognitionEngine.normalized(it) }.toSet()
+        rows.distinctBy { it.type+":"+it.id }.sortedWith(compareByDescending<CatalogueItem> { RecognitionEngine.normalized(it.title) in normalized }.thenByDescending { item.year>0 && it.year==item.year }).take(20)
+    }
     fun search(query: String, type: String, done: (Result<List<CatalogueItem>>) -> Unit) = request(done) {
         require(type == "movie" || type == "show")
         require(query.isNotBlank())

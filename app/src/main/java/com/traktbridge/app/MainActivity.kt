@@ -1568,6 +1568,26 @@ class MainActivity : ComponentActivity() {
                 TraktCatalogue.weeklyReleases(type,monday.toString()) { result -> done(result.map { rows -> rows.map { homePoster(it) } }) }
             }
         }
+        section(dashboard,"Anime")
+        modernContent {
+            var mode by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(homeAnimeMode) }
+            androidx.compose.foundation.layout.Column {
+                ModernCategories(violet,listOf("trending" to "Trending","popular" to "Popular","airing" to "Airing now"),mode){mode=it;homeAnimeMode=it}
+                val selected=mode
+                val key="anime:"+selected
+                val state=homeState(key)
+                androidx.compose.runtime.LaunchedEffect(key) {
+                    loadHomeFeed(key) { done ->
+                        AnimeCatalogue.homeFeed(selected){result -> done(result.map { rows -> rows.map { item ->
+                            val name=item.english.ifBlank { item.romaji }
+                            val next=if(item.nextAiring>0) "E"+item.nextEpisode+" · "+java.time.Instant.ofEpochSecond(item.nextAiring).atZone(java.time.ZoneId.systemDefault()).format(java.time.format.DateTimeFormatter.ofPattern("EEE, d MMM")) else if(item.episodes>0) item.episodes.toString()+" episodes" else ""
+                            PosterLibraryItem(name,next,"","anime",item.id.toLong(),{openAnimeTitle(item)},{},showMenu=false,cover=item.cover)
+                        } }) }
+                    }
+                }
+                androidx.compose.runtime.key(key) { HomeFeedContent(state.value) }
+            }
+        }
         val excluded=(if(prefs.getBoolean("explore_exclude_watched",true)) RecommendationEngine.seen(records) else emptySet())+personalStore("recommendation_hidden").all.keys
         val seeds=RecommendationEngine.seeds(records,System.currentTimeMillis())
         if(!prefs.getBoolean("explore_personalized",false)) {
@@ -1619,16 +1639,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-        section(dashboard,"Anime")
-        modernContent { ModernCategories(violet,listOf("trending" to "Trending","popular" to "Popular","airing" to "Airing now"),homeAnimeMode){homeAnimeMode=it;refreshHomeFeeds()} }
-        val mode=homeAnimeMode
-        homeShelf(if(mode=="airing") "Currently airing anime" else "Anime recommendations","anime:"+mode) { done ->
-            AnimeCatalogue.homeFeed(mode){result -> done(result.map { rows -> rows.map { item ->
-                val name=item.english.ifBlank { item.romaji }
-                val next=if(item.nextAiring>0) "E"+item.nextEpisode+" · "+java.time.Instant.ofEpochSecond(item.nextAiring).atZone(java.time.ZoneId.systemDefault()).format(java.time.format.DateTimeFormatter.ofPattern("EEE, d MMM")) else if(item.episodes>0) item.episodes.toString()+" episodes" else ""
-                PosterLibraryItem(name,next,"","anime",item.id.toLong(),{editAnimeProgress(item.id,name,item.episodes)},{},showMenu=false,cover=item.cover)
-            } }) }
-        }
+
     }
     private val homeEpisodeFeeds=mutableMapOf<String,List<UpcomingEpisode>>()
     private val homeEpisodeStates=mutableMapOf<String,androidx.compose.runtime.MutableState<List<UpcomingEpisode>?>>()
@@ -2262,6 +2273,21 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+    private fun openAnimeTitle(item:AnimeResult) {
+        val name=item.english.ifBlank { item.romaji }
+        lookup("Finding anime on Trakt",{ done -> TraktCatalogue.animeMatches(item,done) }) { rows:List<CatalogueItem> ->
+            val aliases=listOf(item.english,item.romaji,item.native).filter { it.isNotBlank() }.map { RecognitionEngine.normalized(it) }.toSet()
+            val exact=rows.filter { RecognitionEngine.normalized(it.title) in aliases && item.year>0 && it.year==item.year }
+            if(exact.size==1) {
+                val match=exact.single()
+                titleDetails(match.type,match.id,match.title)
+            } else if(rows.isNotEmpty()) {
+                choose("Choose matching anime on Trakt",rows.map { it.label() }) { i ->
+                    val match=rows[i];titleDetails(match.type,match.id,match.title)
+                }
+            } else BridgeDialogBuilder(this).setTitle(name).setMessage("No matching Trakt title found. This anime may be listed under another name or as a season of a series.").setNegativeButton("Close",null).setPositiveButton("Open AniList"){_,_->startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://anilist.co/anime/"+item.id)))}.show()
+        }
+    }
     private fun editAnimeProgress(id:Int,title:String,episodes:Int) {
         if(id<=0) return
         val store=personalStore("anime_progress")
@@ -2287,7 +2313,7 @@ class MainActivity : ComponentActivity() {
             close()
             lookup("Searching anime",{ done -> AnimeCatalogue.search(query,done) }) { rows:List<AnimeResult> ->
                 modernDetailWindow { back -> ModernAnimeResults(violet,rows,prefs.getBoolean("hide_spoilers",true),{ item ->
-                    back();editAnimeProgress(item.id,item.english.ifBlank { item.romaji },item.episodes)
+                    back();openAnimeTitle(item)
                 },{ item -> startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://anilist.co/anime/"+item.id))) },back) }
             }
         },{close();animeLocalProgress()},{close();publicAnimeList()},close) }
