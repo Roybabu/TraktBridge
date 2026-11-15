@@ -1650,12 +1650,16 @@ class MainActivity : ComponentActivity() {
                 else -> "Trakt history: not fully synced"
             }
             val actions=if(state!=null) suggestionActions(r,state) else emptyList()
-            val primary=if(candidate!=null) actions.firstOrNull() else if(g.queued) UiAction("View sync status"){showSessions(g)} else if(r.traktId>0 && reviewBucket(g)=="sync") UiAction("Confirm watched"){showSessions(g)} else null
+            val primary=if(candidate!=null) actions.firstOrNull() else if(g.queued) UiAction("View sync status"){showSessions(g)} else null
             val secondary=actions.firstOrNull { it.label=="No, incorrect" }
             val manual=if(r.traktId<=0) UiAction("Search manually"){identify(r)} else null
             val evidence=when { candidate!=null->state?.matches?.firstOrNull()?.reason.orEmpty()+" · Original: "+r.title; state?.status in setOf("waiting","searching")->"Searching Trakt automatically…"; state?.status=="error"->"Catalogue unavailable; will retry"; state?.status=="rejected"->"Suggestion rejected"; r.traktId<=0->"No reliable Trakt match found"; else->durationText(g.sampledMs)+" sampled · "+original.subtitle }
-            modernContent { ModernReviewCard(violet,item,evidence,primary,secondary,manual,watchedStatus=watchedStatus) {
-                val options=titleEntry(g,true).actions.filter { it.label !in setOf("Yes, correct","No, incorrect","Search manually","Open playback app","Open player") || item.play==null }
+            val details=if(item.id>0 && item.type in setOf("movie","show")) UiAction("Title details"){titleDetails(item.type,item.id,item.title)} else null
+            val target=g.sessions.filter { !UnifiedTraktHistory.remote(it) && it.status=="reviewed" && it.traktId==r.traktId && it.matchType==r.matchType && it.traktId>0 }.maxByOrNull { it.ended }
+            val alreadyWatched=(r.matchType to r.traktId) in watchedKeys || g.confirmed || g.rewatching
+            val watch=if(target!=null && candidate==null && !g.queued && !alreadyWatched) UiAction("Mark watched on Trakt"){approveUpload(target,false)} else null
+            modernContent { ModernReviewCard(violet,item,evidence,primary,secondary,manual,watchedStatus=watchedStatus,details=details,watch=watch) {
+                val options=titleEntry(g,true).actions.filter { it.label!="Title details" && it.label !in setOf("Yes, correct","No, incorrect","Search manually") }
                 val menu=options+if(r.status in setOf("pending","reviewed")) listOf(UiAction("Delete viewing record"){deleteFromReview(r)}) else emptyList()
                 modernActionDialog("Viewing record",item.title,menu.map { it.label }) { menu[it].run() }
             } }
