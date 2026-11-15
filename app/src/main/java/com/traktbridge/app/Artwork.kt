@@ -52,16 +52,16 @@ object Artwork {
         view.imageAlpha=255
         view.setImageBitmap(bitmap)
     }
-    fun load(context:Context,type:String,id:Long,view:ImageView) {
+    fun load(context:Context,type:String,id:Long,view:ImageView,cover:String="") {
         val app=context.applicationContext
         val key=type+"-"+id
         if(view.tag!=key) { view.tag=key; placeholder(view) }
-        if(id<=0 || type !in setOf("movie","show")) return
+        if(id<=0 || type !in setOf("movie","show","anime")) return
         cache(app).get(key)?.let { display(view,it); return }
         val ref=java.lang.ref.WeakReference(view)
         val next=failures[key] ?: 0
         if(next>android.os.SystemClock.elapsedRealtime()) {
-            retry(app,type,id,key,ref,next-android.os.SystemClock.elapsedRealtime())
+            retry(app,type,id,key,ref,next-android.os.SystemClock.elapsedRealtime(),cover)
             return
         }
         waiting[key]?.let { targets ->
@@ -72,7 +72,7 @@ object Artwork {
         waiting[key]=mutableListOf(Target(ref,key))
         try {
             worker.execute {
-                val result=runCatching { fetch(app,type,id,key) }
+                val result=runCatching { fetch(app,type,id,key,cover) }
                 val bitmap=result.getOrNull()
                 if(bitmap!=null) cache(app).put(key,bitmap)
                 main.post {
@@ -83,28 +83,29 @@ object Artwork {
                     } else {
                         if(failures.size>=1000) failures.clear()
                         failures[key]=android.os.SystemClock.elapsedRealtime()+60000
-                        targets.forEach { target -> retry(app,type,id,key,target.view,60000) }
+                        targets.forEach { target -> retry(app,type,id,key,target.view,60000,cover) }
                         result.exceptionOrNull()?.let { DebugTrace.failure("artwork",it) }
                     }
                 }
             }
         } catch(_:java.util.concurrent.RejectedExecutionException) {
             waiting.remove(key)
-            retry(app,type,id,key,ref,2500)
+            retry(app,type,id,key,ref,2500,cover)
         }
     }
-    private fun retry(context:Context,type:String,id:Long,key:String,ref:java.lang.ref.WeakReference<ImageView>,delay:Long) {
+    private fun retry(context:Context,type:String,id:Long,key:String,ref:java.lang.ref.WeakReference<ImageView>,delay:Long,cover:String) {
         main.postDelayed({
-            ref.get()?.takeIf { it.tag==key && it.isAttachedToWindow && it.isShown }?.let { load(context,type,id,it) }
+            ref.get()?.takeIf { it.tag==key && it.isAttachedToWindow && it.isShown }?.let { load(context,type,id,it,cover) }
         },delay.coerceAtLeast(1000))
     }
-    private fun fetch(app:Context,type:String,id:Long,key:String):Bitmap? {
+    private fun fetch(app:Context,type:String,id:Long,key:String,cover:String):Bitmap? {
         val dir=File(app.cacheDir,"artwork").apply { mkdirs() }
         val file=File(dir,key+".webp")
         val existing=decode(file)
         if(existing!=null) { file.setLastModified(System.currentTimeMillis()); return existing }
         val cm=app.getSystemService(android.net.ConnectivityManager::class.java)
         if(app.getSharedPreferences("tracker",Context.MODE_PRIVATE).getBoolean("artwork_unmetered",false) && cm.isActiveNetworkMetered) return null
+        val raw=if(type=="anime") cover else {
         val endpoint=if(type=="movie") "movies" else "shows"
         val connection=URL("https://api.trakt.tv/"+endpoint+"/"+id+"?extended=full,images").openConnection() as HttpsURLConnection
         val data=try {
@@ -118,12 +119,13 @@ object Artwork {
             })
         } finally { connection.disconnect() }
         val posters=data.optJSONObject("images")?.optJSONArray("poster")
-        val raw=(0 until (posters?.length() ?: 0)).map { posters?.optString(it).orEmpty() }.firstOrNull { it.isNotBlank() } ?: error("No catalogue poster")
+        (0 until (posters?.length() ?: 0)).map { posters?.optString(it).orEmpty() }.firstOrNull { it.isNotBlank() } ?: error("No catalogue poster")
+        }
         var url=URL(if(raw.startsWith("https://")) raw else "https://"+raw)
         val temp=File.createTempFile("art",".tmp",dir)
         try {
             repeat(4) {
-                require(url.protocol=="https" && (url.host=="trakt.tv" || url.host.endsWith(".trakt.tv")) && url.userInfo==null)
+                require(url.protocol=="https" && (if(type=="anime") url.host=="s4.anilist.co" || url.host=="s3.anilist.co" else url.host=="trakt.tv" || url.host.endsWith(".trakt.tv")) && url.userInfo==null)
                 val image=url.openConnection() as HttpsURLConnection
                 try {
                     image.connectTimeout=8000; image.readTimeout=8000; image.instanceFollowRedirects=false
