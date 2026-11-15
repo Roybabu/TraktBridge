@@ -29,13 +29,13 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import android.widget.ImageView
 
-data class PosterLibraryItem(val title:String,val subtitle:String,val status:String,val type:String,val id:Long,val open:()->Unit,val menu:()->Unit,val progress:Float?=null,val play:(()->Unit)?=null,val showMenu:Boolean=true)
+data class PosterLibraryItem(val title:String,val subtitle:String,val status:String,val type:String,val id:Long,val open:()->Unit,val menu:()->Unit,val progress:Float?=null,val play:(()->Unit)?=null,val showMenu:Boolean=true,val cover:String="")
 
 @Composable
 fun LibraryPoster(item:PosterLibraryItem,modifier:Modifier) {
     AndroidView(factory={ ctx -> ImageView(ctx).apply { scaleType=ImageView.ScaleType.CENTER_CROP } },modifier=modifier,update={ view ->
         view.contentDescription="Artwork for "+item.title
-        Artwork.load(view.context,item.type,item.id,view)
+        Artwork.load(view.context,item.type,item.id,view,item.cover)
     })
 }
 
