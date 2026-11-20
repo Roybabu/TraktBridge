@@ -7,7 +7,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import java.util.concurrent.Executors
 
-data class HistorySnapshot(val records:List<WatchRecord>,val groups:List<ViewingTitle>,val unified:List<WatchRecord> = records)
+data class HistorySnapshot(val records:List<WatchRecord>,val groups:List<ViewingTitle>,val unified:List<WatchRecord> = records,val watchedKeys:Set<Pair<String,Long>> = emptySet(),val historyComplete:Boolean=false,val historyAccount:String?=null,val historyGeneration:Long=-1L)
 data class HistoryLoadProgress(val stage:String,val completed:Int=0,val total:Int=0)
 
 /** Local database and remote history are separate stages. No network on screen load. */
@@ -23,7 +23,8 @@ class ViewingRepository(private val app:Application) {
         val db=WatchHistory(app)
         val approved=try { local.records.filter { it.status=="synced" && db.approvedAccount(it.id)==account }.map { it.id }.toSet() } finally { db.close() }
         if(!RemoteAccountCache.current(app,account,generation)) return local
-        return local.copy(unified=UnifiedTraktHistory.merge(local.records,remote,approved))
+        val watched=remote.filter { it.id>0 && it.type in setOf("movie","episode") && it.eventId>0 && runCatching { java.time.Instant.parse(it.watchedAt) }.isSuccess }.map { it.type to it.id }.toSet() + local.records.filter { it.id in approved && it.traktId>0 }.map { it.matchType to it.traktId }
+        return local.copy(unified=UnifiedTraktHistory.merge(local.records,remote,approved),watchedKeys=watched,historyComplete=RemoteAccountCache.status(app,account,TraktData.HISTORY)?.complete==true,historyAccount=account,historyGeneration=generation)
     }
     fun snapshot():HistorySnapshot=unified(local()){_,_->}
 }
