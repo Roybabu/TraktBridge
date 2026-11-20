@@ -40,6 +40,7 @@ object RewatchAutomation {
                     Index(account,generation,status.updated,completed).also { index=it }
                 }
                 WatchHistory(app).use { db ->
+                    db.requireReviewForUnconfirmed()
                     db.applyLearned()
                     if(!prefs.getBoolean("auto_rewatch_sync",false) && !prefs.getBoolean("auto_watch_sync",false)) return@use
                     var queued=false
@@ -51,11 +52,11 @@ object RewatchAutomation {
                         val rewatch=prior!=null
                         val eligible=if(rewatch) prefs.getBoolean("auto_rewatch_sync",false) && RewatchPolicy.eligible(r,prior ?: 0L,threshold) else
                             prefs.getBoolean("auto_watch_sync",false) && status.complete && AutomaticCompletionPolicy.eligible(r,prefs.getLong("auto_watch_since",0),threshold)
-                        if(!eligible) continue
+                        if(!eligible || !db.explicitlyConfirmed(r)) continue
                         // An attempted automatic approval is never repeated after manual cancellation.
                         if(attempts.contains(r.id)) continue
                         if(!attempts.edit().putBoolean(r.id,true).commit()) continue
-                        if(db.enqueue(r.id,account,rewatch,r.traktId,r.matchType,r.ended)) {
+                        if(db.enqueue(r.id,account,rewatch,r.traktId,r.matchType,r.ended,requireConfirmation=true)) {
                             ViewingNotifications.cancel(app,r.id); queued=true
                             DebugTrace.event("completion",if(rewatch) "completed rewatch queued" else "completed watch queued automatically")
                         }

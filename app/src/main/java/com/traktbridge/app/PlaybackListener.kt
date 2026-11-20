@@ -81,6 +81,7 @@ class PlaybackListener : NotificationListenerService() {
     }
     private fun notifyPending() {
         if (!getSharedPreferences("tracker",MODE_PRIVATE).getBoolean("enabled",false) || !ViewingNotifications.enabled(this)) return
+        history.applyLearned(100)
         for (record in history.pendingNotifications().take(3)) {
             if(RewatchAutomation.isKnownRewatch(this,record)) { history.markNotified(record.id); continue }
             val posted=ViewingNotifications.post(this,record); DebugTrace.event("notification","viewing review posted="+posted); if(posted) history.markNotified(record.id)
@@ -140,7 +141,7 @@ class PlaybackListener : NotificationListenerService() {
                 val phase=when(p.state) { PlaybackState.STATE_PLAYING->PlaybackPhase.PLAYING; PlaybackState.STATE_PAUSED->PlaybackPhase.PAUSED; PlaybackState.STATE_BUFFERING,PlaybackState.STATE_CONNECTING->PlaybackPhase.BUFFERING; else->PlaybackPhase.STOPPED }
                 if(phase==PlaybackPhase.STOPPED) return@forEach
                 val key=sessionKey(c)
-                samples.add(WatchSample(key,c.packageName,recognized.title,recognized.detail,duration,position,phase==PlaybackPhase.PLAYING,phase,"media",p.playbackSpeed.takeIf { it>0 } ?: 1f,PlaybackSegment.UNKNOWN))
+                samples.add(WatchSample(key,c.packageName,recognized.title,recognized.detail,duration,position,phase==PlaybackPhase.PLAYING,phase,"media",p.playbackSpeed.takeIf { it>0 } ?: 1f,PlaybackSegment.UNKNOWN,HotstarPlayback.identity(m?.getString(MediaMetadata.METADATA_KEY_MEDIA_URI).orEmpty(),recognized.title)))
                 rows.put(JSONObject().put("package",c.packageName).put("sessionId",key.substringAfterLast(":")).put("title",recognized.title).put("subtitle",recognized.detail).put("durationMs",duration).put("positionMs",position).put("state",p.state).put("recognitionScore",recognized.score).put("recognitionConflict",false).put("positionSource","media").put("sampledAt",System.currentTimeMillis()))
                 return@forEach
             }

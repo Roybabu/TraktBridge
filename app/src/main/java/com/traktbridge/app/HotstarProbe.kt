@@ -12,14 +12,45 @@ object HotstarProbe {
     private var last=0L
     private var lastScreen=0L
     private var lastSignals=0L
+    private data class Sample(val title:String,val duration:Long,val position:Long,val time:Long,val state:Int,val speed:Float)
+    private val previous=mutableMapOf<Int,Sample>()
     private fun prefs(c:Context)=c.getSharedPreferences("tracker",Context.MODE_PRIVATE)
     private fun file(c:Context)=File(c.filesDir,"hotstar-title-probe.txt")
     fun enabled(c:Context)=!prefs(c).getBoolean("privacy_lock",false) && System.currentTimeMillis()<prefs(c).getLong(KEY,0)
-    @Synchronized fun start(c:Context) { clear(c);prefs(c).edit().putLong(KEY,System.currentTimeMillis()+900000).apply();last=0;lastScreen=0;lastSignals=0 }
+    @Synchronized fun start(c:Context) { clear(c);prefs(c).edit().putLong(KEY,System.currentTimeMillis()+900000).apply();last=0;lastScreen=0;lastSignals=0;previous.clear() }
     fun stop(c:Context) { prefs(c).edit().remove(KEY).apply() }
     @Synchronized fun clear(c:Context) { file(c).delete() }
     @Synchronized fun report(c:Context):String=if(prefs(c).getBoolean("privacy_lock",false)) "Unlock or disable app privacy lock before accessing this diagnostic." else "JioHotstar title detection diagnostic\nCapture active: "+enabled(c)+"\n"+runCatching { file(c).takeIf { it.exists() }?.readText().orEmpty() }.getOrDefault("")
     private fun safe(value:String):String=HotstarPlayback.clean(value)?.takeIf { !it.contains(Regex("(?i)(https?://|www\\.|@|[0-9]{7,})")) }?.take(160).orEmpty()
+    // Fingerprints are diagnostic candidates only, never verified content identities.
+    private fun fingerprint(value:String):String {
+        if(value.isBlank()) return "none"
+        return java.security.MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8)).take(12).joinToString("") { "%02x".format(it.toInt() and 255) }
+    }
+    private fun uriSummary(value:String):String {
+        if(value.isBlank()) return "none"
+        return runCatching {
+            val uri=android.net.Uri.parse(value)
+            val segments=uri.pathSegments
+            val scheme=uri.scheme?.lowercase(java.util.Locale.ROOT)?.takeIf { it in setOf("http","https","content","file","android.resource") } ?: "other"
+            "scheme="+scheme+" hostHash="+fingerprint(uri.host.orEmpty())+" pathHash="+fingerprint(uri.encodedPath.orEmpty())+" segments="+segments.size+" segmentHashes="+segments.take(12).joinToString(",") { fingerprint(it) }+" queryPresent="+(uri.encodedQuery!=null)
+        }.getOrDefault("unavailable")
+    }
+    private fun extraSummary(bundle:android.os.Bundle?):String {
+        if(bundle==null) return "none"
+        return runCatching {
+            val keys=bundle.keySet().sorted()
+            val fields=keys.take(80).mapNotNull { key ->
+                val normalized=key.substringAfterLast('.').lowercase(java.util.Locale.ROOT).replace("_","").replace("-","")
+                if(normalized !in setOf("contentid","videoid","assetid","mediaid","episodeid","showid","seriesid","season","seasonnumber","episode","episodenumber","contenttype","mediatype")) return@mapNotNull null
+                val value=bundle.get(key)
+                val raw=when(value) { is String -> value; is Int -> value.toString(); is Long -> value.toString(); else -> "" }
+                val shown=if(normalized in setOf("season","seasonnumber","episode","episodenumber")) raw.toIntOrNull()?.takeIf { it in 0..10000 }?.toString() ?: "unknown" else if(normalized in setOf("contenttype","mediatype")) raw.lowercase(java.util.Locale.ROOT).takeIf { it in setOf("movie","episode","series","show","tv","live","sports","trailer","ad") } ?: "unknown" else fingerprint(raw)
+                normalized+"="+shown
+            }
+            "keyCount="+keys.size+" keyHashes="+keys.take(80).joinToString(",") { fingerprint(it) }+" candidates="+fields.joinToString(",")
+        }.getOrDefault("unavailable")
+    }
     @Synchronized fun signals(c:Context,active:Int,tokenControllers:Int,notes:List<android.service.notification.StatusBarNotification>) {
         if(!enabled(c)) return
         val now=android.os.SystemClock.elapsedRealtime()
@@ -55,6 +86,8 @@ object HotstarProbe {
         if(last!=0L && now-last<2000) return
         last=now
         append(c,"media sessions="+controllers.size+" notifications="+notifications)
+        val activeTokens=controllers.map { it.sessionToken.hashCode() }.toSet()
+        previous.keys.retainAll(activeTokens)
         controllers.take(4).forEach { controller ->
             val m=controller.metadata;val p=controller.playbackState
             val title=m?.getString(MediaMetadata.METADATA_KEY_TITLE).orEmpty()
@@ -63,6 +96,24 @@ object HotstarProbe {
             val duration=m?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L
             val position=p?.position ?: -1L
             val result=HotstarPlayback.recognize(title,display,detail,duration,position)
+            val token=controller.sessionToken.hashCode()
+            val state=p?.state ?: -1
+            val speed=p?.playbackSpeed ?: 0f
+            val prior=previous.put(token,Sample(title,duration,position,now,state,speed))
+            val movement=if(prior==null || prior.title!=title || prior.duration!=duration || prior.position<0 || position<0) "new-or-changed" else {
+                val elapsed=now-prior.time
+                val delta=position-prior.position
+                val expected=elapsed*prior.speed.toDouble()
+                val kind=when {
+                    state!=3 || prior.state!=3 -> "state-transition-or-idle"
+                    kotlin.math.abs(delta-expected)>maxOf(2500.0,elapsed*0.5) -> "seek-or-discontinuity"
+                    else -> "normal"
+                }
+                kind+" deltaMs="+delta+" elapsedMs="+elapsed
+            }
+            append(c,"identity session="+token+" mediaIdHash="+fingerprint(m?.getString(MediaMetadata.METADATA_KEY_MEDIA_ID).orEmpty())+" uri="+uriSummary(m?.getString(MediaMetadata.METADATA_KEY_MEDIA_URI).orEmpty()))
+            append(c,"extras controller="+extraSummary(controller.extras)+" playback="+extraSummary(p?.extras))
+            append(c,"playback speed="+speed+" movement="+movement+" description="+safe(m?.getString(MediaMetadata.METADATA_KEY_DISPLAY_DESCRIPTION).orEmpty()))
             append(c,"metadata keys="+m?.keySet()?.filter { it.startsWith("android.media.metadata.") }?.sorted()?.joinToString(",")+" mediaIdPresent="+(!m?.getString(MediaMetadata.METADATA_KEY_MEDIA_ID).isNullOrBlank())+" mediaUriPresent="+(!m?.getString(MediaMetadata.METADATA_KEY_MEDIA_URI).isNullOrBlank())+" extrasPresent="+(controller.extras!=null))
             append(c,"state="+(p?.state ?: -1)+" positionMs="+position+" durationMs="+duration+" title="+safe(title)+" displayTitle="+safe(display)+" subtitle="+safe(detail)+" decision="+(if(result!=null) "accepted: "+safe(result.title) else "rejected: missing, conflicting or invalid playback evidence"))
         }

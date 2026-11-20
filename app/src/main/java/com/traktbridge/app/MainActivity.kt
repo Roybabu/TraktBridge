@@ -684,11 +684,11 @@ class MainActivity : ComponentActivity() {
                 }
                 val selected=PlaybackDetectors.selected(prefs.getStringSet("allowed",emptySet()).orEmpty())
                 settingRow(group ?: root,"Tracked apps",if(selected.isEmpty()) "No apps selected" else selected.joinToString(" · ") { appLabel(it) }) { chooseInstalledApps() }
-                settingToggle(group ?: root,"Automatically mark completed watches on Trakt","Opt in: verified titles with strong measured playback only; uncertain matches remain in Review",prefs.getBoolean("auto_watch_sync",false)) { _,checked ->
+                settingToggle(group ?: root,"Automatically mark completed watches on Trakt","Opt in: only movies or exact episodes you have confirmed in Review, with strong measured playback",prefs.getBoolean("auto_watch_sync",false)) { _,checked ->
                     prefs.edit().putBoolean("auto_watch_sync",checked).putLong("auto_watch_since",if(checked) System.currentTimeMillis() else 0L).apply()
                     RewatchAutomation.request(this)
                 }
-                settingToggle(group ?: root,"Automatically sync completed rewatches","Only after sufficient measured playback; original watched dates stay unchanged",prefs.getBoolean("auto_rewatch_sync",false)) { _,checked -> prefs.edit().putBoolean("auto_rewatch_sync",checked).apply(); RewatchAutomation.request(this) }
+                settingToggle(group ?: root,"Automatically sync completed rewatches","Only for previously confirmed movies or exact episodes after sufficient measured playback; original watched dates stay unchanged",prefs.getBoolean("auto_rewatch_sync",false)) { _,checked -> prefs.edit().putBoolean("auto_rewatch_sync",checked).apply(); RewatchAutomation.request(this) }
                 settingRow(group ?: root,"Completion review threshold",CompletionPolicy.threshold(prefs.getInt("completion_threshold",CompletionPolicy.DEFAULT_THRESHOLD)).toString()+"% • confirmation still required") { configureCompletionThreshold() }
                 heading("YouTube player identification")
                 settingRow(group ?: root,"Accessibility access",if(!prefs.getBoolean("title_optin",false)) "Off • needed to distinguish Shorts and ads when metadata is incomplete" else if(prefs.getBoolean("title_connected",false)) "On • reads player control IDs only" else "Enabled in app • connect in Android settings") {
@@ -2810,13 +2810,14 @@ class MainActivity : ComponentActivity() {
             refreshHistory(); return
         }
         if(item.type=="show") { selectSuggestedEpisode(current,item); return }
-        history.match(current.id,item,false)
+        history.match(current.id,item,true)
         val saved=history.record(current.id)
         if(saved==null || saved.traktId!=item.id || saved.matchType!=item.type) {
             Toast.makeText(this,"Match could not be saved; refresh and try again",Toast.LENGTH_LONG).show()
             refreshHistory(); return
         }
         AutoMatchSuggestions.confirmed(this,current,item)
+        history.applyLearned(100)
         AutoMatchSuggestions.remove(this,current.id)
         ViewingNotifications.cancel(this,current.id)
         refreshHistory()

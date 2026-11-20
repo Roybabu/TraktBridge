@@ -24,7 +24,7 @@ object PlaybackAccuracy {
         return PlaybackInterval(watched=elapsed)
     }
     fun compatibleIdentity(old:WatchSample,next:WatchSample):Boolean {
-        if(old.source==HotstarPlayback.PACKAGE && next.source==HotstarPlayback.PACKAGE) return old.title==next.title && old.subtitle==next.subtitle && kotlin.math.abs(old.duration-next.duration)<=maxOf(3000L,old.duration/100)
+        if(old.source==HotstarPlayback.PACKAGE && next.source==HotstarPlayback.PACKAGE) return (old.hotstarIdentity==null || next.hotstarIdentity==null || old.hotstarIdentity==next.hotstarIdentity) && old.title==next.title && old.subtitle==next.subtitle && kotlin.math.abs(old.duration-next.duration)<=maxOf(3000L,old.duration/100)
         if(old.source==YouTubePlayback.PACKAGE && next.source==YouTubePlayback.PACKAGE) return old.title.isNotBlank() && old.title==next.title
         if(old.title.isBlank() || next.title.isBlank()) return true
         if(RecognitionEngine.normalized(RecognitionEngine.query(old.title))!=RecognitionEngine.normalized(RecognitionEngine.query(next.title))) return false
@@ -35,7 +35,7 @@ object PlaybackAccuracy {
     fun mergeIdentity(old:WatchSample,next:WatchSample):WatchSample {
         val title=next.title.ifBlank { old.title }
         val detail=if(next.title.isBlank() || next.subtitle.isBlank()) old.subtitle else next.subtitle
-        return next.copy(title=title,subtitle=detail)
+        return next.copy(title=title,subtitle=detail,hotstarIdentity=next.hotstarIdentity ?: old.hotstarIdentity)
     }
     fun nearEnd(position:Long,duration:Long):Boolean =
         PlaybackPosition.valid(position,duration) && position.toDouble()/duration>=0.90
