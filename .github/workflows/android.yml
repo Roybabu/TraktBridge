@@ -14,7 +14,7 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '25'
       - name: Install required Android SDK packages
         run: |
           set -euo pipefail
@@ -22,10 +22,10 @@ jobs:
           sdkmanager=$(find "$ANDROID_HOME/cmdline-tools" -type f -path '*/bin/sdkmanager' | sort -V | tail -1)
           test -x "$sdkmanager"
           "$sdkmanager" --sdk_root="$ANDROID_HOME" --version
-          "$sdkmanager" --sdk_root="$ANDROID_HOME" "platforms;android-35" "build-tools;35.0.0"
+          "$sdkmanager" --sdk_root="$ANDROID_HOME" "platforms;android-37.0" "build-tools;36.0.0"
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.9'
+          gradle-version: '9.9.0'
       - name: Validate release candidate security boundaries
         run: python3 scripts/validate_rc.py
       - run: gradle --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
@@ -50,7 +50,7 @@ jobs:
           unset DEBUG_KEY_BASE64
           gradle --no-daemon :app:assembleDebug --rerun-tasks
           apk=app/build/outputs/apk/debug/app-debug.apk
-          report=$("$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$apk")
+          report=$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$apk")
           actual=$(printf '%s\n' "$report" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | tr -d ':' | tr '[:upper:]' '[:lower:]')
           expected=$(printf '%s' "$EXPECTED_SHA256" | tr -d ':[:space:]' | tr '[:upper:]' '[:lower:]')
           [[ "$actual" == "$expected" ]] || { echo "::error::Debug signing certificate mismatch"; exit 1; }

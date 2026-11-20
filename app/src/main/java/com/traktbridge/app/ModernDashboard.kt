@@ -64,14 +64,15 @@ fun ModernActionRow(accent:Int,title:String,detail:String,onClick:()->Unit) {
 fun ModernMetricTiles(accent:Int,metrics:List<Pair<String,String>>) {
     BridgeTheme(accent) {
         Column(verticalArrangement=Arrangement.spacedBy(8.dp)) {
-            metrics.chunked(if(metrics.size==3) 3 else 2).forEach { batch ->
-                Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+            metrics.chunked(2).forEach { batch ->
+                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                     batch.forEach { (label,value) ->
-                        Card(Modifier.weight(1f)) { Column(Modifier.padding(12.dp),verticalArrangement=Arrangement.spacedBy(4.dp)) {
+                        Card(Modifier.weight(1f).fillMaxHeight()) { Column(Modifier.padding(12.dp),verticalArrangement=Arrangement.spacedBy(4.dp)) {
                             Text(value,style=MaterialTheme.typography.titleLarge,color=MaterialTheme.colorScheme.primary,fontWeight=FontWeight.SemiBold)
                             Text(label,style=MaterialTheme.typography.bodySmall)
                         } }
                     }
+                    if(batch.size==1) Spacer(Modifier.weight(1f))
                 }
             }
         }
@@ -79,7 +80,7 @@ fun ModernMetricTiles(accent:Int,metrics:List<Pair<String,String>>) {
 }
 
 @Composable
-fun ModernWatchChart(accent:Int,total:String,labels:List<String>,values:List<Long>,onBar:(Int)->Unit) {
+fun ModernWatchChart(accent:Int,total:String,labels:List<String>,values:List<Long>,heading:String="Sampled watch time",onBar:(Int)->Unit) {
     BridgeTheme(accent) {
         var selected by remember(values) { mutableStateOf(-1) }
         val primary=MaterialTheme.colorScheme.primary
@@ -87,11 +88,11 @@ fun ModernWatchChart(accent:Int,total:String,labels:List<String>,values:List<Lon
         val maximum=(values.maxOrNull() ?: 0L).coerceAtLeast(1)
         Card(Modifier.fillMaxWidth().padding(vertical=6.dp)) {
             Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-                Text("Sampled watch time",style=MaterialTheme.typography.bodyMedium)
+                Text(heading,style=MaterialTheme.typography.bodyMedium)
                 Text(total,style=MaterialTheme.typography.headlineLarge,color=primary,fontWeight=FontWeight.SemiBold)
                 Row(Modifier.fillMaxWidth().height(116.dp),horizontalArrangement=Arrangement.spacedBy(3.dp),verticalAlignment=Alignment.Bottom) {
                     values.forEachIndexed { index,value ->
-                        Canvas(Modifier.weight(1f).fillMaxHeight().clickable { selected=index; onBar(index) }.semantics { contentDescription=labels.getOrElse(index){""}+", "+value/1000+" seconds sampled" }) {
+                        Canvas(Modifier.weight(1f).fillMaxHeight().clickable { selected=index; onBar(index) }.semantics { contentDescription=labels.getOrElse(index){""}+", "+value/1000+" seconds" }) {
                             val h=(size.height*(value.toDouble()/maximum).toFloat()).coerceIn(0f,size.height)
                             drawRoundRect(track,Offset(0f,size.height-2f),Size(size.width,2f),CornerRadius(2f,2f))
                             if(h>0) drawRoundRect(if(index==selected) primary else primary.copy(alpha=0.8f),Offset(0f,size.height-h),Size(size.width,h),CornerRadius(4f,4f))

@@ -25,6 +25,16 @@ class DebugActivity: Activity() {
             text="Record diagnostic events"; isChecked=DebugTrace.enabled(this@DebugActivity)
             setOnCheckedChangeListener { _,checked -> DebugTrace.setEnabled(this@DebugActivity,checked); refresh() }
         })
+        root.addView(Switch(this).apply {
+            text="JioHotstar title detection debugger"; isChecked=HotstarProbe.enabled(this@DebugActivity)
+            setOnCheckedChangeListener { toggle,checked ->
+                if(checked) android.app.AlertDialog.Builder(this@DebugActivity).setTitle("Capture JioHotstar titles?").setMessage("Records JioHotstar media and transport notification metadata, visible player control IDs and candidate player title labels, recent app usage events and global audio activity locally for 15 minutes. Title text may appear in the separate report. No screenshots or automatic uploads.").setNegativeButton("Cancel"){_,_->toggle.isChecked=false}.setOnCancelListener { toggle.isChecked=false }.setPositiveButton("Start"){_,_->HotstarProbe.start(this@DebugActivity);PlaybackListener.wake();refresh()}.show()
+                else { HotstarProbe.stop(this@DebugActivity);refresh() }
+            }
+        })
+        button("Copy JioHotstar title report") { val value=HotstarProbe.report(this); getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(android.content.ClipData.newPlainText("JioHotstar diagnostic",value)); Toast.makeText(this,"JioHotstar report copied",Toast.LENGTH_SHORT).show() }
+        button("Clear JioHotstar title report") { HotstarProbe.stop(this);HotstarProbe.clear(this);refresh() }
+        button("Open JioHotstar") { packageManager.getLaunchIntentForPackage(HotstarPlayback.PACKAGE)?.let { startActivity(it) } ?: Toast.makeText(this,"JioHotstar not installed",Toast.LENGTH_SHORT).show() }
         button("Refresh diagnostic report") { refresh() }
         button("Recover playback sampling") {
             if(!prefs.getBoolean("enabled",false) || !TrackingRecovery.listenerGranted(this)) { Toast.makeText(this,"Enable tracking and grant notification access first",Toast.LENGTH_LONG).show(); return@button }
@@ -53,6 +63,7 @@ class DebugActivity: Activity() {
         root.addView(report,ViewGroup.LayoutParams(-1,-2))
         refresh()
     }
+    override fun onResume() { super.onResume(); refresh() }
     private fun refresh() {
         if(!::report.isInitialized) return
         val last=prefs.getLong("last_sample",0)
@@ -67,7 +78,7 @@ class DebugActivity: Activity() {
         Thread {
             val log=DebugTrace.snapshot(applicationContext)
             val cat=DebugTrace.ownLogcat()
-            val result=summary+"\n\nLOCAL EVENT TRACE\n"+log+"\n\nAPP LOGCAT (current process, diagnostic tag only)\n"+cat+"\n\nSystem-wide logcat is not accessible to normal apps. Use Android Developer options > Take bug report if needed."
+            val result=summary+"\nJioHotstar probe active: "+HotstarProbe.enabled(applicationContext)+"\nJioHotstar title report is separate; use Copy JioHotstar title report.\n\nLOCAL EVENT TRACE\n"+log+"\n\nAPP LOGCAT (current process, diagnostic tag only)\n"+cat+"\n\nSystem-wide logcat is not accessible to normal apps. Use Android Developer options > Take bug report if needed."
             runOnUiThread { if(!isDestroyed && !isFinishing) { prepared=result; report.text=result } }
         }.start()
     }

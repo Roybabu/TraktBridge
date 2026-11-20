@@ -29,7 +29,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import android.widget.ImageView
 
-data class PosterLibraryItem(val title:String,val subtitle:String,val status:String,val type:String,val id:Long,val open:()->Unit,val menu:()->Unit,val progress:Float?=null,val play:(()->Unit)?=null)
+data class PosterLibraryItem(val title:String,val subtitle:String,val status:String,val type:String,val id:Long,val open:()->Unit,val menu:()->Unit,val progress:Float?=null,val play:(()->Unit)?=null,val showMenu:Boolean=true)
 
 @Composable
 fun LibraryPoster(item:PosterLibraryItem,modifier:Modifier) {
@@ -90,7 +90,7 @@ fun PosterLibraryShelf(accent:Int,items:List<PosterLibraryItem>) {
                     PlaybackArtwork(item,Modifier.fillMaxWidth().aspectRatio(2f/3f))
                     Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
                         Text(item.title,Modifier.weight(1f).clickable(onClick=item.open),color=MaterialTheme.colorScheme.onBackground,fontWeight=FontWeight.SemiBold,maxLines=2,overflow=TextOverflow.Ellipsis)
-                        IconButton(onClick=item.menu,modifier=Modifier.size(40.dp).semantics { contentDescription="More options for "+item.title }) { Text("⋯",color=MaterialTheme.colorScheme.onBackground,fontSize=24.sp) }
+                        if(item.showMenu) IconButton(onClick=item.menu,modifier=Modifier.size(40.dp).semantics { contentDescription="More options for "+item.title }) { Text("⋯",color=MaterialTheme.colorScheme.onBackground,fontSize=24.sp) }
                     }
                     Text(item.subtitle,color=MaterialTheme.colorScheme.onSurfaceVariant,fontSize=12.sp,maxLines=3,overflow=TextOverflow.Ellipsis)
                     if(item.status=="Suggested match") Text("Suggested match",color=MaterialTheme.colorScheme.primary,fontSize=11.sp)
@@ -107,7 +107,7 @@ fun PosterLibraryTile(accent:Int,item:PosterLibraryItem) {
             PlaybackArtwork(item,Modifier.fillMaxWidth().aspectRatio(2f/3f))
             Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
                 Text(item.title,Modifier.weight(1f).clickable(onClick=item.open),color=MaterialTheme.colorScheme.onBackground,fontWeight=FontWeight.SemiBold,maxLines=2,overflow=TextOverflow.Ellipsis)
-                IconButton(onClick=item.menu,modifier=Modifier.size(40.dp).semantics { contentDescription="More options for "+item.title }) { Text("⋯",color=MaterialTheme.colorScheme.onBackground,fontSize=24.sp) }
+                if(item.showMenu) IconButton(onClick=item.menu,modifier=Modifier.size(40.dp).semantics { contentDescription="More options for "+item.title }) { Text("⋯",color=MaterialTheme.colorScheme.onBackground,fontSize=24.sp) }
             }
             Text(item.subtitle,color=MaterialTheme.colorScheme.onSurfaceVariant,fontSize=12.sp,maxLines=2,overflow=TextOverflow.Ellipsis)
             if(item.status.isNotBlank()) Text(item.status,color=MaterialTheme.colorScheme.primary,fontSize=12.sp)

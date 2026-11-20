@@ -11,7 +11,7 @@ object AutoMatchSuggestions {
     fun store(context:Context)=context.getSharedPreferences("catalogue_suggestions",Context.MODE_PRIVATE)
     private fun key(r:WatchRecord)=r.id
     private fun fingerprint(r:WatchRecord)=r.source+"|"+r.title+"|"+r.subtitle+"|"+r.duration
-    fun eligible(r:WatchRecord)=r.status=="pending" && r.traktId<=0 && r.title.isNotBlank() && r.source==YouTubePlayback.PACKAGE
+    fun eligible(r:WatchRecord)=r.status=="pending" && r.traktId<=0 && r.title.isNotBlank() && r.source in PlaybackDetectors.supported
     fun read(context:Context,r:WatchRecord):State {
         if(!eligible(r)) return State("unavailable")
         val k=key(r)

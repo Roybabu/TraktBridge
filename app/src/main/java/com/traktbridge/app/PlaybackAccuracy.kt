@@ -24,6 +24,7 @@ object PlaybackAccuracy {
         return PlaybackInterval(watched=elapsed)
     }
     fun compatibleIdentity(old:WatchSample,next:WatchSample):Boolean {
+        if(old.source==HotstarPlayback.PACKAGE && next.source==HotstarPlayback.PACKAGE) return old.title==next.title && old.subtitle==next.subtitle && kotlin.math.abs(old.duration-next.duration)<=maxOf(3000L,old.duration/100)
         if(old.source==YouTubePlayback.PACKAGE && next.source==YouTubePlayback.PACKAGE) return old.title.isNotBlank() && old.title==next.title
         if(old.title.isBlank() || next.title.isBlank()) return true
         if(RecognitionEngine.normalized(RecognitionEngine.query(old.title))!=RecognitionEngine.normalized(RecognitionEngine.query(next.title))) return false

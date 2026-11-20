@@ -30,7 +30,7 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '25'
       - name: Install required Android SDK packages
         run: |
           set -euo pipefail
@@ -38,10 +38,10 @@ jobs:
           sdkmanager=$(find "$ANDROID_HOME/cmdline-tools" -type f -path '*/bin/sdkmanager' | sort -V | tail -1)
           test -x "$sdkmanager"
           "$sdkmanager" --sdk_root="$ANDROID_HOME" --version
-          "$sdkmanager" --sdk_root="$ANDROID_HOME" "platforms;android-35" "build-tools;35.0.0"
+          "$sdkmanager" --sdk_root="$ANDROID_HOME" "platforms;android-37.0" "build-tools;36.0.0"
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.9'
+          gradle-version: '9.9.0'
       - run: gradle --no-daemon :app:testDebugUnitTest :app:lintDebug
       - name: Assemble signed APK
         env:
@@ -68,7 +68,7 @@ jobs:
           set -euo pipefail
           test -n "$EXPECTED_SHA256" || { echo "::error::Set TRAKT_SIGNING_SHA256 repository variable"; exit 1; }
           apk=app/build/outputs/apk/release/app-release.apk
-          report=$("$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$apk")
+          report=$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$apk")
           printf '%s\n' "$report"
           actual=$(printf '%s\n' "$report" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | tr -d ':' | tr '[:upper:]' '[:lower:]')
           expected=$(printf '%s' "$EXPECTED_SHA256" | tr -d ':[:space:]' | tr '[:upper:]' '[:lower:]')

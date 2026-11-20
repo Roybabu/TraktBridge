@@ -13,9 +13,16 @@ object RemoteAccountCache {
     data class Status(val count:Int,val complete:Boolean,val updated:Long,val marker:String)
     private fun meta(c:Context)=c.getSharedPreferences(META,Context.MODE_PRIVATE)
     private fun store(c:Context,k:TraktData)=c.getSharedPreferences("trakt_account_cache_"+k.name.lowercase(java.util.Locale.ROOT),Context.MODE_PRIVATE)
+    private var activeBlob:String?=null
+    private var activeAccount:String?=null
     @Synchronized fun active(c:Context):String? {
-        if(!TraktAuth(c).hasConnection()) return null
-        return meta(c).getString(ACTIVE,null)?.let { runCatching { PrivateHistoryCache.open(it,ACTIVE) }.getOrNull() }
+        if(!TraktAuth(c).hasConnection()) { activeBlob=null; activeAccount=null; return null }
+        val encrypted=meta(c).getString(ACTIVE,null)
+        if(encrypted==null) { activeBlob=null; activeAccount=null; return null }
+        if(encrypted==activeBlob) return activeAccount
+        val account=runCatching { PrivateHistoryCache.open(encrypted,ACTIVE) }.getOrNull()
+        if(account!=null) { activeBlob=encrypted; activeAccount=account }
+        return account
     }
     @Synchronized fun activate(c:Context,account:String):Long {
         require(account.isNotBlank())
@@ -39,10 +46,10 @@ object RemoteAccountCache {
         if(!p.contains("updated")) return null
         return Status(p.getInt("count",0),p.getBoolean("complete",false),p.getLong("updated",0),p.getString("marker","").orEmpty())
     }
-    internal fun encode(row:RemoteItem)=JSONObject().put("type",row.type).put("id",row.id).put("title",row.title.take(1000)).put("show",row.showId).put("season",row.season).put("episode",row.episode).put("watched",row.watchedAt).put("event",row.eventId).put("rating",row.rating).put("progress",row.progress).toString()
+    internal fun encode(row:RemoteItem)=JSONObject().put("type",row.type).put("id",row.id).put("title",row.title.take(1000)).put("show",row.showId).put("season",row.season).put("episode",row.episode).put("watched",row.watchedAt).put("event",row.eventId).put("rating",row.rating).put("progress",row.progress).put("runtimeMs",row.runtimeMs).toString()
     internal fun decode(s:String):RemoteItem {
         val o=JSONObject(s)
-        return RemoteItem(o.getString("type"),o.getLong("id"),o.getString("title"),o.getLong("show"),o.getInt("season"),o.getInt("episode"),o.getString("watched"),o.getLong("event"),o.getInt("rating"),o.getDouble("progress"))
+        return RemoteItem(o.getString("type"),o.getLong("id"),o.getString("title"),o.getLong("show"),o.getInt("season"),o.getInt("episode"),o.getString("watched"),o.getLong("event"),o.getInt("rating"),o.getDouble("progress"),o.optLong("runtimeMs",0))
     }
     private fun scope(account:String,kind:TraktData,key:String)=AccountScope.key(account)+":"+kind.name+":"+key
     fun publish(c:Context,account:String,generation:Long,kind:TraktData,rows:Map<String,RemoteItem>,complete:Boolean,marker:String):Boolean {

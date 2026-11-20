@@ -26,6 +26,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
@@ -49,7 +50,7 @@ fun BridgeTheme(accent:Int,content:@Composable ()->Unit) {
         else -> darkColorScheme(primary=Color(accent),onPrimary=Color(0xff171022),background=Color(BridgeDesign.background),surface=Color(BridgeDesign.surface),onSurface=Color(BridgeDesign.ink))
     }
     val density=LocalDensity.current
-    val tv=context.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_TYPE_MASK == android.content.res.Configuration.UI_MODE_TYPE_TELEVISION
+    val tv=LocalConfiguration.current.uiMode and android.content.res.Configuration.UI_MODE_TYPE_MASK == android.content.res.Configuration.UI_MODE_TYPE_TELEVISION
     val scale=if(BridgeScaled.current) 1f else UiAccessibility.readingScale(prefs.getInt("reading_size",0),tv)
     CompositionLocalProvider(LocalDensity provides Density(density.density,density.fontScale*scale),BridgeScaled provides true) {
         val colors=if(prefs.getBoolean("high_contrast",false)) scheme.copy(onSurface=Color.White,onSurfaceVariant=Color.White,onBackground=Color.White) else scheme
