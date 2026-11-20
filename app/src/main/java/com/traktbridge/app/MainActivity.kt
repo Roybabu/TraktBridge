@@ -1497,64 +1497,123 @@ class MainActivity : ComponentActivity() {
     private fun modernContent(content:@androidx.compose.runtime.Composable ()->Unit) {
         dashboard.addView(ComposeView(this).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow); setContent(content) })
     }
-    private fun renderModernHome(records:List<WatchRecord>,groups:List<ViewingTitle>,pending:Int) {
-        val age=System.currentTimeMillis()-prefs.getLong("last_sample",0)
-        val live=TrackingRecovery.status(this)=="Tracking active"
-        modernContent { ModernPageHeader(violet,"Home",TrackingRecovery.status(this),onMenu={ modernActionDialog("Home options","Manage your dashboard",listOf("Customize dashboard","Refresh library")) { i -> if(i==0) customizeDashboard() else refreshHistory() } }) }
-        if(!live && prefs.getBoolean("enabled",false)) modernContent { ModernActionRow(violet,"Repair tracking",TrackingRecovery.status(this)){repairTracking()} }
-        val hidden=DashboardPreferences.visible(prefs.getString("dashboard_hidden","").orEmpty())
-        val active=groups.filter { it.active }
-        val continuing=SeriesLibrary.continueWatching(groups)
-        val continuingKeys=continuing.map { it.key }.toSet()
-        val recent=groups.filter { !it.active && it.key !in continuingKeys }.take(5)
-        for(key in DashboardPreferences.order(prefs.getString("dashboard_order","").orEmpty())) when(key) {
-            "now" -> {
-        if("now" !in hidden) {
-            modernContent { ModernActionRow(violet,"Now playing",active.firstOrNull()?.representative?.title ?: "View playback on connected devices"){ nowPlaying() } }
+    private data class HomeFeed(val at:Long,val rows:List<PosterLibraryItem>,val error:Boolean=false)
+    private val homeFeeds=mutableMapOf<String,HomeFeed>()
+    private val homeLoading=mutableSetOf<String>()
+    private var homeWeek=0
+    private var homeDiscoverType="movie"
+    private var homeDiscoverMode="trending"
+    private var homeMood=0
+    private var homeAnimeMode="trending"
+    private fun homePoster(item:CatalogueItem,detail:String="")=PosterLibraryItem(item.title,detail.ifBlank { if(item.year>0) item.year.toString() else "" },"",item.type,item.id,{titleDetails(item.type,item.id,item.title)},{},showMenu=false)
+    private fun homeShelf(title:String,key:String,load:((Result<List<PosterLibraryItem>>)->Unit)->Unit) {
+        section(dashboard,title)
+        val state=androidx.compose.runtime.mutableStateOf(homeFeeds[key])
+        modernContent {
+            val feed=state.value
+            if(feed==null) ModernHomeMessage(violet,"Loading…")
+            else if(feed.error) ModernHomeMessage(violet,"Unavailable. Use Refresh to retry.")
+            else if(feed.rows.isEmpty()) ModernHomeMessage(violet,"No titles found.")
+            else PosterLibraryShelf(violet,feed.rows)
         }
-
-            }
-            "continue" -> {
-        if("continue" !in hidden && continuing.isNotEmpty()) {
-            section(dashboard,"Continue watching")
-            val items=continueCards(groups,limit=7,readOnly=true)
-            modernContent { PosterLibraryShelf(violet,items) }
-        }
-        if("continue" !in hidden) {
-            val next=SeriesLibrary.build(groups).filter { it.completed>0 }.take(5)
-            if(next.isNotEmpty()) {
-                section(dashboard,"Up next")
-                next.forEach { series -> modernContent { ModernActionRow(violet,series.title,"Check next unwatched episode"){ remoteSeriesProgress(series.id,series.title) } } }
-            }
-        }
-
-            }
-            "metrics" -> {
-        if("metrics" !in hidden) modernContent { ModernMetricTiles(violet,listOf("This week" to durationText(ViewingAnalytics.filter(records,HistoryFilter(period=7)).sumOf { it.watched }),"Titles tracked" to groups.size.toString(),"To review" to pending.toString())) }
-
-            }
-            "review" -> {
-        if("review" !in hidden) modernContent { ModernActionRow(violet,"Review your viewing",pending.toString()+" records awaiting action"){ showTab(2) } }
-
-            }
-            "recent" -> {
-        if("recent" !in hidden && recent.isNotEmpty()) {
-            section(dashboard,"Recently watched")
-            recent.forEach { g -> val item=groupPoster(g); modernContent { ModernActionRow(violet,item.title,if(g.confirmed) java.text.DateFormat.getDateTimeInstance().format(java.util.Date(g.latest.ended))+" · "+appLabel(g.latest.source) else item.subtitle){ showHomeViewing(listOf(g)) } } }
-        }
-
-            }
-            "discover" -> {
-                if("discover" !in hidden) {
-                    section(dashboard,"Explore")
-                    modernContent { ModernExploreLinks(violet,{recommendFromHistory()},{discover()},{upcomingEpisodes()},{animeSearch()},{openExploreSettings()}) }
-                }
-            }
-            "goal" -> {
-        if("goal" !in hidden && prefs.getBoolean("show_monthly_goal",true)) monthlyGoalCard(dashboard,records)
-            }
+        val cached=homeFeeds[key]
+        if(cached!=null && System.currentTimeMillis()-cached.at<15*60000L) return
+        if(!homeLoading.add(key)) return
+        load { result ->
+            homeLoading.remove(key)
+            if(isDestroyed || isFinishing) return@load
+            val feed=HomeFeed(System.currentTimeMillis(),result.getOrDefault(emptyList()),result.isFailure)
+            if(homeFeeds.size>40) homeFeeds.clear()
+            homeFeeds[key]=feed
+            state.value=feed
+            // A history refresh may have replaced this shelf while its request was running.
+            if(tab==0) refreshHomeFeeds()
         }
     }
+    private var homeRefreshPosted=false
+    private fun refreshHomeFeeds() {
+        if(homeRefreshPosted) return
+        homeRefreshPosted=true
+        dashboard.postDelayed({
+            homeRefreshPosted=false
+            if(tab==0 && !isDestroyed && !isFinishing) {
+                val y=contentPage.scrollY
+                dashboard.removeAllViews()
+                renderModernHome(unifiedRows,ViewingGroups.build(unifiedRows),0)
+                contentPage.post { if(tab==0) contentPage.scrollTo(0,y) }
+            }
+        },350)
+    }
+    private fun renderModernHome(records:List<WatchRecord>,groups:List<ViewingTitle>,pending:Int) {
+        modernContent { ModernPageHeader(violet,"Home",onMenu={ modernActionDialog("Home options","Manage your home feed",listOf("Refresh","Explore preferences")) { i -> if(i==0) { homeFeeds.clear(); homeEpisodeFeeds.clear(); refreshHistory() } else openExploreSettings() } }) }
+        section(dashboard,"Continue watching")
+        val continuing=continueCards(groups,limit=20,readOnly=true)
+        if(continuing.isEmpty()) modernContent { ModernHomeMessage(violet,"Start watching to see your progress here.") }
+        else modernContent { PosterLibraryShelf(violet,continuing) }
+        modernContent { ModernActionRow(violet,"Now playing",groups.firstOrNull { it.active }?.representative?.title ?: "View playback on connected devices"){ nowPlaying() } }
+        val recent=groups.filter { it.confirmed && !it.active }.take(15)
+        if(recent.isNotEmpty()) {
+            section(dashboard,"Recently watched")
+            modernContent { PosterLibraryShelf(violet,recent.map { g -> groupPoster(g).copy(open={showHomeViewing(listOf(g))},menu={},showMenu=false,play=null) }) }
+        }
+        val monday=java.time.LocalDate.now().with(java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY)).plusWeeks(homeWeek.toLong())
+        modernContent { ModernHomeWeek(violet,monday.toString()+" – "+monday.plusDays(6),{homeWeek=(homeWeek-1).coerceAtLeast(-12);refreshHomeFeeds()},{homeWeek=(homeWeek+1).coerceAtMost(0);refreshHomeFeeds()}) }
+        for(type in listOf("movie","show")) {
+            homeShelf(if(type=="movie") "New movies" else "New shows","week:"+monday+":"+type) { done ->
+                TraktCatalogue.weeklyReleases(type,monday.toString()) { result -> done(result.map { rows -> rows.map { homePoster(it) } }) }
+            }
+        }
+        val excluded=(if(prefs.getBoolean("explore_exclude_watched",true)) RecommendationEngine.seen(records) else emptySet())+personalStore("recommendation_hidden").all.keys
+        val seeds=RecommendationEngine.seeds(records,System.currentTimeMillis())
+        if(!prefs.getBoolean("explore_personalized",false)) {
+            section(dashboard,"For you")
+            modernContent { ModernActionRow(violet,"Enable personalized recommendations","Use your watched titles to find similar content"){prefs.edit().putBoolean("explore_personalized",true).apply();refreshHomeFeeds()} }
+        } else if(seeds.isEmpty()) {
+            section(dashboard,"For you")
+            modernContent { ModernHomeMessage(violet,"Watch more titles to get personalized recommendations.") }
+        } else homeShelf("For you","personal:"+seeds.map { it.type+it.id }.joinToString()+":"+excluded.hashCode()) { done ->
+            TraktCatalogue.personalized(seeds) { result -> done(result.map { batches -> RecommendationEngine.rank(batches,excluded).map { homePoster(it.item,"Because you watched "+it.reasons.firstOrNull().orEmpty()) } }) }
+        }
+        section(dashboard,"Discover")
+        modernContent { ModernCategories(violet,listOf("movie" to "Movies","show" to "Shows"),homeDiscoverType){homeDiscoverType=it;refreshHomeFeeds()} }
+        modernContent { ModernCategories(violet,listOf("trending" to "Trending","popular" to "Popular","mood" to "Mood"),homeDiscoverMode){homeDiscoverMode=it;refreshHomeFeeds()} }
+        if(homeDiscoverMode=="mood") {
+            modernContent { ModernCategories(violet,DiscoveryEngine.moods.mapIndexed { i,m -> i.toString() to m.label },homeMood.toString()){homeMood=it.toInt();refreshHomeFeeds()} }
+            val mood=DiscoveryEngine.moods[homeMood]
+            homeShelf(mood.label,"mood:"+homeDiscoverType+":"+homeMood+":"+excluded.hashCode()) { done ->
+                TraktCatalogue.moodDiscovery(homeDiscoverType,mood){result -> done(result.map { rows -> DiscoveryEngine.filter(rows,mood,excluded=excluded).map { homePoster(it.item) } }) }
+            }
+        } else homeShelf(homeDiscoverMode.replaceFirstChar { it.uppercase() },"discover:"+homeDiscoverType+":"+homeDiscoverMode+":"+excluded.hashCode()) { done ->
+            TraktCatalogue.discover(homeDiscoverType,homeDiscoverMode){result -> done(result.map { rows -> rows.filter { it.type+":"+it.id !in excluded }.map { homePoster(it) } }) }
+        }
+        section(dashboard,"Upcoming episodes")
+        val account=RemoteAccountCache.active(this)
+        if(!auth.hasConnection() || account==null) modernContent { ModernHomeMessage(violet,"Connect and sync Trakt for your personal episode calendar.") }
+        else {
+            val key="upcoming:"+account+":"+java.time.LocalDate.now()
+            val state=androidx.compose.runtime.mutableStateOf(homeEpisodeFeeds[key])
+            modernContent { ModernHomeEpisodes(violet,state.value) }
+            if(homeEpisodeFeeds[key]==null && homeLoading.add(key)) TraktLibrary.upcoming(this,14) { result ->
+                homeLoading.remove(key)
+                if(!isDestroyed && !isFinishing) {
+                    homeEpisodeFeeds[key]=result.getOrDefault(emptyList())
+                    state.value=homeEpisodeFeeds[key]
+                    refreshHomeFeeds()
+                }
+            }
+        }
+        section(dashboard,"Anime")
+        modernContent { ModernCategories(violet,listOf("trending" to "Trending","popular" to "Popular","airing" to "Airing now"),homeAnimeMode){homeAnimeMode=it;refreshHomeFeeds()} }
+        val mode=homeAnimeMode
+        homeShelf(if(mode=="airing") "Currently airing anime" else "Anime recommendations","anime:"+mode) { done ->
+            AnimeCatalogue.homeFeed(mode){result -> done(result.map { rows -> rows.map { item ->
+                val name=item.english.ifBlank { item.romaji }
+                val next=if(item.nextAiring>0) "E"+item.nextEpisode+" · "+java.time.Instant.ofEpochSecond(item.nextAiring).atZone(java.time.ZoneId.systemDefault()).format(java.time.format.DateTimeFormatter.ofPattern("EEE, d MMM")) else if(item.episodes>0) item.episodes.toString()+" episodes" else ""
+                PosterLibraryItem(name,next,"","anime",item.id.toLong(),{editAnimeProgress(item.id,name,item.episodes)},{},showMenu=false,cover=item.cover)
+            } }) }
+        }
+    }
+    private val homeEpisodeFeeds=mutableMapOf<String,List<UpcomingEpisode>>()
     private var reviewCategory="match"
     private fun reviewBucket(g:ViewingTitle):String {
         if(g.queued) return "sync"
