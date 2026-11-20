@@ -6,7 +6,7 @@ import java.net.URL
 import javax.net.ssl.HttpsURLConnection
 
 data class AnimeListEntry(val id:Int,val title:String,val progress:Int,val episodes:Int,val status:String)
-data class AnimeResult(val id:Int,val english:String,val romaji:String,val native:String,val episodes:Int,val description:String,val cover:String="",val nextEpisode:Int=0,val nextAiring:Long=0)
+data class AnimeResult(val id:Int,val english:String,val romaji:String,val native:String,val episodes:Int,val description:String,val cover:String="",val nextEpisode:Int=0,val nextAiring:Long=0,val year:Int=0,val format:String="")
 object AnimeCatalogue {
     fun publicList(username:String,done:(Result<List<AnimeListEntry>>)->Unit) {
         Thread {
@@ -40,7 +40,7 @@ object AnimeCatalogue {
             val result=runCatching {
                 require(mode in setOf("trending","popular","airing"))
                 val filter=when(mode) { "airing" -> "status: RELEASING, sort: TRENDING_DESC"; "popular" -> "sort: POPULARITY_DESC"; else -> "sort: TRENDING_DESC" }
-                val query="query { Page(page: 1, perPage: 25) { media(type: ANIME, isAdult: false, "+filter+") { id title { english romaji native } episodes coverImage { large } nextAiringEpisode { episode airingAt } } } }"
+                val query="query { Page(page: 1, perPage: 25) { media(type: ANIME, isAdult: false, "+filter+") { id title { english romaji native } episodes seasonYear format coverImage { large } nextAiringEpisode { episode airingAt } } } }"
                 val c=URL("https://graphql.anilist.co").openConnection() as HttpsURLConnection
                 try {
                     c.requestMethod="POST"; c.doOutput=true; c.instanceFollowRedirects=false; c.connectTimeout=10000; c.readTimeout=10000
@@ -50,7 +50,7 @@ object AnimeCatalogue {
                     val a=JSONObject(c.inputStream.bufferedReader().use { it.readText() }).getJSONObject("data").getJSONObject("Page").getJSONArray("media")
                     (0 until a.length()).map { i ->
                         val row=a.getJSONObject(i); val t=row.getJSONObject("title"); val next=row.optJSONObject("nextAiringEpisode")
-                        AnimeResult(row.getInt("id"),t.optString("english").takeUnless { it=="null" }.orEmpty(),t.optString("romaji"),t.optString("native"),row.optInt("episodes"),"",row.optJSONObject("coverImage")?.optString("large").orEmpty(),next?.optInt("episode") ?: 0,next?.optLong("airingAt") ?: 0)
+                        AnimeResult(row.getInt("id"),t.optString("english").takeUnless { it=="null" }.orEmpty(),t.optString("romaji"),t.optString("native"),row.optInt("episodes"),"",row.optJSONObject("coverImage")?.optString("large").orEmpty(),next?.optInt("episode") ?: 0,next?.optLong("airingAt") ?: 0,row.optInt("seasonYear"),row.optString("format"))
                     }
                 } finally { c.disconnect() }
             }
@@ -61,7 +61,7 @@ object AnimeCatalogue {
         Thread {
             val result=runCatching {
                 require(title.isNotBlank() && title.length<=200)
-                val body=JSONObject().put("query","query (\$search: String) { Page(page: 1, perPage: 15) { media(search: \$search, type: ANIME, isAdult: false) { id title { english romaji native } episodes description(asHtml: false) } } }").put("variables",JSONObject().put("search",title))
+                val body=JSONObject().put("query","query (\$search: String) { Page(page: 1, perPage: 15) { media(search: \$search, type: ANIME, isAdult: false) { id title { english romaji native } episodes seasonYear format description(asHtml: false) } } }").put("variables",JSONObject().put("search",title))
                 val c=URL("https://graphql.anilist.co").openConnection() as HttpsURLConnection
                 try {
                     c.requestMethod="POST"; c.doOutput=true; c.instanceFollowRedirects=false; c.connectTimeout=10000; c.readTimeout=10000
@@ -74,7 +74,7 @@ object AnimeCatalogue {
                         val row=a.optJSONObject(i) ?: return@mapNotNull null
                         val t=row.getJSONObject("title")
                         fun title(k:String)=if(t.isNull(k)) "" else t.optString(k)
-                        AnimeResult(row.getInt("id"),title("english"),title("romaji"),title("native"),row.optInt("episodes",0),row.optString("description","").replace(Regex("<[^>]*>"),""))
+                        AnimeResult(row.getInt("id"),title("english"),title("romaji"),title("native"),row.optInt("episodes",0),row.optString("description","").replace(Regex("<[^>]*>"),""),year=row.optInt("seasonYear"),format=row.optString("format"))
                     }
                 } finally { c.disconnect() }
             }

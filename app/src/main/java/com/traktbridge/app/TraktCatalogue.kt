@@ -17,6 +17,7 @@ data class CatalogueSeason(val number: Int, val title: String)
 
 object TraktCatalogue {
     private val worker = Executors.newSingleThreadExecutor()
+    private val discoveryWorker = Executors.newFixedThreadPool(2)
     private val main = Handler(Looper.getMainLooper())
     private class ReadFailure(val status:Int,val retryAfter:Long?):Exception("Trakt catalogue HTTP "+status)
     private fun get(path:String):JSONArray {
@@ -44,8 +45,52 @@ object TraktCatalogue {
     private fun <T> request(done: (Result<T>) -> Unit, work: () -> T) {
         worker.execute { val result = runCatching(work); main.post { done(result) } }
     }
+    private fun <T> discoveryRequest(done:(Result<T>)->Unit,work:()->T) {
+        discoveryWorker.execute { val result=runCatching(work); main.post { done(result) } }
+    }
     private fun objects(array: JSONArray): List<JSONObject> = (0 until array.length()).mapNotNull { array.optJSONObject(it) }
     private fun id(o: JSONObject): Long = o.optJSONObject("ids")?.optLong("trakt", 0) ?: 0
+    /** Native Trakt anime feeds: every card already has a canonical movie/show ID. */
+    fun animeDiscovery(mode:String,done:(Result<List<CatalogueItem>>)->Unit)=discoveryRequest(done) {
+        require(mode in setOf("trending","popular","airing"))
+        val endpoint=mode
+        val types=if(mode=="airing") emptyList() else listOf("show","movie")
+        val feeds=types.map { type ->
+            val path="/"+RemoteRules.plural(type)+"/"+endpoint+"?limit=30&extended=full&genres=anime"
+            objects(get(path)).mapNotNull { row ->
+                val o=if(mode=="popular") row else row.optJSONObject(type) ?: return@mapNotNull null
+                val genres=o.optJSONArray("genres")
+                if((0 until (genres?.length() ?: 0)).none { genres?.optString(it)=="anime" }) return@mapNotNull null
+                val key=id(o);val title=o.optString("title")
+                if(key<=0 || title.isBlank()) null else CatalogueItem(type,key,title,o.optInt("year"),runtimeMinutes=o.optInt("runtime"))
+            }
+        }
+        if(mode=="airing") {
+            val start=java.time.LocalDate.now().toString()
+            objects(get("/calendars/all/shows/"+start+"/7?extended=full")).mapNotNull { row ->
+                val o=row.optJSONObject("show") ?: return@mapNotNull null
+                val genres=o.optJSONArray("genres")
+                if((0 until (genres?.length() ?: 0)).none { genres?.optString(it)=="anime" }) return@mapNotNull null
+                val key=id(o);val title=o.optString("title")
+                if(key<=0 || title.isBlank()) null else CatalogueItem("show",key,title,o.optInt("year"))
+            }.distinctBy { it.id }
+        } else (0 until (feeds.maxOfOrNull { it.size } ?: 0)).flatMap { index -> feeds.mapNotNull { it.getOrNull(index) } }.distinctBy { it.type+":"+it.id }
+    }
+    fun animeMatches(item:AnimeResult,done:(Result<List<CatalogueItem>>)->Unit)=discoveryRequest(done) {
+        val aliases=listOf(item.english,item.romaji,item.native).filter { it.isNotBlank() && it!="null" }.distinctBy { RecognitionEngine.normalized(it) }.take(3)
+        val types=when(item.format) { "MOVIE"->listOf("movie"); "TV","TV_SHORT","ONA","OVA"->listOf("show"); else->listOf("show","movie") }
+        val rows=mutableListOf<CatalogueItem>()
+        for(type in types) for(alias in aliases) {
+            val q=URLEncoder.encode(alias,"UTF-8")
+            rows.addAll(objects(get("/search/"+type+"?query="+q+"&limit=15&extended=full")).mapNotNull { row ->
+                val o=row.optJSONObject(type) ?: return@mapNotNull null
+                val key=id(o);val title=o.optString("title")
+                if(key<=0 || title.isBlank()) null else CatalogueItem(type,key,title,o.optInt("year"),runtimeMinutes=o.optInt("runtime"))
+            })
+        }
+        val normalized=aliases.map { RecognitionEngine.normalized(it) }.toSet()
+        rows.distinctBy { it.type+":"+it.id }.sortedWith(compareByDescending<CatalogueItem> { RecognitionEngine.normalized(it.title) in normalized }.thenByDescending { item.year>0 && it.year==item.year }).take(20)
+    }
     fun search(query: String, type: String, done: (Result<List<CatalogueItem>>) -> Unit) = request(done) {
         require(type == "movie" || type == "show")
         require(query.isNotBlank())
@@ -179,7 +224,7 @@ object TraktCatalogue {
             if(key<=0 || title.isBlank()) null else CatalogueItem(type,key,title,o.optInt("year"))
         }.distinctBy { it.id }
     }
-    fun discover(type:String,mode:String,done:(Result<List<CatalogueItem>>)->Unit)=request(done) {
+    fun discover(type:String,mode:String,done:(Result<List<CatalogueItem>>)->Unit)=discoveryRequest(done) {
         require(type in setOf("movie","show") && mode in setOf("trending","popular"))
         objects(get("/"+RemoteRules.plural(type)+"/"+mode+"?limit=30&extended=full")).mapNotNull { row ->
             val o=if(mode=="trending") row.optJSONObject(type) ?: return@mapNotNull null else row
@@ -187,7 +232,7 @@ object TraktCatalogue {
             if(id<=0 || title.isBlank()) null else CatalogueItem(type,id,title,o.optInt("year"),runtimeMinutes=o.optInt("runtime"))
         }.distinctBy { it.id }
     }
-    fun moodDiscovery(type:String,mood:DiscoveryMood,done:(Result<List<DiscoveryItem>>)->Unit)=request(done) {
+    fun moodDiscovery(type:String,mood:DiscoveryMood,done:(Result<List<DiscoveryItem>>)->Unit)=discoveryRequest(done) {
         require(type in setOf("movie","show") && mood in DiscoveryEngine.moods)
         val suffix=if(mood.genres.isEmpty()) "" else "&genres="+URLEncoder.encode(mood.genres.sorted().joinToString(","),"UTF-8")
         val rows=objects(get("/"+RemoteRules.plural(type)+"/popular?limit=50&extended=full"+suffix))

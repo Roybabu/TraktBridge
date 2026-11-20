@@ -1499,6 +1499,8 @@ class MainActivity : ComponentActivity() {
     }
     private data class HomeFeed(val at:Long,val rows:List<PosterLibraryItem>,val error:Boolean=false)
     private val homeFeeds=mutableMapOf<String,HomeFeed>()
+    private val homeStates=mutableMapOf<String,androidx.compose.runtime.MutableState<HomeFeed?>>()
+    private fun homeState(key:String)=homeStates.getOrPut(key) { androidx.compose.runtime.mutableStateOf(homeFeeds[key]) }
     private val homeLoading=mutableSetOf<String>()
     private var homeWeek=0
     private var homeDiscoverType="movie"
@@ -1508,14 +1510,18 @@ class MainActivity : ComponentActivity() {
     private fun homePoster(item:CatalogueItem,detail:String="")=PosterLibraryItem(item.title,detail.ifBlank { if(item.year>0) item.year.toString() else "" },"",item.type,item.id,{titleDetails(item.type,item.id,item.title)},{},showMenu=false)
     private fun homeShelf(title:String,key:String,load:((Result<List<PosterLibraryItem>>)->Unit)->Unit) {
         section(dashboard,title)
-        val state=androidx.compose.runtime.mutableStateOf(homeFeeds[key])
-        modernContent {
-            val feed=state.value
-            if(feed==null) ModernHomeMessage(violet,"Loading…")
-            else if(feed.error) ModernHomeMessage(violet,"Unavailable. Use Refresh to retry.")
-            else if(feed.rows.isEmpty()) ModernHomeMessage(violet,"No titles found.")
-            else PosterLibraryShelf(violet,feed.rows)
-        }
+        val state=homeState(key)
+        modernContent { HomeFeedContent(state.value) }
+        loadHomeFeed(key,load)
+    }
+    @androidx.compose.runtime.Composable
+    private fun HomeFeedContent(feed:HomeFeed?) {
+        if(feed==null) ModernHomeMessage(violet,"Loading…")
+        else if(feed.error) ModernHomeMessage(violet,"Unavailable. Use Refresh to retry.")
+        else if(feed.rows.isEmpty()) ModernHomeMessage(violet,"No titles found.")
+        else PosterLibraryShelf(violet,feed.rows)
+    }
+    private fun loadHomeFeed(key:String,load:((Result<List<PosterLibraryItem>>)->Unit)->Unit) {
         val cached=homeFeeds[key]
         if(cached!=null && System.currentTimeMillis()-cached.at<15*60000L) return
         if(!homeLoading.add(key)) return
@@ -1523,11 +1529,10 @@ class MainActivity : ComponentActivity() {
             homeLoading.remove(key)
             if(isDestroyed || isFinishing) return@load
             val feed=HomeFeed(System.currentTimeMillis(),result.getOrDefault(emptyList()),result.isFailure)
-            if(homeFeeds.size>40) homeFeeds.clear()
+            if(homeFeeds.size>=80) { val oldest=homeFeeds.minByOrNull { it.value.at }?.key; if(oldest!=null && oldest!=key) homeFeeds.remove(oldest) }
             homeFeeds[key]=feed
-            state.value=feed
-            // A history refresh may have replaced this shelf while its request was running.
-            if(tab==0) refreshHomeFeeds()
+            homeState(key).value=feed
+
         }
     }
     private var homeRefreshPosted=false
@@ -1545,7 +1550,7 @@ class MainActivity : ComponentActivity() {
         },350)
     }
     private fun renderModernHome(records:List<WatchRecord>,groups:List<ViewingTitle>,pending:Int) {
-        modernContent { ModernPageHeader(violet,"Home",onMenu={ modernActionDialog("Home options","Manage your home feed",listOf("Refresh","Explore preferences")) { i -> if(i==0) { homeFeeds.clear(); homeEpisodeFeeds.clear(); refreshHistory() } else openExploreSettings() } }) }
+        modernContent { ModernPageHeader(violet,"Home",onMenu={ modernActionDialog("Home options","Manage your home feed",listOf("Refresh","Explore preferences")) { i -> if(i==0) { homeFeeds.clear(); homeStates.clear(); homeEpisodeFeeds.clear(); homeEpisodeStates.clear(); refreshHistory() } else openExploreSettings() } }) }
         section(dashboard,"Continue watching")
         val continuing=continueCards(groups,limit=20,readOnly=true)
         if(continuing.isEmpty()) modernContent { ModernHomeMessage(violet,"Start watching to see your progress here.") }
@@ -1563,6 +1568,22 @@ class MainActivity : ComponentActivity() {
                 TraktCatalogue.weeklyReleases(type,monday.toString()) { result -> done(result.map { rows -> rows.map { homePoster(it) } }) }
             }
         }
+        section(dashboard,"Anime")
+        modernContent {
+            var mode by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(homeAnimeMode) }
+            androidx.compose.foundation.layout.Column {
+                ModernCategories(violet,listOf("trending" to "Trending","popular" to "Popular","airing" to "Airing now"),mode){mode=it;homeAnimeMode=it}
+                val selected=mode
+                val key="trakt-anime:"+selected
+                val state=homeState(key)
+                androidx.compose.runtime.LaunchedEffect(key) {
+                    loadHomeFeed(key) { done ->
+                        TraktCatalogue.animeDiscovery(selected) { result -> done(result.map { rows -> rows.map { homePoster(it) } }) }
+                    }
+                }
+                androidx.compose.runtime.key(key) { HomeFeedContent(state.value) }
+            }
+        }
         val excluded=(if(prefs.getBoolean("explore_exclude_watched",true)) RecommendationEngine.seen(records) else emptySet())+personalStore("recommendation_hidden").all.keys
         val seeds=RecommendationEngine.seeds(records,System.currentTimeMillis())
         if(!prefs.getBoolean("explore_personalized",false)) {
@@ -1575,45 +1596,49 @@ class MainActivity : ComponentActivity() {
             TraktCatalogue.personalized(seeds) { result -> done(result.map { batches -> RecommendationEngine.rank(batches,excluded).map { homePoster(it.item,"Because you watched "+it.reasons.firstOrNull().orEmpty()) } }) }
         }
         section(dashboard,"Discover")
-        modernContent { ModernCategories(violet,listOf("movie" to "Movies","show" to "Shows"),homeDiscoverType){homeDiscoverType=it;refreshHomeFeeds()} }
-        modernContent { ModernCategories(violet,listOf("trending" to "Trending","popular" to "Popular","mood" to "Mood"),homeDiscoverMode){homeDiscoverMode=it;refreshHomeFeeds()} }
-        if(homeDiscoverMode=="mood") {
-            modernContent { ModernCategories(violet,DiscoveryEngine.moods.mapIndexed { i,m -> i.toString() to m.label },homeMood.toString()){homeMood=it.toInt();refreshHomeFeeds()} }
-            val mood=DiscoveryEngine.moods[homeMood]
-            homeShelf(mood.label,"mood:"+homeDiscoverType+":"+homeMood+":"+excluded.hashCode()) { done ->
-                TraktCatalogue.moodDiscovery(homeDiscoverType,mood){result -> done(result.map { rows -> DiscoveryEngine.filter(rows,mood,excluded=excluded).map { homePoster(it.item) } }) }
+        modernContent {
+            var type by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(homeDiscoverType) }
+            var mode by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(homeDiscoverMode) }
+            var moodIndex by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(homeMood) }
+            androidx.compose.foundation.layout.Column {
+                ModernCategories(violet,listOf("movie" to "Movies","show" to "Shows"),type){type=it;homeDiscoverType=it}
+                ModernCategories(violet,listOf("trending" to "Trending","popular" to "Popular","mood" to "Mood"),mode){mode=it;homeDiscoverMode=it}
+                if(mode=="mood") ModernCategories(violet,DiscoveryEngine.moods.mapIndexed { i,m -> i.toString() to m.label },moodIndex.toString()){moodIndex=it.toInt();homeMood=moodIndex}
+                val selectedType=type
+                val selectedMode=mode
+                val selectedMood=moodIndex
+                val key=if(selectedMode=="mood") "mood:"+selectedType+":"+selectedMood+":"+excluded.hashCode() else "discover:"+selectedType+":"+selectedMode+":"+excluded.hashCode()
+                val state=homeState(key)
+                androidx.compose.runtime.LaunchedEffect(key) {
+                    loadHomeFeed(key) { done ->
+                        if(selectedMode=="mood") {
+                            val mood=DiscoveryEngine.moods[selectedMood]
+                            TraktCatalogue.moodDiscovery(selectedType,mood){result -> done(result.map { rows -> DiscoveryEngine.filter(rows,mood,excluded=excluded).map { homePoster(it.item) } })}
+                        } else TraktCatalogue.discover(selectedType,selectedMode){result -> done(result.map { rows -> rows.filter { it.type+":"+it.id !in excluded }.map { homePoster(it) } })}
+                    }
+                }
+                androidx.compose.runtime.key(key) { HomeFeedContent(state.value) }
             }
-        } else homeShelf(homeDiscoverMode.replaceFirstChar { it.uppercase() },"discover:"+homeDiscoverType+":"+homeDiscoverMode+":"+excluded.hashCode()) { done ->
-            TraktCatalogue.discover(homeDiscoverType,homeDiscoverMode){result -> done(result.map { rows -> rows.filter { it.type+":"+it.id !in excluded }.map { homePoster(it) } }) }
         }
         section(dashboard,"Upcoming episodes")
         val account=RemoteAccountCache.active(this)
         if(!auth.hasConnection() || account==null) modernContent { ModernHomeMessage(violet,"Connect and sync Trakt for your personal episode calendar.") }
         else {
             val key="upcoming:"+account+":"+java.time.LocalDate.now()
-            val state=androidx.compose.runtime.mutableStateOf(homeEpisodeFeeds[key])
+            val state=homeEpisodeStates.getOrPut(key) { androidx.compose.runtime.mutableStateOf(homeEpisodeFeeds[key]) }
             modernContent { ModernHomeEpisodes(violet,state.value) }
             if(homeEpisodeFeeds[key]==null && homeLoading.add(key)) TraktLibrary.upcoming(this,14) { result ->
                 homeLoading.remove(key)
                 if(!isDestroyed && !isFinishing) {
                     homeEpisodeFeeds[key]=result.getOrDefault(emptyList())
-                    state.value=homeEpisodeFeeds[key]
-                    refreshHomeFeeds()
+                    homeEpisodeStates.getOrPut(key) { androidx.compose.runtime.mutableStateOf(homeEpisodeFeeds[key]) }.value=homeEpisodeFeeds[key]
                 }
             }
         }
-        section(dashboard,"Anime")
-        modernContent { ModernCategories(violet,listOf("trending" to "Trending","popular" to "Popular","airing" to "Airing now"),homeAnimeMode){homeAnimeMode=it;refreshHomeFeeds()} }
-        val mode=homeAnimeMode
-        homeShelf(if(mode=="airing") "Currently airing anime" else "Anime recommendations","anime:"+mode) { done ->
-            AnimeCatalogue.homeFeed(mode){result -> done(result.map { rows -> rows.map { item ->
-                val name=item.english.ifBlank { item.romaji }
-                val next=if(item.nextAiring>0) "E"+item.nextEpisode+" · "+java.time.Instant.ofEpochSecond(item.nextAiring).atZone(java.time.ZoneId.systemDefault()).format(java.time.format.DateTimeFormatter.ofPattern("EEE, d MMM")) else if(item.episodes>0) item.episodes.toString()+" episodes" else ""
-                PosterLibraryItem(name,next,"","anime",item.id.toLong(),{editAnimeProgress(item.id,name,item.episodes)},{},showMenu=false,cover=item.cover)
-            } }) }
-        }
+
     }
     private val homeEpisodeFeeds=mutableMapOf<String,List<UpcomingEpisode>>()
+    private val homeEpisodeStates=mutableMapOf<String,androidx.compose.runtime.MutableState<List<UpcomingEpisode>?>>()
     private var reviewCategory="match"
     private fun reviewBucket(g:ViewingTitle):String {
         if(g.queued) return "sync"
@@ -1650,12 +1675,16 @@ class MainActivity : ComponentActivity() {
                 else -> "Trakt history: not fully synced"
             }
             val actions=if(state!=null) suggestionActions(r,state) else emptyList()
-            val primary=if(candidate!=null) actions.firstOrNull() else if(g.queued) UiAction("View sync status"){showSessions(g)} else if(r.traktId>0 && reviewBucket(g)=="sync") UiAction("Confirm watched"){showSessions(g)} else null
+            val primary=if(candidate!=null) actions.firstOrNull() else if(g.queued) UiAction("View sync status"){showSessions(g)} else null
             val secondary=actions.firstOrNull { it.label=="No, incorrect" }
             val manual=if(r.traktId<=0) UiAction("Search manually"){identify(r)} else null
             val evidence=when { candidate!=null->state?.matches?.firstOrNull()?.reason.orEmpty()+" · Original: "+r.title; state?.status in setOf("waiting","searching")->"Searching Trakt automatically…"; state?.status=="error"->"Catalogue unavailable; will retry"; state?.status=="rejected"->"Suggestion rejected"; r.traktId<=0->"No reliable Trakt match found"; else->durationText(g.sampledMs)+" sampled · "+original.subtitle }
-            modernContent { ModernReviewCard(violet,item,evidence,primary,secondary,manual,watchedStatus=watchedStatus) {
-                val options=titleEntry(g,true).actions.filter { it.label !in setOf("Yes, correct","No, incorrect","Search manually","Open playback app","Open player") || item.play==null }
+            val details=if(item.id>0 && item.type in setOf("movie","show")) UiAction("Title details"){titleDetails(item.type,item.id,item.title)} else null
+            val target=g.sessions.filter { !UnifiedTraktHistory.remote(it) && it.status=="reviewed" && it.traktId==r.traktId && it.matchType==r.matchType && it.traktId>0 }.maxByOrNull { it.ended }
+            val alreadyWatched=(r.matchType to r.traktId) in watchedKeys || g.confirmed || g.rewatching
+            val watch=if(target!=null && candidate==null && !g.queued && !alreadyWatched) UiAction("Mark watched on Trakt"){approveUpload(target,false)} else null
+            modernContent { ModernReviewCard(violet,item,evidence,primary,secondary,manual,watchedStatus=watchedStatus,details=details,watch=watch) {
+                val options=titleEntry(g,true).actions.filter { it.label!="Title details" && it.label !in setOf("Yes, correct","No, incorrect","Search manually") }
                 val menu=options+if(r.status in setOf("pending","reviewed")) listOf(UiAction("Delete viewing record"){deleteFromReview(r)}) else emptyList()
                 modernActionDialog("Viewing record",item.title,menu.map { it.label }) { menu[it].run() }
             } }
@@ -2240,6 +2269,21 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+    private fun openAnimeTitle(item:AnimeResult) {
+        val name=item.english.ifBlank { item.romaji }
+        lookup("Finding anime on Trakt",{ done -> TraktCatalogue.animeMatches(item,done) }) { rows:List<CatalogueItem> ->
+            val aliases=listOf(item.english,item.romaji,item.native).filter { it.isNotBlank() }.map { RecognitionEngine.normalized(it) }.toSet()
+            val exact=rows.filter { RecognitionEngine.normalized(it.title) in aliases && item.year>0 && it.year==item.year }
+            if(exact.size==1) {
+                val match=exact.single()
+                titleDetails(match.type,match.id,match.title)
+            } else if(rows.isNotEmpty()) {
+                choose("Choose matching anime on Trakt",rows.map { it.label() }) { i ->
+                    val match=rows[i];titleDetails(match.type,match.id,match.title)
+                }
+            } else BridgeDialogBuilder(this).setTitle(name).setMessage("No matching Trakt title found. This anime may be listed under another name or as a season of a series.").setNegativeButton("Close",null).setPositiveButton("Open AniList"){_,_->startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://anilist.co/anime/"+item.id)))}.show()
+        }
+    }
     private fun editAnimeProgress(id:Int,title:String,episodes:Int) {
         if(id<=0) return
         val store=personalStore("anime_progress")
@@ -2265,7 +2309,7 @@ class MainActivity : ComponentActivity() {
             close()
             lookup("Searching anime",{ done -> AnimeCatalogue.search(query,done) }) { rows:List<AnimeResult> ->
                 modernDetailWindow { back -> ModernAnimeResults(violet,rows,prefs.getBoolean("hide_spoilers",true),{ item ->
-                    back();editAnimeProgress(item.id,item.english.ifBlank { item.romaji },item.episodes)
+                    back();openAnimeTitle(item)
                 },{ item -> startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://anilist.co/anime/"+item.id))) },back) }
             }
         },{close();animeLocalProgress()},{close();publicAnimeList()},close) }
