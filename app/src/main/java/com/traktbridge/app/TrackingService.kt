@@ -50,7 +50,7 @@ class TrackingService: Service() {
         val repair=PendingIntent.getActivity(this,2,Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS),PendingIntent.FLAG_IMMUTABLE)
         val stop=PendingIntent.getService(this,1,Intent(this,TrackingService::class.java).setAction("stop"),PendingIntent.FLAG_IMMUTABLE)
         val status=TrackingRecovery.status(this)
-        return Notification.Builder(this,"tracking").setSmallIcon(android.R.drawable.ic_media_play).setContentTitle("TraktBridge • "+status).setContentText(if(status=="Tracking active") "YouTube playback monitoring" else "Check notification access if recovery fails").setContentIntent(open).setOngoing(true).addAction(Notification.Action.Builder(null,"Repair tracking",repair).build()).addAction(Notification.Action.Builder(null,"Stop tracking",stop).build()).build()
+        return Notification.Builder(this,"tracking").setSmallIcon(android.R.drawable.ic_media_play).setContentTitle("TraktBridge • "+status).setContentText(if(status=="Tracking active") "Monitoring selected playback apps" else "Check notification access if recovery fails").setContentIntent(open).setOngoing(true).addAction(Notification.Action.Builder(null,"Repair tracking",repair).build()).addAction(Notification.Action.Builder(null,"Stop tracking",stop).build()).build()
     }
     private val heartbeat=object: Runnable {
         override fun run() {

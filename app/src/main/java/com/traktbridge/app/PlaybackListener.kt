@@ -48,13 +48,13 @@ class PlaybackListener : NotificationListenerService() {
     override fun onNotificationPosted(sbn: android.service.notification.StatusBarNotification?) {
         val n=sbn ?: return
         val pkg=n.packageName
-        if(!prefs.getBoolean("enabled",false) || (pkg !in PlaybackDetectors.selected(prefs.getStringSet("allowed",emptySet()).orEmpty()) && !(pkg==HotstarPlayback.PACKAGE && HotstarProbe.enabled(this)))) return
+        if(!prefs.getBoolean("enabled",false) || (pkg !in PlaybackDetectors.selected(prefs.getStringSet("allowed",emptySet()).orEmpty()))) return
         val extras=n.notification.extras
         if(!extras.containsKey(android.app.Notification.EXTRA_MEDIA_SESSION)) return
         wake()
     }
     override fun onNotificationRemoved(sbn: android.service.notification.StatusBarNotification?) { if(sbn?.packageName==YouTubePlayback.PACKAGE) wake() }
-    override fun onCreate() { super.onCreate(); PlaybackTrackingMigration.apply(this); DebugTrace.init(this); DebugTrace.event("listener","service created"); prefs.edit().putBoolean("listener_connected",false).apply(); history = WatchHistory(this); handler.post { runCatching { history.recover() }.onFailure { DebugTrace.failure("history-recovery",it) } } }
+    override fun onCreate() { super.onCreate(); PlaybackTrackingMigration.apply(this); prefs.edit().remove("hotstar_probe_until").apply(); java.io.File(filesDir,"hotstar-title-probe.txt").delete(); DebugTrace.init(this); DebugTrace.event("listener","service created"); prefs.edit().putBoolean("listener_connected",false).apply(); history = WatchHistory(this); handler.post { runCatching { history.recover() }.onFailure { DebugTrace.failure("history-recovery",it) } } }
     // Serialize sampling and database access without blocking service/UI callbacks.
     private val samplingThread = HandlerThread("PlaybackSampling").apply { start() }
     private val handler = Handler(samplingThread.looper)
@@ -109,7 +109,7 @@ class PlaybackListener : NotificationListenerService() {
             getSystemService(MediaSessionManager::class.java).getActiveSessions(ComponentName(this, PlaybackListener::class.java))
         } catch (e: SecurityException) { DebugTrace.failure("media access",e); prefs.edit().putString("sample_error","Media session access denied").apply(); history.finishAll(); return }
         val notificationControllers=runCatching { activeNotifications.orEmpty().mapNotNull { n ->
-            if(n.packageName !in allowed && !(n.packageName==HotstarPlayback.PACKAGE && HotstarProbe.enabled(this))) return@mapNotNull null
+            if(n.packageName !in allowed) return@mapNotNull null
             @Suppress("DEPRECATION") val token=n.notification.extras.getParcelable<android.media.session.MediaSession.Token>(android.app.Notification.EXTRA_MEDIA_SESSION) ?: return@mapNotNull null
             runCatching { android.media.session.MediaController(this,token) }.getOrNull()?.takeIf { it.packageName==n.packageName }
         } }.getOrDefault(emptyList())
@@ -118,8 +118,6 @@ class PlaybackListener : NotificationListenerService() {
         DebugTrace.event("sampling","all="+sessions.size+" selected="+sessions.count { it.packageName in allowed }+" allowed="+allowed.size)
         val rows = JSONArray()
         val samples = mutableListOf<WatchSample>()
-        if(HotstarProbe.enabled(this)) HotstarProbe.signals(this,active.count { it.packageName==HotstarPlayback.PACKAGE },notificationControllers.count { it.packageName==HotstarPlayback.PACKAGE },runCatching { activeNotifications.orEmpty().filter { it.packageName==HotstarPlayback.PACKAGE } }.getOrDefault(emptyList()))
-        HotstarProbe.media(this,sessions.filter { it.packageName==HotstarPlayback.PACKAGE },runCatching { activeNotifications.orEmpty().count { it.packageName==HotstarPlayback.PACKAGE } }.getOrDefault(0))
         val selected=sessions.filter { it.packageName in allowed }
         sessionIds.keys.retainAll(selected.map { it.sessionToken }.toSet())
         val keys=selected.map { sessionKey(it) }.toSet()
@@ -141,8 +139,13 @@ class PlaybackListener : NotificationListenerService() {
                 val phase=when(p.state) { PlaybackState.STATE_PLAYING->PlaybackPhase.PLAYING; PlaybackState.STATE_PAUSED->PlaybackPhase.PAUSED; PlaybackState.STATE_BUFFERING,PlaybackState.STATE_CONNECTING->PlaybackPhase.BUFFERING; else->PlaybackPhase.STOPPED }
                 if(phase==PlaybackPhase.STOPPED) return@forEach
                 val key=sessionKey(c)
-                samples.add(WatchSample(key,c.packageName,recognized.title,recognized.detail,duration,position,phase==PlaybackPhase.PLAYING,phase,"media",p.playbackSpeed.takeIf { it>0 } ?: 1f,PlaybackSegment.UNKNOWN,HotstarPlayback.identity(m?.getString(MediaMetadata.METADATA_KEY_MEDIA_URI).orEmpty(),recognized.title)))
-                rows.put(JSONObject().put("package",c.packageName).put("sessionId",key.substringAfterLast(":")).put("title",recognized.title).put("subtitle",recognized.detail).put("durationMs",duration).put("positionMs",position).put("state",p.state).put("recognitionScore",recognized.score).put("recognitionConflict",false).put("positionSource","media").put("sampledAt",System.currentTimeMillis()))
+                val uri=m?.getString(MediaMetadata.METADATA_KEY_MEDIA_URI).orEmpty()
+                val episode=RecognitionEngine.episodeOf(recognized.title)
+                val catalogue=runCatching { HotstarPublicCatalogue.lookup(this,uri,episode!=null).singleOrNull() }.getOrNull()
+                val resolvedTitle=if(episode==null) catalogue?.title ?: recognized.title else recognized.title
+                val resolvedDetail=if(episode!=null) catalogue?.title.orEmpty() else ""
+                samples.add(WatchSample(key,c.packageName,resolvedTitle,resolvedDetail,duration,position,phase==PlaybackPhase.PLAYING,phase,"media",p.playbackSpeed.takeIf { it>0 } ?: 1f,PlaybackSegment.UNKNOWN,HotstarPlayback.catalogueIdentity(catalogue,recognized.title)))
+                rows.put(JSONObject().put("package",c.packageName).put("sessionId",key.substringAfterLast(":")).put("title",resolvedTitle).put("subtitle",resolvedDetail).put("durationMs",duration).put("positionMs",position).put("state",p.state).put("recognitionScore",recognized.score).put("recognitionConflict",false).put("positionSource","media").put("sampledAt",System.currentTimeMillis()))
                 return@forEach
             }
             val direct=m?.getString(MediaMetadata.METADATA_KEY_TITLE)?.takeIf { YouTubePlayback.clean(it)!=null } ?: m?.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE)?.takeIf { YouTubePlayback.clean(it)!=null }.orEmpty()
